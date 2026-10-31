@@ -114,6 +114,7 @@ def test_retired_keys_cannot_be_added(policy_file, key):
     with pytest.raises(pc.ChangeError, match="따로 찾지 않습니다"):
         pc.plan_add(policy_file, (), Entry(settings={key: "mask"}))   # 코드가 만든 항목도 새로 더하지 않는다
     assert not policy_file.exists()
+    assert "2026" not in pc.retired_message(key)   # 터미널 안내에도 내부 날짜는 넣지 않는다
 
 
 def test_old_entries_with_retired_keys_stay_and_can_be_removed(policy_file):

@@ -214,7 +214,7 @@ def setting_entry(key: str, values: Sequence[str]) -> Entry:
 def retired_message(key: str) -> str:
     """뺀 키를 지정하려 할 때의 안내."""
     name = RETIRED_ENTITY_NAMES[key.split(".")[1]]
-    return (f"{key}는 지정할 수 없습니다. 2026-11-01 NER 교체로 지금은 {name}을(를) 따로 찾지 않습니다.\n"
+    return (f"{key}는 지정할 수 없습니다. 지금은 {name}을(를) 따로 찾지 않습니다(이름·주소를 찾는 NER 모델을 바꾸면서 뺐습니다).\n"
             "  예전 정책 파일에 있는 항목은 그대로 읽히지만 효과가 없습니다(`gate policy remove <번호>`로 지울 수 있습니다).")
 
 

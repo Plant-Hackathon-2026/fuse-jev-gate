@@ -196,6 +196,8 @@ def test_retired_kinds_are_not_saved(sentence):
     result = interpret(sentence, keyword())
     assert (result.outcome, result.entry) == ("unsupported", None)
     assert "지금은 날짜·사건·시간·연도·직함·과목을 따로 찾지 않아요" in result.message
+    assert "2026" not in result.message and "교체" not in result.message  # 일반 사용자에게 내부 이력은 보이지 않는다
+    assert "습니다" not in result.message                                  # 설정 화면 말투(~해요)에 맞춘다
     assert [s.key for s in result.steps] == ["type", "entity"]          # 처리 방식은 묻지 않는다
     assert result.steps[1].choice.answer == "unsupported"
 
