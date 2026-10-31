@@ -120,8 +120,8 @@ def run(
     try:
         path = _policy_path(args)
         if command in CHANGE_COMMANDS and require_tty and not _isatty(stdin):
-            raise _Stop("정책을 바꾸는 명령은 사람이 터미널에서 직접 실행해야 합니다(입력이 터미널이 아님). "
-                        "보기는 `gate policy show`로 할 수 있습니다.")
+            raise _Stop("정책을 바꾸는 명령은 사람이 터미널에서 직접 실행해야 해요(입력이 터미널이 아님). "
+                        "보기는 `gate policy show`로 할 수 있어요.")
         if command == "undo":
             return _undo(path, _Prompt(stdin, out))
         entries = _read(path)
@@ -183,10 +183,10 @@ class _Prompt:
 
 
 _NOTE_TEXT: dict[Note, str] = {
-    "context_mock": "  주의: 지금 Jev는 Mock(키워드 규칙)이라 맥락 규칙을 판단에 쓰지 않습니다. 실제 Jev를 붙여야 효과가 있습니다.",
-    "ner_off": "  주의: 지금 NER이 꺼져 있어(ner_backend: none) 이 설정은 효과가 없습니다. "
+    "context_mock": "  주의: 지금 Jev는 Mock(키워드 규칙)이라 맥락 규칙을 판단에 쓰지 않아요. 실제 Jev를 붙여야 효과가 있어요.",
+    "ner_off": "  주의: 지금 NER이 꺼져 있어(ner_backend: none) 이 설정은 효과가 없어요. "
                "켜려면: gate policy set ner_backend server",
-    "no_change": "  (지금 정책과 같은 값이라 동작은 바뀌지 않습니다)",
+    "no_change": "  (지금 정책과 같은 값이라 동작은 바뀌지 않아요)",
 }
 
 
@@ -208,18 +208,18 @@ def _apply(change: Change) -> Policy:
 def _confirm_loosening(change: Change, io: _Prompt) -> bool:
     if not change.loosening:
         return True
-    io.say("이 변경은 정책을 느슨하게 합니다(더 많이 보여 주게 됩니다):")
+    io.say("이 변경은 정책을 느슨하게 해요(더 많이 보여 주게 돼요):")
     for line in change.loosening:
         io.say(f"  - {line}")
     if io.confirm("정말 느슨하게 바꿀까요?"):
         return True
-    io.say("취소했습니다. 정책은 바뀌지 않았습니다.")
+    io.say("취소했어요. 정책은 바뀌지 않았어요.")
     return False
 
 
 def _saved(path: Path, policy: Policy, io: _Prompt) -> None:
-    io.say(f"저장했습니다: {path}")
-    io.say("실행 중인 게이트 데몬은 다음 요청부터 바뀐 정책을 씁니다(다시 시작하지 않아도 됩니다).")
+    io.say(f"저장했어요: {path}")
+    io.say("실행 중인 게이트 데몬은 다음 요청부터 바뀐 정책을 써요(다시 시작하지 않아도 돼요).")
     io.say(f"되돌리려면 `gate policy undo`. 정책 버전 {policy.version}")
 
 
@@ -238,7 +238,7 @@ def _add(path: Path, entries: tuple[Entry, ...], sentence: str, io: _Prompt,
         try:
             interpreter = make_interpreter()
         except InterpretError as exc:
-            raise _Stop(f"문장 해석기를 준비하지 못했습니다: {exc}") from exc
+            raise _Stop(f"문장 해석기를 준비하지 못했어요: {exc}") from exc
     result = interpret(sentence, interpreter)
     io.say(result.message)
     if result.entry is None:
@@ -247,7 +247,7 @@ def _add(path: Path, entries: tuple[Entry, ...], sentence: str, io: _Prompt,
     for note in change.notes():
         io.say(_NOTE_TEXT[note])
     if not io.confirm("이대로 저장할까요?"):
-        io.say("저장하지 않았습니다.")
+        io.say("저장하지 않았어요.")
         return 1
     return _commit(change, io)
 
@@ -255,7 +255,7 @@ def _add(path: Path, entries: tuple[Entry, ...], sentence: str, io: _Prompt,
 def _remove(path: Path, entries: tuple[Entry, ...], number: str, io: _Prompt) -> int:
     change = _plan(plan_remove, path, entries, number)
     removed = change.entry
-    io.say(f"{number}번 항목을 지웁니다: {_entry_title(removed)} → {_describe_entry(removed)}")
+    io.say(f"{number}번 항목을 지워요: {_entry_title(removed)} → {_describe_entry(removed)}")
     return _commit(change, io)
 
 
@@ -269,12 +269,12 @@ def _undo(path: Path, io: _Prompt) -> int:
         raise _Stop(str(exc)) from exc
     if change.before is None:
         _say_problem(change.problem, io)
-        io.say(f"직전 기록으로 되돌립니다 (지정한 항목 {len(change.after)}개).")
+        io.say(f"직전 기록으로 되돌려요 (지정한 항목 {len(change.after)}개).")
         if not io.confirm("되돌릴까요?"):
-            io.say("취소했습니다. 정책은 바뀌지 않았습니다.")
+            io.say("취소했어요. 정책은 바뀌지 않았어요.")
             return 1
     else:
-        io.say(f"직전 변경을 되돌립니다 (지정한 항목 {len(change.before)}개 → {len(change.after)}개).")
+        io.say(f"직전 변경을 되돌려요 (지정한 항목 {len(change.before)}개 → {len(change.after)}개).")
         if not _confirm_loosening(change, io):
             return 1
     _saved(path, _apply(change), io)
@@ -283,8 +283,8 @@ def _undo(path: Path, io: _Prompt) -> int:
 
 
 def _say_problem(problem: str, io: _Prompt) -> None:
-    io.say(f"지금 정책 파일에 문제가 있습니다: {problem}")
-    io.say("게이트 데몬은 지금 내용 읽기를 모두 차단하고 있습니다. 되돌리면 잘못된 파일은 기록의 내용으로 바뀝니다.")
+    io.say(f"지금 정책 파일에 문제가 있어요: {problem}")
+    io.say("게이트 데몬은 지금 내용 읽기를 모두 차단하고 있어요. 되돌리면 잘못된 파일은 기록의 내용으로 바뀌어요.")
 
 
 def _set(path: Path, entries: tuple[Entry, ...], key: str, values: list[str], io: _Prompt) -> int:
@@ -293,9 +293,9 @@ def _set(path: Path, entries: tuple[Entry, ...], key: str, values: list[str], io
     except ChangeError as exc:
         raise _Stop(str(exc)) from exc
     if entry.path_rule is not None:
-        io.say(f"지정합니다: {_describe_entry(entry)}")
+        io.say(f"지정해요: {_describe_entry(entry)}")
     else:
-        io.say(f"지정합니다: {describe_setting(key, entry.settings[key])}")
+        io.say(f"지정해요: {describe_setting(key, entry.settings[key])}")
     return _commit(_plan(plan_add, path, entries, entry, "set"), io)
 
 
@@ -324,7 +324,7 @@ def _show(path: Path, entries: tuple[Entry, ...], out: TextIO) -> None:
     lines = [f"정책 파일: {path}" + ("" if path.exists() else " (아직 없음, 전부 기본값)"), ""]
     lines.append("내가 지정한 항목 (지우기: gate policy remove <번호>)")
     if not entries:
-        lines.append("  없음. 아래는 전부 기본값입니다.")
+        lines.append("  없음. 아래는 전부 기본값이에요.")
     for i, entry in enumerate(entries):
         at = f"  ({entry.at[:16].replace('T', ' ')})" if entry.at else ""
         lines.append(f"  {i + 1}. {_entry_title(entry)}{at}")
@@ -372,7 +372,7 @@ def _show(path: Path, entries: tuple[Entry, ...], out: TextIO) -> None:
     for rule in policy.context_rules:
         lines.append(f"    - {' '.join(rule.split())} [지정]")
     if policy.context_rules and policy.jev_backend == "mock":
-        lines.append("    주의: 지금 Jev는 Mock(키워드 규칙)이라 맥락 규칙을 판단에 쓰지 않습니다.")
+        lines.append("    주의: 지금 Jev는 Mock(키워드 규칙)이라 맥락 규칙을 판단에 쓰지 않아요.")
 
     lines.append("  기타")
     for key in _OTHER_KEYS:

@@ -128,16 +128,16 @@ _EXAMPLES = (
     "병원 기록은 보여주지 마",
 )
 _ACTION_NOTES = {
-    "deny": "이 번호가 있는 파일은 읽기를 거부합니다.",
-    "ask_human": "이 번호가 있는 파일은 사람에게 물어본 뒤 보여줍니다(허용해도 번호는 가린 채로 보여줍니다).",
-    "mask": "번호를 가린 뒤 보여줍니다.",
+    "deny": "이 번호가 있는 파일은 읽기를 거부해요.",
+    "ask_human": "이 번호가 있는 파일은 사람에게 물어본 뒤 보여줘요(허용해도 번호는 가린 채로 보여줘요).",
+    "mask": "번호를 가린 뒤 보여줘요.",
 }
 # {finder}·{sample}은 묶음에 따라 바뀐다: NER·[이름], IP·내부 주소(host)는 규칙·[IP] (_entity_action_note)
 _ENTITY_ACTION_NOTES = {
-    "deny": "{finder}이 이 정보를 찾은 파일은 읽기를 거부합니다.",
-    "ask_human": "{finder}이 이 정보를 찾은 파일은 사람에게 물어본 뒤 보여줍니다(허용해도 이 정보는 가린 채로 보여줍니다).",
-    "mask": "{finder}이 찾은 부분을 {sample}처럼 종류 이름으로 바꿔 보여줍니다.",
-    "allow": "{finder}이 찾아도 가리지 않습니다. 다만 판단 모델(Jev)이 문서를 민감하다고 보면 사람에게 묻거나 막을 수 있습니다.",
+    "deny": "{finder}이 이 정보를 찾은 파일은 읽기를 거부해요.",
+    "ask_human": "{finder}이 이 정보를 찾은 파일은 사람에게 물어본 뒤 보여줘요(허용해도 이 정보는 가린 채로 보여줘요).",
+    "mask": "{finder}이 찾은 부분을 {sample}처럼 종류 이름으로 바꿔 보여줘요.",
+    "allow": "{finder}이 찾아도 가리지 않아요. 다만 판단 모델(Jev)이 문서를 민감하다고 보면 사람에게 묻거나 막을 수 있어요.",
 }
 UNSUPPORTED_ENTITY_MESSAGE = (
     "지금은 날짜·사건·시간·연도·직함·과목을 따로 찾지 않아요. 그래서 저장하지 않았어요.\n"
@@ -157,10 +157,10 @@ class Choice:
 
     def __post_init__(self) -> None:
         if not isinstance(self.answer, str) or not self.answer:
-            raise InterpretError("해석기 답이 비어 있지 않은 문자열이 아닙니다")
+            raise InterpretError("해석기 답이 비어 있지 않은 문자열이 아니에요")
         c = self.confidence
         if isinstance(c, bool) or not isinstance(c, (int, float)) or not math.isfinite(c) or not 0.0 <= c <= 1.0:
-            raise InterpretError("해석기 확신도가 0.0~1.0 사이 숫자가 아닙니다")
+            raise InterpretError("해석기 확신도가 0.0~1.0 사이 숫자가 아니에요")
         object.__setattr__(self, "confidence", float(c))
 
 
@@ -222,7 +222,7 @@ def _normalize_sentence(sentence: object) -> str:
 def _unclear(text: str, reason: str, steps: Sequence[Step] = ()) -> Interpretation:
     examples = "\n".join(f"  {ex}" for ex in _EXAMPLES)
     message = (
-        f"문장을 확실히 이해하지 못했어요({reason}). 저장하지 않았습니다.\n"
+        f"문장을 확실히 이해하지 못했어요({reason}). 저장하지 않았어요.\n"
         f"다시 말해 주세요. 예:\n{examples}\n"
         "또는 `gate policy set <키> <값>`으로 직접 지정할 수 있어요."
     )
@@ -245,9 +245,9 @@ def interpret(
         question = build_question(key, options, detail)
         choice = interpreter.choose(text, question, options)
         if not isinstance(choice, Choice):
-            raise InterpretError(f"해석기 응답 형식이 올바르지 않습니다: {type(choice).__name__}")
+            raise InterpretError(f"해석기 응답 형식이 올바르지 않아요: {type(choice).__name__}")
         if choice.answer not in options:
-            raise InterpretError("해석기가 선택지 밖의 답을 했습니다")
+            raise InterpretError("해석기가 선택지 밖의 답을 했어요")
         step = Step(key, question, options, choice)
         steps.append(step)
         if choice.confidence < threshold:
@@ -260,7 +260,7 @@ def interpret(
             return _unclear(text, "정책 문장으로 보이지 않음", steps)
         if kind_of_sentence == "path":
             message = (
-                "폴더나 파일 이름(경로)에 대한 규칙으로 보여요. 경로 패턴은 문장에서 정확히 고를 수 없어서 저장하지 않았습니다.\n"
+                "폴더나 파일 이름(경로)에 대한 규칙으로 보여요. 경로 패턴은 문장에서 정확히 고를 수 없어서 저장하지 않았어요.\n"
                 "다음처럼 직접 지정하세요:\n"
                 "  gate policy set path \"<패턴>\" <allow|ask_human|deny>\n"
                 "  예: gate policy set path \"공개/**\" allow"
@@ -269,7 +269,7 @@ def interpret(
         if kind_of_sentence == "context":
             if ask("direction", DIRECTION_OPTIONS) == "looser":
                 message = (
-                    "문서 내용에 대한 규칙을 느슨하게 하는 문장으로 보여요. 저장하지 않았습니다.\n"
+                    "문서 내용에 대한 규칙을 느슨하게 하는 문장으로 보여요. 저장하지 않았어요.\n"
                     "맥락 규칙은 더 막는 쪽(예: \"병원 기록은 보여주지 마\")으로만 지정할 수 있어요.\n"
                     "특정 폴더를 그대로 보여 주려면: gate policy set path \"<패턴>\" allow"
                 )
@@ -278,7 +278,7 @@ def interpret(
             message = (
                 "이렇게 이해했어요:\n"
                 f"  맥락 규칙: \"{text}\"\n"
-                "  파일을 보여 줄지 Jev가 판단할 때 이 문장을 그대로 함께 봅니다."
+                "  파일을 보여 줄지 Jev가 판단할 때 이 문장을 그대로 함께 봐요."
             )
             return Interpretation("context", text, message, entry, tuple(steps))
         if kind_of_sentence == "entity":
@@ -319,7 +319,7 @@ def _entity_action_note(group: str, value: str) -> str:
 
 def _error(text: str, reason: str, steps: Sequence[Step]) -> Interpretation:
     message = (
-        f"문장 해석기에 문제가 있어 저장하지 않았습니다({reason}).\n"
+        f"문장 해석기에 문제가 있어 저장하지 않았어요({reason}).\n"
         "잠시 뒤 다시 하거나 `gate policy set <키> <값>`으로 직접 지정하세요."
     )
     return Interpretation("error", text, message, None, tuple(steps))
@@ -465,7 +465,7 @@ class MockPolicyInterpreter:
     ) -> None:
         if mode == "fixed":
             if not answers:
-                raise InterpretError("Mock fixed 방식은 answers(질문 키별 답)를 정해야 합니다")
+                raise InterpretError("Mock fixed 방식은 answers(질문 키별 답)를 정해야 해요")
             unknown = set(answers) - set(QUESTION_TITLES)
             if unknown:
                 raise InterpretError(f"모르는 질문 키: {', '.join(sorted(unknown))}")
@@ -473,7 +473,7 @@ class MockPolicyInterpreter:
                 Choice(answer, confidence)  # 값 검증
         elif mode == "keyword":
             if answers:
-                raise InterpretError("answers는 Mock fixed 방식에서만 씁니다")
+                raise InterpretError("answers는 Mock fixed 방식에서만 써요")
         else:
             raise InterpretError(f"알 수 없는 Mock 방식: {mode!r} (keyword 또는 fixed)")
         self.mode = mode
@@ -491,10 +491,10 @@ class MockPolicyInterpreter:
         if self.error is not None:
             raise self.error
         if key is None:
-            raise InterpretError("Mock 해석기가 모르는 질문입니다")
+            raise InterpretError("Mock 해석기가 모르는 질문이에요")
         if self.mode == "fixed":
             if key not in self.answers:
-                raise InterpretError(f"Mock fixed 방식에 {key} 질문의 답이 없습니다")
+                raise InterpretError(f"Mock fixed 방식에 {key} 질문의 답이 없어요")
             return Choice(*self.answers[key])
         return _keyword_choice(key, sentence.casefold(), options)
 
@@ -605,7 +605,7 @@ class FailClosedInterpreter:
     def __init__(self, inner: PolicyInterpreter, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> None:
         if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) \
                 or timeout <= 0:
-            raise InterpretError("해석기 타임아웃은 0보다 큰 숫자(초)여야 합니다")
+            raise InterpretError("해석기 타임아웃은 0보다 큰 숫자(초)여야 해요")
         self.inner = inner
         self.timeout = float(timeout)
 
@@ -623,16 +623,16 @@ class FailClosedInterpreter:
         worker.start()
         worker.join(self.timeout)
         if not outcome:
-            raise InterpretError(f"해석기 응답이 {self.timeout:g}초 안에 오지 않았습니다")
+            raise InterpretError(f"해석기 응답이 {self.timeout:g}초 안에 오지 않았어요")
         ok, value = outcome[0]
         if not ok:
             if isinstance(value, InterpretError):
                 raise value
-            raise InterpretError(f"해석기 호출 중 오류가 났습니다: {type(value).__name__}") from value
+            raise InterpretError(f"해석기 호출 중 오류가 났어요: {type(value).__name__}") from value
         if not isinstance(value, Choice):
-            raise InterpretError(f"해석기 응답 형식이 올바르지 않습니다: {type(value).__name__}")
+            raise InterpretError(f"해석기 응답 형식이 올바르지 않아요: {type(value).__name__}")
         if value.answer not in options:
-            raise InterpretError("해석기가 선택지 밖의 답을 했습니다")
+            raise InterpretError("해석기가 선택지 밖의 답을 했어요")
         return value
 
 
@@ -646,7 +646,7 @@ def split_question(question: str, options: Sequence[str]) -> tuple[str, dict[str
     """build_question이 만든 질문을 (지시문, {선택지: 설명})으로 나눈다. 선택지가 options와 다르면 InterpretError."""
     lines = question.split("\n")
     if "선택지:" not in lines:
-        raise InterpretError("질문에 선택지 목록이 없습니다")
+        raise InterpretError("질문에 선택지 목록이 없어요")
     cut = lines.index("선택지:")
     instructions = "\n".join(lines[:cut]).strip()
     criteria: dict[str, str] = {}
@@ -656,7 +656,7 @@ def split_question(question: str, options: Sequence[str]) -> tuple[str, dict[str
             if sep:
                 criteria[option] = guide
     if not instructions or set(criteria) != set(options):
-        raise InterpretError("질문의 선택지가 options와 다릅니다")
+        raise InterpretError("질문의 선택지가 options와 달라요")
     return instructions, {option: criteria[option] for option in options}
 
 
@@ -683,10 +683,10 @@ class LayaPolicyInterpreter:
         env = os.environ if env is None else env
         raw_url = base_url if base_url is not None else env.get("JEV_BASE_URL", "")
         if not raw_url.strip():
-            raise InterpretError("laya 해석기는 JEV_BASE_URL(laya-serve 주소, 예: http://127.0.0.1:8000)이 필요합니다")
+            raise InterpretError("laya 해석기는 JEV_BASE_URL(laya-serve 주소, 예: http://127.0.0.1:8000)이 필요해요")
         if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) \
                 or timeout <= 0:
-            raise InterpretError("해석기 타임아웃은 0보다 큰 숫자(초)여야 합니다")
+            raise InterpretError("해석기 타임아웃은 0보다 큰 숫자(초)여야 해요")
         try:
             self._endpoint = laya_endpoint(raw_url)
         except JevError as exc:
@@ -714,13 +714,13 @@ class LayaPolicyInterpreter:
         answers = item.get("answers") if isinstance(item, dict) else None
         answer = answers.get(_LAYA_QID) if isinstance(answers, dict) else None
         if not isinstance(answer, dict):
-            raise InterpretError("Laya 응답 형식이 올바르지 않습니다: answers")
+            raise InterpretError("Laya 응답 형식이 올바르지 않아요: answers")
         choice, probabilities = answer.get("choice"), answer.get("probabilities")
         if choice not in options:
-            raise InterpretError("해석기가 선택지 밖의 답을 했습니다")
+            raise InterpretError("해석기가 선택지 밖의 답을 했어요")
         p = probabilities.get(choice) if isinstance(probabilities, dict) else None
         if isinstance(p, bool) or not isinstance(p, (int, float)) or not math.isfinite(p) or not 0.0 <= p <= 1.0:
-            raise InterpretError("Laya 응답 형식이 올바르지 않습니다: probabilities")
+            raise InterpretError("Laya 응답 형식이 올바르지 않아요: probabilities")
         return Choice(choice, float(p))
 
 
@@ -747,5 +747,5 @@ def make_interpreter(name: str = "mock", *, timeout: float = DEFAULT_TIMEOUT_SEC
     except InterpretError:
         raise
     except Exception as exc:
-        raise InterpretError(f"해석기 {name!r}를 만들 수 없습니다: {type(exc).__name__}") from exc
+        raise InterpretError(f"해석기 {name!r}를 만들 수 없어요: {type(exc).__name__}") from exc
     return FailClosedInterpreter(inner, timeout)
