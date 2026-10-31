@@ -33,7 +33,7 @@ from typing import Literal
 from gate.approval import AnsweredBy, Approval, ApprovalRequest, Approvals
 from gate.cache import CachedJudgment, CacheKey, JudgmentCache
 from gate.detectors import mask_bytes
-from gate.jev_client import JevClient, JevDecision, JevError, RequestContext, make_client
+from gate.jev_client import JevClient, JevDecision, JevError, RequestContext, cache_tag, make_client
 from gate.peer import Peer
 from gate.policy import (
     ACTIONS,
@@ -250,14 +250,15 @@ class Inspector:
 
     def _judge(self, policy: Policy, peer: Peer | None, path: str, purpose: str | None,
                masked: bytes, digest: str) -> _JevResult:
-        key = CacheKey.build(digest, policy.version, path, peer.exe if peer else None, purpose)
+        try:
+            client = self._client(policy)
+            model_tag = cache_tag(client)
+        except Exception as exc:
+            return _JevResult("deny", None, None, 0, False, f"Jev를 준비하지 못해 차단했습니다: {_safe_error(exc)}")
+        key = CacheKey.build(digest, policy.version, path, peer.exe if peer else None, purpose, model_tag)
         hit = self.cache.get(key)
         if hit is not None:
             return _JevResult(hit.action, hit.label, hit.confidence, 0, True)
-        try:
-            client = self._client(policy)
-        except Exception as exc:
-            return _JevResult("deny", None, None, 0, False, f"Jev를 준비하지 못해 차단했습니다: {_safe_error(exc)}")
 
         context = RequestContext.from_peer(peer, path, purpose, policy.context_rules)
         text = masked.decode("utf-8", "replace").encode("utf-8")

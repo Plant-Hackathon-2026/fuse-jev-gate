@@ -109,6 +109,11 @@ class Stats:
         return self.correct / self.total if self.total else None
 
     @property
+    def safe_correct(self) -> int:
+        """safe인지 아닌지만 맞힌 수. 오류는 safe가 아님(차단)으로 센다."""
+        return self.total - self.false_positives - self.false_negatives
+
+    @property
     def false_positive_rate(self) -> float | None:
         return self.false_positives / self.safe_total if self.safe_total else None
 
@@ -284,6 +289,7 @@ def format_report(report: Report, *, client_name: str, notice: str | None = None
         "[전체]",
         *_table(["항목", "값", "설명"], [
             ["정확도", _ratio(o.correct, o.total), "답 = 기대 라벨 (오류는 틀림)"],
+            ["안전 여부 정확도", _ratio(o.safe_correct, o.total), "safe인지 아닌지만 비교. 예/아니오 모델(laya)은 이 값을 본다"],
             ["오탐률", _ratio(o.false_positives, o.safe_total), "기대 safe → safe 아님 (오류 포함)"],
             ["미탐률", _ratio(o.false_negatives, o.unsafe_total), "기대 safe 아님 → safe"],
             ["Jev 오류", f"{o.errors}건", "JevError 등. 정책 결과는 차단으로 집계"],

@@ -250,6 +250,36 @@ def test_cache_misses_when_context_policy_or_content_changes(source, tmp_path):
     assert len(jev.calls) == 6
 
 
+class TaggedJev(MockJevClient):
+    """모델 식별값(cache_tag)이 있는 Mock. tag를 바꾸면 체크포인트를 바꾼 것과 같다."""
+    tag = "v1"
+
+    def cache_tag(self):
+        if isinstance(self.tag, Exception):
+            raise self.tag
+        return self.tag
+
+
+def test_cache_misses_when_model_changes(source, tmp_path):
+    jev = TaggedJev("fixed", label="safe", confidence=0.99)
+    inspector, _, _ = make(source, tmp_path, jev=jev)
+    inspector.inspect(PEER, "/회의.txt", "요약")
+    assert inspector.inspect(PEER, "/회의.txt", "요약").judgment.cached
+    assert len(jev.calls) == 1
+    jev.tag = "v2"
+    verdict = inspector.inspect(PEER, "/회의.txt", "요약")
+    assert not verdict.judgment.cached and len(jev.calls) == 2
+
+
+def test_model_tag_failure_denies_without_calling_jev(source, tmp_path):
+    jev = TaggedJev("fixed", label="safe", confidence=0.99)
+    jev.tag = JevError("Laya 모델 폴더에서 questions.json·model.safetensors를 찾을 수 없습니다: FileNotFoundError")
+    inspector, _, _ = make(source, tmp_path, jev=jev)
+    verdict = inspector.inspect(PEER, "/회의.txt")
+    assert verdict.judgment.action == "deny" and "모델 폴더" in verdict.judgment.reason
+    assert jev.calls == []
+
+
 # --- 그 밖 ---
 
 def test_empty_file_is_allowed_without_jev(source, tmp_path):
