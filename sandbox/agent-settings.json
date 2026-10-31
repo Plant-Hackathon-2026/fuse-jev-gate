@@ -1,0 +1,47 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(//path/to/hackathon/gate-data/source)",
+      "Read(//path/to/hackathon/gate-data/source/**)",
+      "Edit(//path/to/hackathon/gate-data/source)",
+      "Edit(//path/to/hackathon/gate-data/source/**)",
+      "Read(//path/to/hackathon/gate-data/policy.yaml)",
+      "Edit(//path/to/hackathon/gate-data/policy.yaml)",
+      "Read(//path/to/hackathon/gate-data/policy-history)",
+      "Read(//path/to/hackathon/gate-data/policy-history/**)",
+      "Edit(//path/to/hackathon/gate-data/policy-history)",
+      "Edit(//path/to/hackathon/gate-data/policy-history/**)",
+      "Read(//path/to/hackathon/gate-data/audit)",
+      "Read(//path/to/hackathon/gate-data/audit/**)",
+      "Edit(//path/to/hackathon/gate-data/audit)",
+      "Edit(//path/to/hackathon/gate-data/audit/**)",
+      "Edit(//path/to/hackathon/gate-data/run/**)",
+      "Edit(.claude/**)",
+      "Edit(.mcp.json)",
+      "Edit(~/.claude/**)",
+      "Edit(~/.claude.json)"
+    ],
+    "disableBypassPermissionsMode": "disable"
+  },
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "allowUnsandboxedCommands": false,
+    "filesystem": {
+      "denyRead": [
+        "/path/to/hackathon/gate-data/source",
+        "/path/to/hackathon/gate-data/policy.yaml",
+        "/path/to/hackathon/gate-data/policy-history",
+        "/path/to/hackathon/gate-data/audit"
+      ]
+    },
+    "network": {
+      "allowUnixSockets": [
+        "/path/to/hackathon/gate-data/run/gate.sock"
+      ]
+    }
+  },
+  "env": {
+    "GATE_SOCKET": "/path/to/hackathon/gate-data/run/gate.sock"
+  }
+}
