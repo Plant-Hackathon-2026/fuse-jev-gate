@@ -1,10 +1,13 @@
 """gate 명령: 게이트 데몬 실행(serve), 조회(ls, stat, cat, search), 사용자 정책(policy), 사람 승인(approve, deny),
-에이전트 작업 폴더 설정(workspace init), 설치 때 Claude Code 사용자 설정에 원본 보호 합치기(setup), 감사 로그 보기(audit).
+에이전트 작업 폴더 설정(workspace init), 설치 때 Claude Code 사용자 설정에 원본 보호 합치기(setup), 감사 로그 보기(audit),
+설정 화면(ui).
 
 소켓 경로는 --socket 또는 GATE_SOCKET, 정책 파일은 --policy 또는 GATE_POLICY로 지정한다.
 정책 파일이 없으면 기본 정책으로 동작하고, 데몬은 요청마다 정책 파일이 바뀌었는지 보고 다시 읽는다.
 policy는 소켓을 쓰지 않고 정책 파일을 직접 다룬다(gate.policy_cli). workspace init은 설정 파일만 만든다(gate.workspace).
 setup은 사용자 설정 파일만 고친다(gate.claude_setup). audit은 감사 로그를 읽기만 한다(gate.audit_cli).
+ui는 127.0.0.1에만 여는 로컬 웹 화면이다(gate.ui). 정책 쓰기는 gate policy와 같은 함수(gate.policy_change)로 한다.
+--socket(GATE_SOCKET)을 주면 화면에 게이트 데몬이 켜져 있는지 보여 준다(연결만 해 본다).
 
 사람 승인(Phase 5)
   - serve는 맥이면 대화상자로 묻고(--no-dialog로 끔), 승인 소켓도 연다. 승인 소켓은 --approve-socket 또는
@@ -30,7 +33,7 @@ import threading
 from pathlib import Path
 from typing import TextIO
 
-from gate import audit_cli, claude_setup, policy_cli, workspace
+from gate import audit_cli, claude_setup, policy_cli, ui, workspace
 from gate.approval import Approvals, DialogChannel, Pending, clean_text, kinds_text
 from gate.audit import AuditLog
 from gate.client import ApprovalClient, GateClient
@@ -194,6 +197,7 @@ def main(argv: list[str] | None = None) -> int:
     workspace.register(sub)
     claude_setup.register(sub)
     audit_cli.register(sub)
+    ui.register(sub)
 
     args = parser.parse_args(argv)
     if args.command == "policy":
@@ -204,6 +208,8 @@ def main(argv: list[str] | None = None) -> int:
         return claude_setup.run(args)
     if args.command == "audit":
         return audit_cli.run(args)
+    if args.command == "ui":
+        return ui.run(args)
     if args.command in ("approve", "deny"):
         approve_socket = approve_socket_path(args.socket, args.approve_socket)
         if not approve_socket:

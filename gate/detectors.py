@@ -189,6 +189,20 @@ _NOT_SECRET = frozenset({
 })
 _PLACEHOLDER_START = ("$", "%(", "{{", "<")
 
+# 종류별로 쓰는 정규식(이 모듈의 변수 이름, 패턴 객체). 설정 화면의 "찾는 규칙 보기"(gate.ui_api)가 여기서 읽어 보여 준다.
+# 패턴 글자를 따로 적지 않고 객체를 그대로 넘기므로 화면과 코드가 어긋나지 않는다. 날짜·Luhn·키워드 같은 추가 확인은 코드에 있다.
+PATTERNS: dict[str, tuple[tuple[str, re.Pattern[str]], ...]] = {
+    "rrn": (("_RRN", _RRN),),
+    "foreigner_rrn": (("_RRN", _RRN),),
+    "card": (("_CARD", _CARD),),
+    "mobile": (("_MOBILE", _MOBILE),),
+    "phone": (("_PHONE", _PHONE),),
+    "email": (("_EMAIL", _EMAIL),),
+    "account": (("_ACCOUNT", _ACCOUNT), ("_ACCOUNT_KEYWORD", _ACCOUNT_KEYWORD)),
+    "secret": (("_TOKEN", _TOKEN), ("_PRIVATE_KEY", _PRIVATE_KEY), ("_URL_PASSWORD", _URL_PASSWORD),
+               ("_SECRET_KEY", _SECRET_KEY), ("_SECRET_VALUE", _SECRET_VALUE)),
+}
+
 
 def detect(text: str) -> list[Finding]:
     """text에서 개인정보 위치를 찾는다. 겹치지 않고, start 순으로 정렬된다."""
