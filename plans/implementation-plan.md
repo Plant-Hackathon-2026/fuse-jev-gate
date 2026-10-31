@@ -41,6 +41,7 @@
 | 판단 모델 교체 (v3) | **팀원 재학습판 v3(`hackathon/models/laya-v3`)로 바꾼다. 질문이 9개라 `has_pii` 하나만 묻는다**(`JEV_QUESTION`으로 바꿀 수 있음) | 사용자 결정(2026-10-31). 같은 36개에서 오탐 6/12 → 2/12, 미탐 0/24 유지. 종류 질문 6개 중 최대를 쓰는 팀원 방식은 미탐 1이라 고르지 않았다. `has_pii`는 "가려지지 않은 채 남았는가"를 물어 ②와 맞는다 |
 | 정책 문장 → NER 묶음 (3d) | **해석기 질문 단계에 `entity`(묶음 11개) → `entity_action`(deny·ask_human·mask·allow)을 더한다.** 문장 하나는 바꿈 하나, plain 묶음은 함께 바뀐다고 알리고, NER이 꺼져 있으면 효과가 없다고 알린다. **기본 해석기는 키워드 Mock 그대로**이고 Laya 해석기는 실험용으로 둔다 | 진행 방식은 사용자 결정(2026-10-31: Mock 확장 + 평가 세트 → Laya 실험). Laya v3 zero-shot은 120문장 모두 첫 질문에 "모름"(0.99~1.00)이라 쓸 수 없었다. Mock은 블라인드 검증 세트에서 맞음 64%, 잘못 저장 3/50(느슨해짐 0) |
 | 다음 작업 (3d 뒤) | **설정 화면 UI(Phase 8).** "전화번호" 해석과 승인 창 줄이기는 하지 않는다. 계획은 `plans/ui-plan.md` | 사용자 결정(2026-10-31). 둘 다 모델 재학습으로 풀리고, 모델 관련 작업은 제외한다. UI는 로컬 웹 페이지(`gate ui`), 문장 입력 + 직접 고르기, 화면은 설정·감사 기록, 디자인은 팀 Plant 로고 기준 |
+| 설정 화면 세부 (Phase 8) | **제품 이름 "게이트 · PLANT", 로고는 마크만 저장소에, 글꼴은 Outfit·JetBrains Mono latin만 번들(한글은 시스템 글꼴, 외부 요청 0), NER [켜기]는 설정만 바꾸고 NER 서버 `/health`가 응답할 때만(서버도 같은 검사), 기관 정책 기능은 범위 밖** | 사용자 결정(2026-11-01, `plans/ui-plan.md` 7절). 화면 서버는 127.0.0.1에만 열고 한 번 쓰는 열쇠 + 메모리에만 두는 세션 토큰, Host·Origin 검사, CSP. 정책 쓰기는 `gate policy`와 같은 함수(`gate/policy_change.py`) |
 | 사람 승인 방법(Phase 5) | **둘 다.** 맥에서는 대화상자(`osascript display dialog`, 버튼: 거부·이번만 허용·이 폴더 허용)를 띄우고, 사용자 터미널에서 `gate approve <id>`·`gate deny <id>`로도 답할 수 있다. 먼저 온 답을 쓴다 | 사용자 결정(2026-10-31). 맥 알림 배너(`display notification`)는 버튼 응답을 받지 못한다. `gate approve`는 **별도 승인 소켓**(`approve.sock`)을 쓴다. 에이전트와 같은 소켓이면 에이전트가 스스로 승인할 수 있기 때문이다. Phase 6 샌드박스는 게이트 소켓만 열어 준다 |
 | 승인 대기 시간 | **기본 30초**(`approval.timeout_seconds`). 넘으면 차단 | 사용자 결정(2026-10-31). 명세 값. 그동안 요청한 `gate cat`은 멈춰 있다 |
 | 세션 단위 승인 | **데몬 실행 중 + 최대 1시간**(`approval.session_minutes`, 0이면 기억하지 않음). 기억 단위는 폴더(그 폴더 바로 안의 파일) + 요청 프로그램 + 정책 버전 | 사용자 결정(2026-10-31). `gate cat`은 매번 새 프로세스라 요청자 PID는 쓸 수 없다. 정책이 바뀌면 기억을 지운다 |
@@ -514,10 +515,27 @@ fuse-jev-gate/
 - 결과: 작업 폴더 설정(`gate-data/agent-workspace`)과 전역 설정(`gate-data/plain-project` + `--settings <gate setup으로 만든 파일>`) 모두 W14·W15가 **OS 샌드박스에 막혔다**(`Operation not permitted`). 대조군 2/2 통과, 판정 불가 0. 비용은 두 번 합계 약 $0.052다.
 - 테스트: `tests/test_bypass.py`에 판정 테스트 2개(요약 줄이면 breached, 열기 오류면 OS 샌드박스)를 더했다.
 
-### Phase 8: 설정 화면 UI (계획, 2026-10-31)
+### Phase 8: 설정 화면 UI (구현, 2026-11-01, 브랜치 `feat/ui-settings`, PR 전)
 
-- 계획·디자인 기준·보안 조건·구현 순서는 `plans/ui-plan.md`에 있다. 디자인 시안: https://claude.ai/artifact/USfowzn1bGWNa6v5nY4ZHc
-- 이번 세션에 디자인을 확정했고, 구현은 다음 세션에 한다(먼저 팀원용 평가 보고서를 갱신한 뒤).
+- 계획·디자인 기준·보안 조건은 `plans/ui-plan.md`에 있다. 디자인 시안: https://claude.ai/artifact/USfowzn1bGWNa6v5nY4ZHc
+- 2026-10-31에 디자인을 확정했고, 2026-11-01에 미결 5개를 정한 뒤(ui-plan 7절, 2절 표 "설정 화면 세부") 구현했다. 자세한 결과·시안과 다른 점은 ui-plan 8절.
+
+**결과**
+- **`gate ui`**(`gate/ui.py`, `gate/ui_api.py`, `gate/ui_static/`): 표준 라이브러리 `http.server`만 쓰는 로컬 웹 화면. 새 의존성 없음.
+  - 화면: 설정(연결 상태 카드 3개, 문장으로 정책 바꾸기, 지금 정책 번호 8줄·NER 11줄과 "찾는 규칙 보기", 내가 정한 문장·지우기·되돌리기), 감사 기록(결과별 건수, 기간·결과·파일 이름 거르기, 표).
+  - 보안: 127.0.0.1에만 바인드, 실행마다 한 번 쓰는 열쇠로 연 창에 세션 토큰(메모리에만), 모든 요청 Host 검사, 바꾸는 요청은 POST + Origin, CSP `default-src 'none'`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store`. 새로 고치면 터미널에서 Enter로 다시 연다.
+  - 완화하는 바꿈은 화면에서 한 번 더 확인해야 저장된다(서버가 확인 값을 검사). NER 켜기는 NER 서버 `/health`가 응답할 때만 된다(서버도 검사).
+- **`gate/policy_cli.py` 나누기**: 바꿈 계산·완화 판단·되돌리기 기록·0600 쓰기·undo를 `gate/policy_change.py`로 옮겼다. CLI는 묻기와 출력만 한다. 출력과 동작은 그대로다(기존 policy_cli 테스트 그대로 통과).
+- **`gate/detectors.py`**: 종류별 정규식 객체 `PATTERNS`. 화면은 패턴 글자를 따로 적지 않고 여기서 읽는다.
+- **하네스 W16·W17**(`sandbox/bypass.py`): 하네스가 호스트에서 `gate ui`를 띄우고, 에이전트가 샌드박스 안에서 127.0.0.1 TCP로 토큰 없이 정책 바꾸기(`POST /api/set`)·감사 기록 읽기(`GET /api/audit`)를 시도한다. 시도 정의·판정과 단위 테스트만 넣었고 **실제로 돌리지 않았다.**
+  - 실행: `uv run python -m sandbox.bypass --only W16,W17 --out 보고서.md`(데몬이 떠 있어야 한다. 대조군 C1·C2가 함께 돈다). 전역 설정 시험은 `--settings 시험.json --workspace ../gate-data/plain-project --only W16,W17`.
+- 테스트: 맥 1372 통과·1 skip, Linux 컨테이너(`fuse-jev-gate:phase8`) 1373 통과. 늘어난 것은 ui 88, policy_change 8, bypass 10이다.
+- `gate ui --no-browser`를 띄워 curl로 확인했다: 토큰 없음·틀림 403(bad-token), Host가 localhost면 403(bad-host), 열쇠 없는 첫 페이지 403, 열쇠로 첫 페이지 200(CSP·no-referrer·no-store, 외부 URL 0), 같은 열쇠 다시 403, 토큰으로 `/api/state`·`/api/status` 200, 정적 파일 4종 200, 바꾸는 요청을 GET으로 405, Origin 없는 POST 403, SIGTERM으로 깨끗이 꺼짐.
+
+**거짓 안전 (Phase 8)**
+- 화면을 실제 브라우저로 보지 않았다. 작은 가짜 DOM에서 `app.js`를 실제 화면 서버에 붙여 흐름을 돌려 오류가 없는 것만 봤다.
+- 샌드박스가 127.0.0.1 TCP를 막는지는 하네스를 돌려야 안다. 막지 않으면 세션 토큰이 마지막 경계다. 토큰은 파일·쿠키·브라우저 저장소에 두지 않는다.
+- 화면의 Laya·NER 상태는 화면 프로세스의 환경변수 주소로 잰다. 데몬이 다른 주소를 쓰면 실제와 다를 수 있다.
 
 ## 6. 알려진 한계
 
@@ -544,6 +562,7 @@ fuse-jev-gate/
 - ②에서 v3는 나이·연도도 개인정보로 보므로, 기본 정책이 보여 주는 "30대"·"2016년"이 남은 문서는 잘 가려도 승인으로 간다(민감 24개 중 19개). 정책(plain 묶음)과 판단 모델의 기준이 다르다.
 - NER로 가리면 내용 길이가 원본과 달라진다. `gate stat` 크기는 원본 그대로라, 크기만큼만 읽는 클라이언트는 끝을 잘릴 수 있다(`gate cat`은 통째로 읽어 문제없다).
 - NER 클라이언트 타임아웃은 연결·읽기마다 걸린다. 서버가 아주 느리게 조금씩 보내면 전체 시간이 더 길어질 수 있다(서버는 우리 코드라 위험은 낮다).
+- 설정 화면(`gate ui`)은 창을 새로 고치면 다시 열어야 한다(세션 토큰을 디스크에 남기지 않으려고). 터미널에서 Enter를 누르면 새 주소로 연다. 화면은 경로 규칙·판단 기준·승인 시간 같은 그 밖의 설정을 보여 주거나 바꾸지 않는다(`gate policy`). 상태 카드의 Laya·NER 주소는 화면 프로세스의 환경변수 기준이다.
 - 정책 문장 해석기(3d)는 키워드 Mock이다. 처음 보는 표현은 대부분 다시 말해 달라고 하고(검증 세트 안전한 실패 30%), 가끔 다른 설정을 저장하려 한다(6%, 모두 더 엄격한 쪽). "전화번호"는 일반 전화로 읽는다(휴대폰은 따로 말해야 한다). 실제 모델로 바꾸려면 해석용 질문을 학습한 체크포인트가 필요하다(Laya v3 zero-shot은 실패).
 
 ## 7. 검증 방법
@@ -565,9 +584,11 @@ uv run python -m eval.run_eval --client mock [--policy 정책파일] [--details]
 - **Phase 6 기준(2026-10-31): 맥 881 통과·1 skip, Linux 컨테이너 882 통과.** 늘어난 파일은 bypass 55, claude_setup 17, workspace 15다.
 - **Phase 7 기준(2026-10-31): 맥 909 통과·1 skip, Linux 컨테이너 910 통과.** 늘어난 파일은 audit_cli 28이다.
 - **Phase 7 뒤 하네스 보완 기준(2026-10-31): 맥 911 통과·1 skip, Linux 컨테이너 912 통과(`fuse-jev-gate:harness-audit`).** 늘어난 것은 bypass 2(W14·W15 판정)다.
+- **Phase 8 기준(2026-11-01): 맥 1372 통과·1 skip, Linux 컨테이너 1373 통과(`fuse-jev-gate:phase8`).** 늘어난 것은 ui 88, policy_change 8, bypass 10(W16·W17)이다.
 - **Phase 3b 기준(2026-10-31): 맥 975 통과·1 skip, Linux 컨테이너 976 통과(`fuse-jev-gate:phase3b`).** 늘어난 것은 laya_client 62(가짜 laya-serve로 시험, 실제 모델은 부르지 않음), pipeline 2(모델 식별값과 캐시)다.
 - 실제 Laya 평가(laya-serve가 떠 있어야 한다): `JEV_BASE_URL=http://127.0.0.1:8000 JEV_MODEL_DIR=…/models/laya uv run python -m eval.run_eval --client laya [--details]`
 - 감사 로그 보기: `gate audit [--blocked] [--decision …] [--path …] [--since …] [--file …] [--json]` (`GATE_AUDIT`)
+- 설정 화면: `gate --socket <게이트 소켓> ui --policy <정책 파일> --audit <감사 로그> [--port N] [--no-browser]` (`GATE_SOCKET`·`GATE_POLICY`·`GATE_AUDIT`)
 - 우회 시험 하네스(실제 `claude -p`, 비용이 든다. 데몬이 떠 있어야 한다):
   ```bash
   uv run python -m sandbox.bypass --out 보고서.md [--raw 원문폴더]                       # 작업 폴더 설정 (default)
