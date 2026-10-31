@@ -1,7 +1,8 @@
 """1차 정규식 탐지와 같은 길이 마스킹.
 
 형식이 정해진 개인정보와 비밀값(비밀번호·키·토큰)을 정규식으로 찾아, UTF-8 바이트 길이가 원본과 같도록 가린다.
-게이트는 원본 크기를 그대로 알려 주므로(stat, offset·size 읽기) 돌려주는 내용의 바이트 수가 달라지면 안 된다.
+정규식이 가린 부분은 원본과 바이트 수가 같다(자릿수가 보존된다). 처음에는 게이트가 원본 크기를 그대로 알려 주므로 필수였다.
+3c부터 NER 개체는 replacements로 받아 `[이름]`처럼 종류 이름으로 바꾸므로, NER이 켜져 있으면 전체 길이는 달라질 수 있다.
 
 같은 길이 규칙
   - 가릴 문자 하나를 그 문자의 UTF-8 바이트 수만큼의 `*`로 바꾼다.
@@ -69,7 +70,7 @@ TODO: 전각 하이픈 외의 비ASCII 구분자(en dash `–`, 마이너스 `�
 """
 
 import re
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 
@@ -208,30 +209,49 @@ def check_visible(visible: Mapping[str, str] | None = None) -> dict[str, str]:
     return {kind: visible.get(kind, DEFAULT_VISIBLE) for kind in KINDS}
 
 
-def mask(text: str, *, visible: Mapping[str, str] | None = None) -> MaskResult:
+def mask(
+    text: str, *, visible: Mapping[str, str] | None = None, replacements: Sequence[tuple[int, int, str]] = ()
+) -> MaskResult:
     """탐지한 범위를 같은 UTF-8 바이트 길이로 가린다.
 
     `len(결과.text.encode("utf-8")) == len(text.encode("utf-8"))`이다. findings의 위치는 원문(text)의 문자 인덱스다.
     전각 숫자처럼 문자 하나가 `*` 여러 개가 되면 결과 문자열에서는 위치가 밀린다(바이트 위치는 원문과 같다).
     visible은 종류별 공개 범위다(모듈 docstring의 표). 기본은 전부 가림이고, 모르는 종류나 값이면 ValueError.
+
+    replacements는 정규식 밖에서 찾은 범위(NER 개체, 3c)를 `[(start, end, 바꿀 글자)]`로 받아 함께 바꾼다.
+    위치는 원문 문자 인덱스이고, 서로 겹치거나 정규식 범위와 겹치면 ValueError다(겹치는 부분은 미리 빼서 넘긴다).
+    replacements를 주면 결과 길이가 원문과 달라질 수 있다(`[이름]`처럼 종류 이름으로 바꾸기 때문). findings는 정규식 것만이다.
     """
     shown = check_visible(visible)
     view = text.translate(_NORMALIZE)
     hits = _scan(view)
-    if not hits:
+    extra = sorted(replacements)
+    for i, (start, end, new) in enumerate(extra):
+        if isinstance(start, bool) or isinstance(end, bool) or not isinstance(start, int) or not isinstance(end, int) \
+                or not 0 <= start < end <= len(text) or not isinstance(new, str):
+            raise ValueError(f"replacements의 범위가 올바르지 않습니다: {(start, end)}")
+        if i and start < extra[i - 1][1]:
+            raise ValueError("replacements끼리 겹칩니다")
+        if any(start < hit.end and hit.start < end for hit in hits):
+            raise ValueError("replacements가 정규식 범위와 겹칩니다")
+    if not hits and not extra:
         return MaskResult(text, ())
+    spans: list[tuple[int, int, str | _Hit]] = [(hit.start, hit.end, hit) for hit in hits] + list(extra)
     parts = []
     pos = 0
-    for hit in hits:
-        parts.append(text[pos:hit.start])
-        parts.append(_mask_hit(text, view, hit, dict(hit.keeps).get(shown[hit.kind])))
-        pos = hit.end
+    for start, end, what in sorted(spans, key=lambda s: s[0]):
+        parts.append(text[pos:start])
+        if isinstance(what, _Hit):
+            parts.append(_mask_hit(text, view, what, dict(what.keeps).get(shown[what.kind])))
+        else:
+            parts.append(what)
+        pos = end
     parts.append(text[pos:])
     return MaskResult("".join(parts), tuple(hit.finding() for hit in hits))
 
 
 def mask_bytes(
-    data: bytes, *, visible: Mapping[str, str] | None = None
+    data: bytes, *, visible: Mapping[str, str] | None = None, replacements: Sequence[tuple[int, int, str]] = ()
 ) -> tuple[bytes, tuple[Finding, ...]]:
     """바이트를 같은 길이로 가린다. UTF-8이 아닌 바이트도 그대로 보존한다.
 
@@ -243,8 +263,9 @@ def mask_bytes(
     - UTF-8이 아닌 인코딩(EUC-KR 등)은 공식 지원이 아니다. ASCII 숫자·이메일은 그대로 잡히지만
       한글 키워드가 필요한 계좌는 놓친다. UTF-16은 아무것도 잡지 못한다.
     - 파일을 나눠서 부르면 경계에 걸친 번호를 놓친다. 파일 전체를 한 번에 넘기고, 부분 읽기는 결과를 잘라서 쓴다.
+    - replacements(NER 개체)는 mask와 같다. 위치는 위 방식으로 푼 문자열의 문자 인덱스이고, 주면 바이트 길이가 달라질 수 있다.
     """
-    result = mask(data.decode("utf-8", "surrogateescape"), visible=visible)
+    result = mask(data.decode("utf-8", "surrogateescape"), visible=visible, replacements=replacements)
     return result.text.encode("utf-8", "surrogateescape"), result.findings
 
 

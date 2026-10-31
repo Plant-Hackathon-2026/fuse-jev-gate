@@ -45,6 +45,7 @@ from pathlib import Path
 from typing import TextIO
 
 from gate.detectors import KINDS
+from gate.ner_client import ENTITY_GROUPS, ENTITY_NAMES
 from gate.policy import (
     ACTION_NAMES,
     DEFAULT_PATH_RULES,
@@ -71,7 +72,7 @@ MAX_HISTORY = 20
 CHANGE_COMMANDS = ("add", "remove", "undo", "set")
 _YES = frozenset({"y", "yes", "예", "네", "ㅛ"})  # ㅛ: 한글 자판 상태에서 y를 누른 경우
 _HISTORY_NAME = re.compile(r"^(\d{6,})\.yaml$")
-_OTHER_KEYS = ("jev_backend", "jev_timeout_seconds", "max_inspect_bytes")
+_OTHER_KEYS = ("jev_backend", "jev_timeout_seconds", "max_inspect_bytes", "ner_backend", "ner_timeout_seconds")
 
 
 class _Stop(Exception):
@@ -405,6 +406,15 @@ def _show(path: Path, entries: tuple[Entry, ...], out: TextIO) -> None:
         action_key, visible_key = f"numbers.{kind}.action", f"numbers.{kind}.visible"
         lines.append(f"    {KIND_NAMES[kind]}: {ACTION_NAMES[policy.number_rule(kind)]} {mark(action_key)}"
                      f" · 가릴 때 {VISIBLE_NAMES[policy.visible[kind]]} {mark(visible_key)}")
+
+    ner_on = policy.ner_backend != "none"
+    lines.append("  이름·주소·소속 등 종류별 처리 (NER이 찾은 것, `[이름]`처럼 종류 이름으로 가림)"
+                 + ("" if ner_on else " — 지금 NER이 꺼져 있어 쓰지 않음"))
+    for group in ENTITY_GROUPS:
+        key = f"entities.{group}.action"
+        lines.append(f"    {ENTITY_NAMES[group]}: {ACTION_NAMES[policy.entity_rule(group)]} {mark(key)}")
+    if ner_on:
+        lines.append("    가린 것이 있으면 가린 결과를 Jev에 다시 물어, 안전하면 보여주고 아니면 사람에게 물어봄")
 
     allow_key, deny_key = "thresholds.allow_if_safe_confidence_gte", "thresholds.deny_if_sensitive_confidence_gte"
     timeout_key, session_key = "approval.timeout_seconds", "approval.session_minutes"

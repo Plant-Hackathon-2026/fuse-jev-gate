@@ -9,6 +9,9 @@
 - Jev에 넘기는 가상 경로에는 경우(pii 등)가 드러나지 않게 중립 이름을 쓴다. 파일 이름이 답을 알려 주지 않게 하기 위해서다.
 - JevError(및 그 밖의 예외)가 난 샘플은 '오류'로 따로 세고, 정책 결과는 차단으로 집계한다.
 - Mock 결과는 Jev의 실제 성능을 대변하지 않는다.
+- --ner server를 주면(3c) 샘플을 실제 게이트 파이프라인(gate.pipeline.Inspector)으로 한 번 더 돌린다. 정규식 → NER → Jev →
+  합치기를 그대로 거친 결과와, 가려져야 할 글자(eval/must_hide.csv)가 결과에 남았는지(누출)를 센다. 사람 승인은 '이번만 허용'으로
+  가정해 승인하면 무엇이 보이는지도 센다. 샘플은 중립 이름(가상 경로와 같은 모양)으로 임시 폴더에 복사해서 돌린다.
 """
 
 import argparse
@@ -16,6 +19,7 @@ import csv
 import hashlib
 import os
 import sys
+import tempfile
 import time
 import unicodedata
 from collections import Counter
@@ -36,10 +40,28 @@ from gate.jev_client import (
     available_backends,
     make_client,
 )
-from gate.policy import DEFAULT_POLICY, Policy, PolicyError, jev_action, load_policy, number_action, strictest
+from gate.approval import ApprovalResult, SessionApprovals, kinds_text
+from gate.ner_client import NER_BACKENDS, NerClient, NerError, make_ner_client
+from gate.pipeline import Inspector
+from gate.policy import (
+    DEFAULT_POLICY,
+    Entry,
+    Policy,
+    PolicyError,
+    PolicySource,
+    jev_action,
+    load_policy,
+    number_action,
+    read_entries,
+    strictest,
+    write_entries,
+)
+from gate.store import PlainStore
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_LABELS = PROJECT_ROOT / "eval" / "labels.csv"
+DEFAULT_MUST_HIDE = PROJECT_ROOT / "eval" / "must_hide.csv"
+TIERS = {"identifier": "식별자", "quasi": "준식별자"}
 DEFAULT_PURPOSE = "문서 내용을 요약하기 위해"
 
 DOC_TYPES = {"cover_letter": "자기소개서", "consult_chat": "상담채팅", "medical_note": "진료메모", "resume": "이력서"}
@@ -332,6 +354,125 @@ def format_details(results: Sequence[SampleResult], policy: Policy = DEFAULT_POL
     return "\n".join(lines)
 
 
+# --- 게이트 흐름 (3c): 실제 파이프라인으로 돌리고 누출을 센다 ---
+
+@dataclass(frozen=True)
+class MustHide:
+    path: str
+    tier: str   # identifier | quasi
+    group: str
+    text: str
+
+
+@dataclass(frozen=True)
+class GateRun:
+    sample: LabeledSample
+    outcome: Outcome          # 사람 승인을 묻기 전의 결과
+    stage: str
+    reason: str
+    findings: dict[str, int]  # 가린 것 (종류·묶음별 건수)
+    shown: str | None         # 보이는 내용. ask_human이면 승인했을 때 보일 내용, deny면 None
+    leaked: tuple[MustHide, ...]
+    latency_ms: float
+
+
+class _ApproveOnce:
+    """사람 승인을 모두 '이번만 허용'으로 가정한다. 승인하면 무엇이 보이는지 세기 위해서다(평가 전용)."""
+
+    def __init__(self) -> None:
+        self.sessions = SessionApprovals()
+
+    def request(self, request: object, key: object) -> ApprovalResult:
+        return ApprovalResult("once")
+
+
+def load_must_hide(path: Path = DEFAULT_MUST_HIDE) -> dict[str, list[MustHide]]:
+    out: dict[str, list[MustHide]] = {}
+    with open(path, encoding="utf-8", newline="") as f:
+        for line_no, row in enumerate(csv.DictReader(f), start=2):
+            if row["tier"] not in TIERS or not row["text"]:
+                raise ValueError(f"{path}:{line_no}: 값이 올바르지 않습니다: {row}")
+            out.setdefault(row["path"], []).append(MustHide(row["path"], row["tier"], row["group"], row["text"]))
+    return out
+
+
+def run_gate(
+    samples: Sequence[LabeledSample],
+    client: JevClient,
+    ner: NerClient | None,
+    must_hide: dict[str, list[MustHide]],
+    *,
+    entries: Sequence[Entry] = (),
+    root: Path = PROJECT_ROOT,
+    purpose: str = DEFAULT_PURPOSE,
+) -> list[GateRun]:
+    """샘플을 중립 이름으로 임시 폴더에 복사하고 Inspector로 판단한다. ner가 있으면 ner_backend를 server로 둔다."""
+    runs = []
+    with tempfile.TemporaryDirectory(prefix="gate-eval-") as tmp:
+        store_root = Path(tmp) / "source"
+        policy_path = Path(tmp) / "policy.yaml"
+        extra = [Entry(settings={"ner_backend": "server" if ner is not None else "none"})]
+        write_entries(policy_path, [*entries, *extra])
+        for sample in samples:
+            target = store_root / virtual_path(sample).lstrip("/")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes((root / sample.path).read_bytes())
+        inspector = Inspector(PlainStore(store_root), PolicySource(policy_path), jev_factory=lambda p: client,
+                              ner_factory=lambda p: ner, approvals=_ApproveOnce())
+        for sample in samples:
+            started = time.perf_counter()
+            verdict = inspector.inspect(None, virtual_path(sample), purpose)
+            latency_ms = (time.perf_counter() - started) * 1000
+            j = verdict.judgment
+            outcome: Outcome = "ask_human" if j.approval is not None else j.action
+            shown = verdict.data.decode("utf-8", "replace") if verdict.data is not None else None
+            leaked = tuple(m for m in must_hide.get(sample.path, []) if shown is not None and m.text in shown)
+            runs.append(GateRun(sample, outcome, j.stage, j.reason, dict(j.findings), shown, leaked, latency_ms))
+    return runs
+
+
+def format_gate_runs(runs: Sequence[GateRun], must_hide: dict[str, list[MustHide]], *, ner_name: str) -> str:
+    lines = [f"[게이트 흐름] 실제 파이프라인(정규식 → NER {ner_name} → Jev → 합치기). 사람 승인은 '이번만 허용'으로 가정"]
+    table = {label: Counter(r.outcome for r in runs if r.sample.expected == label) for label in LABELS}
+    lines += _table(["기대 라벨", *(OUTCOME_NAMES[x] for x in OUTCOMES)], [
+        *([label, *(str(table[label][x]) for x in OUTCOMES)] for label in LABELS),
+        ["합계", *(str(sum(table[label][x] for label in LABELS)) for x in OUTCOMES)],
+    ])
+    lines += ["", "[누출] 가려져야 할 글자(eval/must_hide.csv)가 결과에 남은 줄 수. 승인 칸은 사람이 승인했을 때"]
+    rows = []
+    for tier, name in TIERS.items():
+        total = [m for ms in must_hide.values() for m in ms if m.tier == tier]
+        shown = [m for r in runs if r.outcome in ("allow", "mask") for m in r.leaked if m.tier == tier]
+        asked = [m for r in runs if r.outcome == "ask_human" for m in r.leaked if m.tier == tier]
+        rows.append([name, str(len(total)), str(len(shown)), str(len(asked))])
+    lines += _table(["구분", "전체", "남음(허용·가림)", "남음(승인하면)"], rows)
+    by_doc = Counter()
+    for r in runs:
+        by_doc[r.sample.doc_type] += len(r.leaked)
+    lines.append("문서 종류별 남은 줄: " + ", ".join(f"{DOC_TYPES[k]} {by_doc[k]}" for k in DOC_TYPES))
+    safe = [r for r in runs if r.sample.expected == "safe"]
+    masked_safe = [r for r in safe if r.findings]
+    lines += ["", f"[안전 문서] {len(safe)}개 중 무언가를 가린 문서 {len(masked_safe)}개, 가린 건수 합계 "
+                  f"{sum(sum(r.findings.values()) for r in safe)}"]
+    latencies = [r.latency_ms for r in runs]
+    if latencies:
+        lines.append(f"[지연] 게이트 한 번(정규식 + NER + Jev, 캐시 없음) 평균 {sum(latencies) / len(latencies):.0f} ms, "
+                     f"최대 {max(latencies):.0f} ms")
+    return "\n".join(lines)
+
+
+def format_gate_details(runs: Sequence[GateRun], *, show: bool = False) -> str:
+    rows = [[r.sample.path, r.sample.expected, OUTCOME_NAMES[r.outcome], r.stage,
+             kinds_text(r.findings) if r.findings else "-",
+             ", ".join(m.text for m in r.leaked) or "-"] for r in runs]
+    lines = ["[게이트 흐름 샘플별]", *_table(["파일", "기대", "결과", "단계", "가린 것", "남은 글자"], rows, align="llllll")]
+    if show:
+        for r in runs:
+            lines += ["", f"--- {r.sample.path} ({OUTCOME_NAMES[r.outcome]}) {r.reason}"]
+            lines.append(r.shown.rstrip("\n") if r.shown is not None else "(보이지 않음)")
+    return "\n".join(lines)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m eval.run_eval", description="합성 한국어 샘플로 Jev 판단을 평가한다")
     parser.add_argument("--client", required=True, choices=available_backends(), help="Jev 백엔드 이름")
@@ -340,13 +481,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS, help="Jev 호출 타임아웃(초)")
     parser.add_argument("--purpose", default=DEFAULT_PURPOSE, help="Jev 질문에 넣을 요청 목적")
     parser.add_argument("--details", action="store_true", help="샘플별 결과도 출력")
+    parser.add_argument("--ner", choices=NER_BACKENDS, default="none",
+                        help="server면 실제 게이트 흐름(NER 포함)도 돌리고 누출을 센다. NER_BASE_URL 필요")
+    parser.add_argument("--ner-timeout", type=float, default=30.0, help="NER 호출 타임아웃(초)")
+    parser.add_argument("--must-hide", type=Path, default=DEFAULT_MUST_HIDE, help="가려져야 할 글자 CSV")
+    parser.add_argument("--show", action="store_true", help="--ner와 함께: 샘플마다 게이트가 돌려준 내용도 출력")
     args = parser.parse_args(argv)
 
     try:
         policy = load_policy(args.policy)
         masker = load_default_masker()
         client = make_client(args.client, timeout=args.timeout)
-    except (MaskerUnavailable, JevError, PolicyError) as exc:
+        ner = make_ner_client(args.ner, timeout=args.ner_timeout)
+        if ner is not None:
+            ner.cache_tag()  # 서버가 떠 있는지 먼저 확인
+    except (MaskerUnavailable, JevError, PolicyError, NerError) as exc:
         print(f"eval: 평가를 중단합니다. {exc}", file=sys.stderr)
         return 2
 
@@ -356,6 +505,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.details:
         print()
         print(format_details(results, policy))
+    if ner is not None:
+        must_hide = load_must_hide(args.must_hide)
+        runs = run_gate(load_labels(args.labels), client, ner, must_hide, entries=read_entries(args.policy),
+                        purpose=args.purpose)
+        print()
+        print(format_gate_runs(runs, must_hide, ner_name=args.ner))
+        if args.details or args.show:
+            print()
+            print(format_gate_details(runs, show=args.show))
     return 0
 
 

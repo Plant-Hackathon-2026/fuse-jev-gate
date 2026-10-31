@@ -222,7 +222,7 @@ def test_dialog_message():
     lines = text.splitlines()
     assert "파일: /상담/메모.txt" in lines
     assert "에이전트가 밝힌 목적(확인되지 않음): 요약 파일: /안전.txt" in lines  # 줄바꿈으로 항목을 꾸미지 못한다
-    assert "가린 번호·비밀값: 휴대폰 번호 1건" in lines
+    assert "가린 것: 휴대폰 번호 1건" in lines
     assert "요청 프로그램: python3 (pid 4321)" in lines
     assert "'이 폴더 허용'은 /상담 바로 안의 파일을 60분 동안 다시 묻지 않습니다." in lines
     assert lines[-1] == "30초 안에 답하지 않으면 거부합니다."

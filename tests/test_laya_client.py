@@ -331,3 +331,53 @@ def test_fail_closed_turns_cache_tag_failure_into_jev_error(fake, tmp_path):
     (folder / "model.safetensors").unlink()
     with pytest.raises(JevError):
         c.cache_tag()
+
+
+# --- 질문이 여러 개인 체크포인트 (팀원 v3) ---
+
+V3_QUESTIONS = {
+    "has_pii": {"type": "noul", "instructions": "가려지지 않은 개인 식별 정보가 포함되어 있는가?"},
+    "has_name": {"type": "noul", "instructions": "사람의 실제 이름이 포함되어 있는가?"},
+    "is_pii": {"type": "noul", "instructions": "`target` 값이 개인정보인가?"},
+    "category": {"type": "choice", "instructions": "`target` 값의 종류는?", "criteria": {"name": "이름"}},
+}
+
+
+def write_v3_dir(path, questions=V3_QUESTIONS):
+    path.mkdir(exist_ok=True)
+    (path / "questions.json").write_text(json.dumps(questions, ensure_ascii=False), encoding="utf-8")
+    (path / "model.safetensors").write_bytes(b"v3")
+    return path
+
+
+def test_multi_question_checkpoint_sends_only_has_pii(fake, tmp_path):
+    c = client(fake, model_dir=write_v3_dir(tmp_path / "v3"))
+    c.judge("본문", CTX)
+    assert fake.requests[-1][2]["questions"] == {"has_pii": V3_QUESTIONS["has_pii"]}
+
+
+def test_jev_question_picks_another_yes_no_question(fake, tmp_path):
+    folder = write_v3_dir(tmp_path / "v3")
+    c = client(fake, model_dir=folder, question="has_name")
+    c.judge("본문", CTX)
+    assert fake.requests[-1][2]["questions"] == {"has_name": V3_QUESTIONS["has_name"]}
+    assert c.cache_tag() != client(fake, model_dir=folder).cache_tag()  # 질문이 다르면 캐시도 따로
+    env_client = LayaJevClient(base_url=fake.url, model_dir=folder, env={"JEV_QUESTION": "has_name"})
+    assert env_client.cache_tag() == c.cache_tag()
+
+
+@pytest.mark.parametrize("question, questions", [
+    ("category", V3_QUESTIONS),                                         # 예/아니오가 아님
+    ("nope", V3_QUESTIONS),                                             # 없는 질문
+    (None, {k: v for k, v in V3_QUESTIONS.items() if k != "has_pii"}),  # 여럿인데 has_pii도 없음
+    (None, {}),
+])
+def test_bad_question_choice_is_error(fake, tmp_path, question, questions):
+    with pytest.raises(JevError):
+        client(fake, model_dir=write_v3_dir(tmp_path / "v3", questions), question=question)
+
+
+def test_jev_question_without_model_dir_must_match_default_question(fake):
+    assert client(fake, question="sensitive").judge("본문", CTX).label == "safe"
+    with pytest.raises(JevError, match="JEV_QUESTION"):
+        client(fake, question="has_pii")

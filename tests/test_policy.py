@@ -66,7 +66,10 @@ def test_config_file_documents_the_code_defaults():
     flat = {f"numbers.{kind}.{what}": value
             for kind, rule in data["numbers"].items() for what, value in rule.items()}
     flat |= {f"thresholds.{k}": v for k, v in data["thresholds"].items()}
-    flat |= {k: data[k] for k in ("jev_backend", "jev_timeout_seconds", "max_inspect_bytes")}
+    flat |= {f"entities.{group}.{what}": value
+             for group, rule in data["entities"].items() for what, value in rule.items()}
+    flat |= {k: data[k] for k in ("jev_backend", "jev_timeout_seconds", "max_inspect_bytes", "ner_backend",
+                                  "ner_timeout_seconds")}
     flat |= {f"approval.{k}": v for k, v in data["approval"].items()}
     assert flat == default_settings()
     assert tuple(PathRule(r["pattern"], r["action"]) for r in data["path_rules"]) == DEFAULT_PATH_RULES
@@ -464,7 +467,7 @@ def test_describe_setting_is_korean():
     assert describe_setting("jev_timeout_seconds", 3.0) == "Jev 응답 제한 시간(초): 3"
     assert describe_setting("thresholds.allow_if_safe_confidence_gte", 0.97) == \
         "Jev가 '안전'이라고 답할 때 보여 주는 최소 확신도: 0.97"
-    assert set(SETTING_NAMES) == {k for k in setting_keys() if not k.startswith("numbers.")}
+    assert set(SETTING_NAMES) == {k for k in setting_keys() if not k.startswith(("numbers.", "entities."))}
 
 
 # --- Phase 4 보완: 비밀값과 자격 증명 파일 ---
