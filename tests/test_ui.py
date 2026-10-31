@@ -61,6 +61,10 @@ class FakeHealth:
         self.server.server_close()
 
 
+def session_in(body: bytes) -> str:
+    return re.search(r'name="gate-session" content="([^"]+)"', body.decode()).group(1)
+
+
 def closed_port_url() -> str:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -111,10 +115,20 @@ class Ui:
         return response.status, {k.lower(): v for k, v in response.getheaders()}, data
 
     def launch(self) -> str:
+        return self.launch_with_cookie()[0]
+
+    def launch_with_cookie(self) -> tuple[str, str]:
+        """(세션 토큰, Set-Cookie 헤더)."""
         url = self.server.new_launch_url()
-        status, _, body = self.raw("GET", url[len(self.origin):], [("Host", self.host)])
+        status, headers, body = self.raw("GET", url[len(self.origin):], [("Host", self.host)])
         assert status == 200
-        return re.search(r'name="gate-session" content="([^"]+)"', body.decode()).group(1)
+        return session_in(body), headers["set-cookie"]
+
+    def page(self, path="/", cookie=None, host=None):
+        headers = [("Host", self.host if host is None else host)]
+        if cookie is not None:
+            headers.append(("Cookie", cookie))
+        return self.raw("GET", path, headers)
 
     def get(self, name, token, *, host=None, query=""):
         host = self.host if host is None else host
@@ -182,6 +196,45 @@ def test_launch_key_works_once_and_new_key_replaces_old(make_ui):
     assert u.raw("GET", first[len(u.origin):], [("Host", u.host)])[0] == 403  # 새 열쇠가 옛 열쇠를 바꾼다
     assert u.raw("GET", second[len(u.origin):], [("Host", u.host)])[0] == 200
     assert "bad-launch" in u.log.getvalue() and "launch=" not in u.log.getvalue()  # 거부만 남기고 주소는 남기지 않는다
+
+
+def test_launch_sets_strict_httponly_session_cookie(make_ui):
+    u = make_ui()
+    session, cookie = u.launch_with_cookie()
+    name, _, rest = cookie.partition("=")
+    value, *flags = [part.strip() for part in rest.split(";")]
+    assert name == f"gate_ui_{u.port}"  # 포트마다 이름이 달라 다른 gate ui 실행과 섞이지 않는다
+    assert value == session
+    assert {f.lower() for f in flags} == {"httponly", "samesite=strict", "path=/"}  # 기한 없음: 브라우저 세션 동안만
+
+
+def test_refresh_with_cookie_reopens_same_session(make_ui):
+    u = make_ui()
+    url = u.server.new_launch_url()
+    status, headers, body = u.page(url[len(u.origin):])
+    session = session_in(body)
+    cookie = headers["set-cookie"].split(";")[0]
+    for path in ("/", url[len(u.origin):], "/?launch=wrong"):  # 새로 고침·방문 기록으로 다시 열기
+        status, headers, body = u.page(path, cookie=f"other=1; {cookie}")
+        assert status == 200, path
+        assert session_in(body) == session and "set-cookie" not in headers
+    assert u.get("state", session)[0] == 200
+
+
+def test_cookie_alone_is_not_enough(make_ui):
+    u = make_ui()
+    session, set_cookie = u.launch_with_cookie()
+    cookie = set_cookie.split(";")[0]
+    other = make_ui()
+    for bad in (f"gate_ui_{u.port}=wrong", f"gate_ui_{other.port}={session}", f"gate_ui_{u.port}={session}x", "", "%%%"):
+        assert u.page("/", cookie=bad)[0] == 403, bad
+    assert u.page("/", cookie=cookie, host="evil.example")[0] == 403  # Host 검사는 그대로
+    status, _, _ = u.raw("GET", "/api/state", [("Host", u.host), ("Cookie", cookie)])  # API는 헤더 토큰이 있어야 한다
+    assert status == 403
+    status, data = u.post("set", {"key": "numbers.card.action", "value": "deny"}, None, extra=[("Cookie", cookie)])
+    assert (status, data["error"]) == (403, "bad-token")
+    assert not u.policy.exists()
+    assert session not in u.log.getvalue()
 
 
 def test_api_requires_session_token(make_ui):
@@ -273,8 +326,10 @@ def test_body_must_be_small_json_object(make_ui):
 def test_every_response_has_security_headers(make_ui):
     u = make_ui()
     session = u.launch()
+    launched = u.raw("GET", u.server.new_launch_url()[len(u.origin):], [("Host", u.host)])
+    assert "set-cookie" in launched[1]  # 쿠키는 열쇠로 처음 연 응답에만 준다
     responses = [
-        u.raw("GET", u.server.new_launch_url()[len(u.origin):], [("Host", u.host)]),
+        launched,
         u.raw("GET", "/?launch=wrong", [("Host", u.host)]),
         u.raw("GET", f"/s/{session}/app.js", [("Host", u.host)]),
         u.raw("GET", "/api/state", [("Host", u.host), ("X-Gate-Token", session)]),
@@ -287,6 +342,7 @@ def test_every_response_has_security_headers(make_ui):
         assert headers["referrer-policy"] == "no-referrer"
         assert headers["cache-control"] == "no-store"
         assert headers["x-frame-options"] == "DENY" and headers["x-content-type-options"] == "nosniff"
+    for status, headers, _ in responses[1:]:
         assert "set-cookie" not in headers
 
 

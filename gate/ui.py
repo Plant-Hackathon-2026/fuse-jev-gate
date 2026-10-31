@@ -7,12 +7,17 @@ gate.policy_change(`gate policy`와 같은 함수)다. 게이트 데몬·소켓�
 보안 (plans/ui-plan.md 5절)
   - 127.0.0.1(IP 리터럴)에만 바인드한다. 포트는 기본 0(빈 포트를 고름), --port로 정한다.
   - 여는 주소: 실행할 때마다 secrets로 만든 **한 번 쓰는 열쇠(launch)**가 든 `http://127.0.0.1:<포트>/?launch=…`.
-    터미널에 찍고 브라우저로 연다. 파일에 남기지 않는다. 열쇠는 처음 한 번만 통하고, 그때 그 창의 **세션 토큰**을 새로 만든다.
+    터미널에 찍고 브라우저로 연다. 파일에 남기지 않는다. 열쇠는 처음 한 번만 통하고, 그때 그 브라우저의 **세션 토큰**을 새로 만든다.
     브라우저 방문 기록(디스크의 파일)에 주소가 남아도, 그 열쇠는 이미 썼으므로 다시 쓸 수 없다.
-  - 세션 토큰은 첫 페이지 안에만 실린다. 화면 스크립트는 이를 메모리에만 두고 API에는 X-Gate-Token 헤더로,
-    정적 파일(CSS·JS·글꼴·로고)에는 경로 `/s/<토큰>/…`로 보낸다. 쿠키·sessionStorage·localStorage에는 두지 않는다
-    (브라우저는 이것들을 디스크에 남기고, 샌드박스 안의 에이전트도 그 파일은 읽을 수 있다). 그래서 새로 고치면 다시 열어야 한다.
-    이 터미널에서 Enter를 누르면 새 열쇠로 다시 연다.
+  - 세션 토큰은 페이지 안(<meta>)에 실린다. 화면 스크립트는 API에 X-Gate-Token 헤더로, 정적 파일(CSS·JS·글꼴·로고)에는
+    경로 `/s/<토큰>/…`로 보낸다.
+  - 새로 고침(사용자 결정, 2026-11-01): 열쇠로 처음 열 때 세션 토큰을 쿠키 `gate_ui_<포트>`(HttpOnly, SameSite=Strict,
+    Path=/, 기한 없음)로도 준다. 열쇠 없이 `/`로 와도 쿠키가 이번 실행의 세션이면 같은 토큰으로 페이지를 다시 준다.
+    쿠키는 페이지를 다시 그리는 데만 쓰고, API는 지금처럼 X-Gate-Token 헤더가 있어야 한다(쿠키만으로는 아무것도 바꾸지 못한다).
+    세션은 이 프로세스 메모리에만 있어서 gate ui를 끄면 쿠키도 쓸모없어진다.
+    쿠키는 디스크에 남지만, 샌드박스 안의 에이전트는 127.0.0.1에 연결하지 못하고(하네스 W16·W17), 샌드박스 밖의
+    같은 사용자 프로그램은 원래 정책 파일을 직접 쓸 수 있어서 메모리에만 두는 이득이 작다.
+    다른 브라우저에서 열거나 쿠키가 없으면 이 터미널에서 Enter를 누른다(새 열쇠로 다시 연다).
   - 모든 요청: Host 헤더가 정확히 `127.0.0.1:<포트>`여야 한다(DNS rebinding 방지). 첫 페이지는 열쇠, 나머지는 세션 토큰이 맞아야 한다.
   - 바꾸는 요청은 POST만 받고, Origin이 정확히 `http://127.0.0.1:<포트>`여야 한다(CSRF 방지). 본문은 JSON(64KB 이하)만 받는다.
     읽기 API에 POST를 보내거나 바꾸는 API에 GET을 보내면 405다.
@@ -32,6 +37,7 @@ API (gate.ui_api)
 import argparse
 import hmac
 import json
+from http.cookies import CookieError, SimpleCookie
 import os
 import secrets
 import signal
@@ -55,6 +61,7 @@ PRODUCT_TAG = "PLANT"
 HOST = "127.0.0.1"
 DEFAULT_PORT = 0
 TOKEN_HEADER = "X-Gate-Token"
+COOKIE_PREFIX = "gate_ui_"  # 쿠키는 포트를 가리지 않으므로 이름에 포트를 붙인다
 MAX_BODY_BYTES = 64 * 1024
 MAX_SESSIONS = 8
 REQUEST_TIMEOUT_SECONDS = 15
@@ -88,7 +95,7 @@ _DENIED_PAGE = """<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title}</title></head>
 <body><main><h1>이 주소로는 열 수 없어요</h1>
-<p>설정 화면 주소는 한 번만 열 수 있어요. 창을 새로 고쳤거나 다른 창에서 열었다면,
+<p>설정 화면은 <code>gate ui</code>가 열어 준 브라우저에서만 열려요. 다른 브라우저에서 열었거나 <code>gate ui</code>를 다시 실행했다면,
 <code>gate ui</code>를 실행한 터미널에서 Enter를 누르면 새 주소로 다시 열어요.</p>
 <p>터미널을 닫았다면 <code>gate ui</code>를 다시 실행해 주세요.</p></main></body></html>
 """
@@ -117,6 +124,7 @@ class UiServer(ThreadingHTTPServer):
         self.port = self.server_address[1]
         self.host_header = f"{HOST}:{self.port}"
         self.origin = f"http://{HOST}:{self.port}"
+        self.cookie_name = f"{COOKIE_PREFIX}{self.port}"
         self.files = load_static()
         self.log = log if log is not None else sys.stderr
         self._lock = threading.Lock()
@@ -233,6 +241,11 @@ class _Handler(BaseHTTPRequestHandler):
     def _launch_page(self) -> None:
         values = parse_qs(urlsplit(self.path).query).get("launch", [])
         session = self.server.use_launch(values[0]) if len(values) == 1 else None
+        extra: tuple[tuple[str, str], ...] = ()
+        if session is not None:  # 열쇠로 처음 열었다: 새로 고쳐도 다시 열리게 쿠키로도 준다
+            extra = (("Set-Cookie", f"{self.server.cookie_name}={session}; HttpOnly; SameSite=Strict; Path=/"),)
+        else:  # 새로 고침·다시 열기: 이번 실행에서 준 쿠키가 있으면 같은 세션으로 다시 그린다
+            session = self._cookie_session()
         if session is None:
             body = _DENIED_PAGE.format(title=escape(f"{PRODUCT_NAME} · {PRODUCT_TAG}")).encode("utf-8")
             self.server.note("요청을 거부했습니다 (bad-launch, GET)")
@@ -242,7 +255,20 @@ class _Handler(BaseHTTPRequestHandler):
         page = (page.replace("__SESSION__", session)
                 .replace("__PRODUCT_NAME__", escape(PRODUCT_NAME))
                 .replace("__PRODUCT_TAG__", escape(PRODUCT_TAG)))
-        self._send(200, page.encode("utf-8"), "text/html; charset=utf-8")
+        self._send(200, page.encode("utf-8"), "text/html; charset=utf-8", extra)
+
+    def _cookie_session(self) -> str | None:
+        """Cookie 헤더에 이번 실행의 세션 쿠키가 있으면 그 토큰. 없거나 틀리면 None."""
+        jar: SimpleCookie = SimpleCookie()
+        for raw in self.headers.get_all("Cookie") or []:
+            try:
+                jar.load(raw)
+            except CookieError:
+                continue
+        morsel = jar.get(self.server.cookie_name)
+        if morsel is None or not self.server.has_session(morsel.value):
+            return None
+        return morsel.value
 
     def _static(self, path: str) -> None:
         _, _, rest = path.partition("/s/")
@@ -321,11 +347,11 @@ class _Handler(BaseHTTPRequestHandler):
     def _send_json(self, status: int, payload: dict) -> None:
         self._send(status, json.dumps(payload, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
 
-    def _send(self, status: int, body: bytes, content_type: str) -> None:
+    def _send(self, status: int, body: bytes, content_type: str, extra: tuple[tuple[str, str], ...] = ()) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
-        for name, value in SECURITY_HEADERS:
+        for name, value in SECURITY_HEADERS + extra:
             self.send_header(name, value)
         self.end_headers()
         if self.command != "HEAD":
@@ -387,7 +413,8 @@ def _announce(server: UiServer, config: UiConfig, no_browser: bool, out: TextIO,
     print(f"gate ui: {PRODUCT_NAME} · {PRODUCT_TAG} 설정 화면 {url}", file=out, flush=True)
     if first:
         lines = [
-            "  이 주소는 한 번만 열 수 있어요. 창을 새로 고쳤거나 닫았으면 여기서 Enter를 누르면 새 주소로 다시 열어요.",
+            "  이 주소는 한 번만 쓸 수 있어요. 한 번 열면 그 브라우저에서는 새로 고치거나 다시 열어도 돼요(이 터미널이 켜져 있는 동안).",
+            "  다른 브라우저에서 열거나 창이 열리지 않았으면 여기서 Enter를 누르면 새 주소를 만들어요.",
             "  주소는 이 터미널에만 보여요. 다른 사람이나 AI 에이전트에게 알려 주지 마세요. 끄려면 Ctrl-C.",
             f"  정책 파일: {config.policy}",
             f"  감사 로그: {config.audit or '지정 안 함 (--audit 또는 GATE_AUDIT)'}",

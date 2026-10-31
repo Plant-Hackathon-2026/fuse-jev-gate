@@ -248,7 +248,7 @@
     clear(box);
     if (lost) {
       box.appendChild(banner([h("strong", { text: "화면과 연결이 끊겼어요. " }),
-        "창을 새로 고쳤거나 gate ui를 껐을 수 있어요. gate ui를 실행한 터미널에서 Enter를 누르면 새 주소로 다시 열어요."]));
+        "gate ui를 껐거나 다시 실행했을 수 있어요. gate ui를 실행한 터미널에서 Enter를 누르면 새 주소로 다시 열어요."]));
       return;
     }
     if (state && state.invalid) {
