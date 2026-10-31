@@ -1,0 +1,121 @@
+id,sentence,expect,setting,group,note
+P001,사람 이름은 가려줘,setting,entities.name.action=mask,entity,기본 반말 가림. 기본값과 같아도 설정 하나
+P002,성함은 가리지 말아 주세요,setting,entities.name.action=allow,entity,성함=이름. 존댓말 부탁
+P003,상담사 이름이 나오면 [이름]으로 바꿔서 보여줘,setting,entities.name.action=mask,entity,상담사(COUNSELOR)도 name 묶음. 조건형이지만 동작은 가림
+P004,가족 이름이 들어간 파일은 아예 열지 마,setting,entities.name.action=deny,entity,가족 이름(FAMILY_NAME)은 name. '가족 이야기'(context)와 경계. 파일을 열지 말라 → 거부
+P005,교수님 성함이 나오면 보여주기 전에 저한테 꼭 물어봐 주세요,setting,entities.name.action=ask_human,entity,교수(PROFESSOR)도 name. 높임말 물어봄
+P006,누군지 알 수 있는 이름은 익명 처리해줘,setting,entities.name.action=mask,entity,익명 처리=가림
+P007,이름 정도는 그냥 보여줘도 돼,setting,entities.name.action=allow,entity,'보여줘도 돼' → 그대로
+P008,실명이 나오면 확인받고 보여줘,setting,entities.name.action=ask_human,entity,실명=이름
+P009,이름이 적힌 문서는 에이전트가 아예 못 읽게 막아,setting,entities.name.action=deny,entity,'문서'가 있지만 경로가 아니라 내용 조건 → 거부(path 아님)
+P010,이름 좀 가려줘 ㅠㅠ,setting,entities.name.action=mask,entity,군말·이모티콘 섞임
+P011,주소는 안 보이게 해줘,setting,entities.address.action=mask,entity,안 보이게=가림
+P012,사는 곳은 감춰줘,setting,entities.address.action=mask,entity,사는 곳=주소(장소 place 아님)
+P013,집 주소가 있는 파일은 거부해 주시겠어요?,setting,entities.address.action=deny,entity,정중한 의문형 명령
+P014,주소가 나오면 나한테 먼저 물어봐,setting,entities.address.action=ask_human,entity,먼저 물어봐 → 사람에게 물어봄
+P015,주소는 굳이 가릴 필요 없어,setting,entities.address.action=allow,entity,'가릴 필요 없어' → 그대로
+P016,AI가 내 주소를 못 보게 해줘,setting,entities.address.action=mask,entity,정보가 대상이므로 그 부분만 가림. 파일 거부까지는 아님
+P017,생년월일은 가려줘,setting,entities.birth.action=mask,entity,경계: 주민번호 공개 범위(numbers.rrn.visible)가 아니라 NER birth 묶음
+P018,생일은 그대로 보여줘도 돼,setting,entities.birth.action=allow,entity,생일=생년월일(DOB)
+P019,태어난 날짜가 적힌 파일은 열지 마,setting,entities.birth.action=deny,entity,'날짜'가 들어가지만 태어난 날 → birth(date 아님)
+P020,생년월일이 나오면 확인받고 보여줘,setting,entities.birth.action=ask_human,entity,확인받고 → 물어봄
+P021,생년월일은 보여주면 안 돼,setting,entities.birth.action=mask,entity,'안 돼' 부정이지만 정보가 대상 → 가림
+P022,학번은 가려줘,setting,entities.student_id.action=mask,entity,경계: 번호처럼 보여도 numbers가 아니라 entities.student_id
+P023,학번이 있는 문서는 읽지 못하게 해줘,setting,entities.student_id.action=deny,entity,있는 문서는 읽지 못하게 → 거부
+P024,학생 번호는 그대로 둬,setting,entities.student_id.action=allow,entity,학생 번호=학번. '번호'가 있어도 numbers 아님(번호엔 allow 없음)
+P025,학번 나오면 보여주기 전에 물어봐 줄래?,setting,entities.student_id.action=ask_human,entity,부탁형 의문문
+P026,학번은 가리지 않으면 안 돼,setting,entities.student_id.action=mask,entity,이중 부정 → 가림
+P027,회사 이름은 가려줘,setting,entities.org.action=mask,entity,경계: '회사 이야기는 보여주지 마'(context)와 다름
+P028,다니는 학교는 숨겨줘,setting,entities.org.action=mask,entity,다니는 학교=SCHOOL → org
+P029,병원 이름은 보여줘도 돼,setting,entities.org.action=allow,entity,경계: '병원 기록은 보여줘도 돼'(unsupported)와 다름. 이름은 org
+P030,학과나 부서 이름은 그대로 보여줘,setting,entities.org.action=allow,entity,학과·부서 둘 다 org 한 묶음 → 바꿈 하나
+P031,동아리 이름이 나오면 물어보고 보여줘,setting,entities.org.action=ask_human,entity,동아리=CLUB → org
+P032,다니는 회사가 드러나는 파일은 거부해 주세요,setting,entities.org.action=deny,entity,회사=COMPANY → org. 드러나는 파일은 거부
+P033,프로젝트나 사업 이름은 숨기지 않아도 돼요,setting,entities.org.action=allow,entity,프로젝트·사업 이름(PROJECT)도 org. '숨기지 않아도' → 그대로
+P034,회사 이름은 내 허락 없이 보여주지 마,setting,entities.org.action=ask_human,entity,'보여주지 마'가 있지만 '허락 없이' → 물어봄
+P035,학교 이름이 들어간 문서는 에이전트가 열지 못하게 해,setting,entities.org.action=deny,entity,들어간 문서를 열지 못하게 → 거부
+P036,장소는 가려라,setting,entities.place.action=mask,entity,명령형
+P037,지명은 그대로 둬도 돼,setting,entities.place.action=allow,entity,지명=PLACE
+P038,만난 장소가 적혀 있으면 나한테 확인받아,setting,entities.place.action=ask_human,entity,확인받아 → 물어봄
+P039,여행 간 도시 이름은 숨겨줘,setting,entities.place.action=mask,entity,도시 이름=지명 → place. '이름'이 있지만 사람 이름 아님
+P040,지명이 나오는 파일은 차단해,setting,entities.place.action=deny,entity,차단 → 거부
+P041,장소는 숨기지 마,setting,entities.place.action=allow,entity,'숨기지 마' → 그대로
+P042,날짜는 가리지 마,setting,entities.date.action=allow,entity,가리지 마 → 그대로
+P043,날짜는 지워서 보여줘,setting,entities.date.action=mask,entity,지워서 보여줘=가림
+P044,약속 날짜가 나오면 물어보고 보여줘,setting,entities.date.action=ask_human,entity,약속 날짜=DATE
+P045,몇 월 며칠인지 나오는 문서는 거부해,setting,entities.date.action=deny,entity,몇 월 며칠=날짜
+P046,날짜는 가려도 돼,setting,entities.date.action=mask,entity,'~해도 돼'지만 동사가 가림 → mask(allow 아님)
+P047,사건 이름은 보여주지 마,setting,entities.event.action=mask,entity,정보가 주어인 '보여주지 마'는 그 부분만 가림(파일 거부 아님)
+P048,사건명이 나오는 파일은 열지 마,setting,entities.event.action=deny,entity,사건명=사건 이름(EVENT)
+P049,사건은 그대로 보여줘도 괜찮아요,setting,entities.event.action=allow,entity,사건(EVENT) 종류. 주제 규칙(unsupported)이 아니라 개체
+P050,사건 이름이 있으면 나한테 물어봐,setting,entities.event.action=ask_human,entity,물어봐 → 물어봄
+P051,"기타 민감 정보는 가려 줘, 부탁해",setting,entities.etc.action=mask,entity,부탁형. 문장 안 쉼표
+P052,그 밖의 민감한 정보가 나오면 확인받고 보여줘,setting,entities.etc.action=ask_human,entity,'그 밖의'=기타 → etc 묶음. '개인정보 다'처럼 넓은 말과 구분
+P053,기타 민감 정보는 그냥 보여줘,setting,entities.etc.action=allow,entity,묶음 이름을 그대로 쓴 문장
+P054,기타 민감 정보가 있는 파일은 거부해,setting,entities.etc.action=deny,entity,있는 파일은 거부
+P055,IP 주소는 마스킹해 줘,setting,entities.host.action=mask,entity,경계: '주소'가 있지만 host(address 아님). 외래어 마스킹
+P056,서버 IP는 그대로 둬,setting,entities.host.action=allow,entity,서버 IP=IP_ADDRESS → host
+P057,내부 서버 주소가 있는 파일은 열지 마,setting,entities.host.action=deny,entity,내부 서버 주소=INTERNAL_HOST → host(address 아님)
+P058,사내 호스트 이름이 나오면 확인받고 보여줘,setting,entities.host.action=ask_human,entity,'이름'이 있지만 호스트 → host
+P059,아이피 나오면 그 파일은 막아,setting,entities.host.action=deny,entity,한글 표기 아이피. 파일을 막아 → 거부
+P060,IP주소는 봐도 돼,setting,entities.host.action=allow,entity,띄어쓰기 없음
+P061,나이는 가려줘,setting,entities.plain.action=mask,entity,plain 묶음 전체(시간·연도·나이·직함·과목)가 함께 바뀌지만 바꿈 하나 → setting
+P062,몇 살인지는 숨겨줘,setting,entities.plain.action=mask,entity,몇 살=나이(AGE) → plain
+P063,직함은 그대로 보여줘,setting,entities.plain.action=allow,entity,기본값과 같음. 직함=TITLE
+P064,과목 이름이 나오면 물어보고 보여줘,setting,entities.plain.action=ask_human,entity,과목=COURSE → plain. '학과'(org)와 경계
+P065,시간은 안 가려도 돼,setting,entities.plain.action=allow,entity,시간=TIME → plain. 기본값과 같음
+P066,연도가 적힌 파일은 거부해줘,setting,entities.plain.action=deny,entity,묶음 전체가 거부로 바뀜(나이·시간 등도)
+P067,직급이나 직책이 적힌 문서는 읽지 마,setting,entities.plain.action=deny,entity,직급·직책=직함(TITLE). 둘 다 plain → 바꿈 하나
+P068,수업 이름은 확인받고 보여줘,setting,entities.plain.action=ask_human,entity,수업=과목(COURSE)
+P069,주민번호는 생년월일까지만 보여줘,setting,numbers.rrn.visible=birth,number,경계: 생년월일 묶음이 아니라 주민번호 공개 범위(앞 6자리)
+P070,주민등록번호는 성별 자리까지 보여줘도 돼,setting,numbers.rrn.visible=birth_gender,number,'보여줘도 돼'지만 번호엔 allow가 없고 공개 범위 지정
+P071,주민번호 앞자리만 보이게 해 주세요,setting,numbers.rrn.visible=birth,number,주민번호 '앞자리'=하이픈 앞 6자리=birth
+P072,외국인등록번호가 들어 있는 파일은 거부해,setting,numbers.foreigner_rrn.action=deny,number,외국인등록번호=foreigner_rrn(rrn 아님)
+P073,외국인등록번호는 생년월일까지 보여도 돼,setting,numbers.foreigner_rrn.visible=birth,number,rrn과 구분
+P074,카드번호는 끝 네 자리만 보여줘,setting,numbers.card.visible=last4,number,끝 네 자리=last4
+P075,신용카드 번호가 나오면 나한테 먼저 물어봐,setting,numbers.card.action=ask_human,number,신용카드 번호=card
+P076,휴대폰 번호는 010 같은 앞자리만 보여줘,setting,numbers.mobile.visible=prefix,number,010 같은 앞자리=prefix
+P077,핸드폰 번호가 적힌 파일은 열지 마,setting,numbers.mobile.action=deny,number,핸드폰=휴대폰
+P078,사무실 전화번호는 지역번호까지만 보여줘,setting,numbers.phone.visible=area,number,사무실·지역번호 → 일반 전화(phone)
+P079,집 전화번호는 확인받고 보여줘,setting,numbers.phone.action=ask_human,number,집 전화 → phone
+P080,이메일 주소는 가려줘,setting,numbers.email.action=mask|numbers.email.visible=none,number,경계: '주소'가 있지만 email(address 아님). 기본이 mask·none이라 둘 다 정답
+P081,이메일 주소가 적힌 문서는 거부해,setting,numbers.email.action=deny,number,경계: 기본과 다른 값이라 email/address 혼동이 바로 드러남
+P082,메일 주소는 .com 같은 끝부분만 보여줘,setting,numbers.email.visible=tld,number,메일 주소=email. 끝부분=tld
+P083,계좌번호가 있으면 물어보고 보여줘,setting,numbers.account.action=ask_human,number,계좌번호=account
+P084,API 키나 토큰이 들어간 파일은 아예 열지 마,setting,numbers.secret.action=deny,number,API 키·토큰 둘 다 secret → 바꿈 하나
+P085,비밀번호는 별표로 가려서 보여줘,setting,numbers.secret.action=mask|numbers.secret.visible=none,number,비밀번호=secret. 기본과 같아 둘 다 정답
+P086,병원 진료 기록은 보여주지 마,context,,context,경계: '병원 이름'(org)이 아니라 문서 주제
+P087,가족 이야기가 담긴 문서는 보여주지 마,context,,context,경계: '가족 이름'(name)이 아니라 주제. '문서'가 있어도 경로 아님
+P088,회사 이야기는 보여주지 마,context,,context,경계: '회사 이름은 가려줘'(org)와 다름
+P089,상담 받은 내용은 에이전트한테 보여주지 마세요,context,,context,경계: '상담사 이름'(name)이 아니라 상담 내용
+P090,개인적인 비밀 이야기는 숨겨줘,context,,context,경계: '비밀번호'(secret)가 아니라 주제. 동사가 '숨겨줘'여도 주제면 context
+P091,돈 문제나 빚 얘기가 나오는 글은 읽지 못하게 해줘,context,,context,동사는 거부 쪽이지만 주제 규칙(계좌번호 아님)
+P092,진료 기록은 보여줘도 괜찮아,unsupported,,unsupported,주제 규칙을 푸는 쪽. '병원 이름은 보여줘도 돼'(org allow)와 경계
+P093,가족 이야기는 그냥 보여줘,unsupported,,unsupported,주제를 푸는 쪽. '가족 이름'(name)이 아님
+P094,회사 업무 얘기는 다 봐도 돼,unsupported,,unsupported,주제를 푸는 쪽. '회사 이름'(org)이 아님
+P095,파일 이름에 '급여'가 들어간 건 보여주지 마,path,,path,경계: '이름'이 있지만 파일 이름 → path
+P096,가계부 폴더는 열지 마,path,,path,폴더 규칙
+P097,확장자가 hwp인 파일은 거부해,path,,path,확장자 규칙
+P098,주소록.xlsx 파일은 열지 마,path,,path,경계: '주소'가 있지만 파일 이름 → path(address 아님)
+P099,이름에 '이력서'가 들어간 파일은 확인받고 열어줘,path,,path,경계: '이름에 ~ 들어간 파일'은 파일 이름. '이름이 적힌 문서'(entity name)와 다름
+P100,이름하고 사는 곳은 숨겨줘,unclear,,unclear,바꿈 둘(name·address)
+P101,연락처는 안 보이게 해 줘,unclear,,unclear,종류 모호(휴대폰·일반 전화·이메일·주소)
+P102,개인정보는 다 가려줘,unclear,,unclear,너무 넓음. 하나로 정할 수 없음
+P103,주민번호는 그대로 보여줘,unclear,,unclear,번호에는 allow가 없음
+P104,카드번호는 가리지 마,unclear,,unclear,번호에는 allow가 없음
+P105,계좌번호는 끝 4자리만 보여줘,unclear,,unclear,account 공개 범위는 none뿐(last4는 card만)
+P106,휴대폰 번호는 뒷자리만 보여줘,unclear,,unclear,mobile 공개 범위는 none·prefix뿐
+P107,이름,unclear,,unclear,동작 없음
+P108,오늘 저녁 메뉴 추천해줘,unclear,,unclear,정책 문장이 아님
+P109,지금 정책 어떻게 돼 있어?,unclear,,unclear,정책을 묻는 질문이지 바꿈이 아님(gate policy show)
+P110,나이는 가리고 연도는 보여줘,unclear,,unclear,plain 묶음 일부만 다르게 → 표현 불가(바꿈 둘)
+P111,직함만 그대로 두고 나이랑 과목은 가려줘,unclear,,unclear,plain 묶음 안에서 갈라짐
+P112,학교 이름은 보여주고 병원 이름만 가려줘,unclear,,unclear,org 묶음 안에서 갈라짐(학교·병원 둘 다 org)
+P113,교수님 이름은 가리고 학생 이름은 그대로 둬,unclear,,unclear,name 묶음 안에서 갈라짐(PROFESSOR·NAME 둘 다 name)
+P114,IP 주소랑 비밀번호는 거부해줘,unclear,,unclear,바꿈 둘(host·secret). 같은 동작이어도 키가 둘
+P115,전화번호가 나오면 물어봐줘,unclear,,unclear,'전화번호'만으로는 휴대폰(mobile)·일반 전화(phone) 모두. 기본과 다른 값이라 하나만 바꾸면 다른 쪽이 남음
+P116,이름은 성만 보이게 가려줘,unclear,,unclear,entities에는 공개 범위가 없음([이름]으로만 가림)
+P117,주소는 시·도까지만 보여줘,unclear,,unclear,entities에는 공개 범위가 없음
+P118,번호는 다 거부해줘,unclear,,unclear,번호 종류 전체(8개) → 바꿈 여럿
+P119,주민번호는 생년월일까지만 보여주고 생년월일은 가려줘,unclear,,unclear,바꿈 둘(numbers.rrn.visible·entities.birth). 경계 짝을 한 문장에
+P120,주소랑 이메일 주소는 지워줘,unclear,,unclear,바꿈 둘(address·numbers.email)
