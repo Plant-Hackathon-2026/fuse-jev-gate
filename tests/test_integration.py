@@ -288,6 +288,14 @@ def test_human_approval_end_to_end(tmp_path, socket_dir):
     raw = audit_path.read_text(encoding="utf-8")
     assert "화요일" not in raw and "요약" not in raw  # 원문과 목적은 남기지 않는다
 
+    # 사용자 터미널의 gate audit: 막힌 요청 중 이 파일과 내용이 같은 것
+    shown = _gate(sock, "audit", "--audit", str(audit_path), "--blocked", "--file", str(source / "진료" / "메모.txt"))
+    lines = shown.stdout.decode().splitlines()
+    assert shown.returncode == 0 and len(lines) == 3
+    assert "승인: 거부(터미널)" in lines[0] and "승인: 무응답(시간 초과)" in lines[1]
+    assert lines[2].endswith("조건에 맞는 2건 · 차단 2")
+    assert audit_path.read_text(encoding="utf-8") == raw  # 보기만 한다
+
 
 def stat_mode(path) -> int:
     return os.stat(path).st_mode & 0o777

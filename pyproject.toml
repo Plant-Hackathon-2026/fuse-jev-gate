@@ -1,6 +1,8 @@
 [project]
 name = "fuse-jev-gate"
 version = "0.1.0"
+description = "AI 에이전트가 원본 파일을 게이트(정규식 + Jev + 정책 + 사람 승인)를 거쳐서만 읽게 하는 도구"
+readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "mfusepy>=3.1.1",
