@@ -530,14 +530,13 @@ class UiApp:
         return payload
 
     def save(self, ticket: object, confirm: object = None) -> dict:
-        entry = self.tickets.get(ticket)
-        if entry is None:
-            raise UiError(410, "ticket-expired", "해석한 지 오래되어 저장하지 않았어요. 문장을 다시 해석해 주세요.")
-        with self._write:
-            entries = self._entries()
-            result = self._commit(plan_add(self.config.policy, entries, stamped(entry)), confirm)
-        if result["status"] == "saved":
-            self.tickets.drop(ticket)
+        with self._write:  # 같은 표로 두 번 저장하지 않게 표 확인부터 잠근다
+            entry = self.tickets.get(ticket)
+            if entry is None:
+                raise UiError(410, "ticket-expired", "해석한 지 오래되어 저장하지 않았어요. 문장을 다시 해석해 주세요.")
+            result = self._commit(plan_add(self.config.policy, self._entries(), stamped(entry)), confirm)
+            if result["status"] == "saved":
+                self.tickets.drop(ticket)
         return result
 
     def set_choice(self, key: object, value: object, confirm: object = None) -> dict:
