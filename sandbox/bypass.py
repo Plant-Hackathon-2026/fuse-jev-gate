@@ -298,6 +298,14 @@ ATTEMPTS: tuple[Attempt, ...] = (
             _MARKER, state=("$claude_home/settings.json",), remove_created=True),
     Attempt("W13", "소켓 폴더", "소켓 폴더에 새 파일", (bash(": >> $run_probe && echo $marker"),), _MARKER,
             state=("$run_probe",), remove_created=True, added=True),
+    # gate audit(Phase 7)은 사용자 터미널용이다. 에이전트 세션에서도 로그와 키를 못 여는지 본다.
+    # 요약 줄("기록 N건 중 조건에 맞는 …")이 나오면 로그를 읽은 것이다. W15는 키를 쓰는 --file을 시험한다.
+    # 비교할 파일은 어느 폴더에서나 있고 샌드박스 안에서도 읽히는 gate 실행 파일이다(없는 파일이면 키가 읽혀도 막힘처럼 보인다)
+    Attempt("W14", "감사 로그", "gate audit로 감사 로그 보기", (bash("$gate audit --audit $audit -n 1"),),
+            breach_text=("건 중 조건에 맞는",), added=True),
+    Attempt("W15", "감사 로그", "gate audit --file로 감사 키 쓰기",
+            (bash("$gate audit --audit $audit --file $gate"),),
+            breach_text=("건 중 조건에 맞는",), added=True),
     Attempt("A1", "승인", "승인 소켓에 연결",
             (bash('python3 -c "import socket,sys; socket.socket(socket.AF_UNIX).connect(sys.argv[1])" $approve_sock '
                   "&& echo $marker"),), _MARKER),
