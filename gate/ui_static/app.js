@@ -1,4 +1,4 @@
-/* 게이트 설정 화면. 빌드 도구·외부 의존 없음. 서버: gate/ui.py, 자료: gate/ui_api.py.
+/* 게이트 설정 화면. 빌드 도구·외부 의존 없음. 서버: gate/ui.py, 자료: gate/ui_api.py, 원본 폴더: gate/mount_change.py.
    - 세션 토큰은 첫 페이지의 meta에서 읽어 이 스크립트의 변수에만 둔다(쿠키·저장소에 두지 않는다). API에는 X-Gate-Token 헤더로 보낸다.
    - 서버가 준 글자는 모두 textContent로 넣는다(innerHTML에는 이 파일에 적은 고정 아이콘만 넣는다). */
 "use strict";
@@ -37,6 +37,8 @@
 
   var state = null;
   var status = null;
+  var mounts = null;       // GET /api/mounts
+  var mountsError = "";    // 목록을 불러오지 못한 이유
   var lost = false;
   var busy = false;
   var auditCategory = "all";
@@ -96,7 +98,12 @@
     return (d.getMonth() + 1) + "월 " + d.getDate() + "일 " + t;
   }
 
-  function ApiError(code, message) { this.code = code; this.message = message; }
+  function ApiError(code, message, data) { this.code = code; this.message = message; this.data = data || null; }
+
+  // 서버 글의 `명령`을 <code>로 보여 준다(글자는 모두 textContent로 넣는다).
+  function rich(text) {
+    return String(text || "").split("`").map(function (part, i) { return i % 2 ? h("code", { text: part }) : part; });
+  }
 
   function api(method, name, body, query) {
     var url = "/api/" + name + (query ? "?" + new URLSearchParams(query).toString() : "");
@@ -112,7 +119,7 @@
       return res.json().catch(function () { return null; }).then(function (data) {
         if (res.status === 403 && data && data.error === "bad-token") connectionLost();
         if (!res.ok || !data || data.ok === false) {
-          throw new ApiError(data && data.error || "http", data && data.message || ("요청이 실패했어요(HTTP " + res.status + ")."));
+          throw new ApiError(data && data.error || "http", data && data.message || ("요청이 실패했어요(HTTP " + res.status + ")."), data);
         }
         return data;
       });
@@ -135,22 +142,30 @@
 
   // ---------- 확인 창 ----------
 
-  function confirmLoosening(result) {
+  // 확인 창 하나를 여러 곳이 같이 쓴다. opts: title, lead, facts([이름, 값, 고정폭]), items, warn, strong, yes, danger
+  function ask(opts) {
     return new Promise(function (resolve) {
       var dialog = $("confirm-dialog");
+      $("confirm-title").textContent = opts.title;
+      $("confirm-lead").textContent = opts.lead;
+      var facts = $("confirm-facts");
+      clear(facts);
+      (opts.facts || []).forEach(function (r) {
+        facts.appendChild(h("dt", { text: r[0] }));
+        facts.appendChild(h("dd", { class: r[2] ? "mono" : null, text: r[1] }));
+      });
+      facts.hidden = !(opts.facts && opts.facts.length);
       var list = $("confirm-list");
       clear(list);
-      if (result.problem) {
-        $("confirm-title").textContent = "되돌릴까요?";
-        $("confirm-lead").textContent = "지금 정책 파일에 문제가 있어요(" + result.problem + "). 되돌리면 잘못된 파일이 직전 기록의 내용으로 바뀌어요.";
-        $("confirm-yes").textContent = "되돌리기";
-      } else {
-        $("confirm-title").textContent = "정말 느슨하게 바꿀까요?";
-        $("confirm-lead").textContent = "이 변경은 정책을 느슨하게 해요(더 많이 보여 주게 돼요).";
-        $("confirm-yes").textContent = "느슨하게 바꾸기";
-      }
-      (result.loosening || []).forEach(function (line) { list.appendChild(h("li", { text: line })); });
-      list.hidden = !(result.loosening && result.loosening.length);
+      (opts.items || []).forEach(function (line) { list.appendChild(h("li", { text: line })); });
+      list.hidden = !(opts.items && opts.items.length);
+      var warn = $("confirm-warn");
+      clear(warn);
+      warn.className = "warn confirm-warn" + (opts.strong ? " strong" : "");
+      if (opts.warn) { warn.appendChild(icon("warn")); warn.appendChild(h("span", null, rich(opts.warn))); }
+      warn.hidden = !opts.warn;
+      $("confirm-yes").textContent = opts.yes;
+      $("confirm-yes").className = "btn " + (opts.danger ? "btn-danger" : "btn-primary");
       function done(answer) {
         $("confirm-yes").removeEventListener("click", yes);
         $("confirm-no").removeEventListener("click", no);
@@ -167,9 +182,18 @@
         dialog.showModal();
         $("confirm-no").focus();
       } else {
-        resolve(window.confirm($("confirm-title").textContent + "\n" + (result.loosening || []).join("\n")));
+        resolve(window.confirm([opts.title, opts.lead].concat(opts.items || [], opts.warn ? [opts.warn] : []).join("\n")));
       }
     });
+  }
+
+  function confirmLoosening(result) {
+    if (result.problem) {
+      return ask({ title: "되돌릴까요?", danger: true, yes: "되돌리기", items: result.loosening,
+        lead: "지금 정책 파일에 문제가 있어요(" + result.problem + "). 되돌리면 잘못된 파일이 직전 기록의 내용으로 바뀌어요." });
+    }
+    return ask({ title: "정말 느슨하게 바꿀까요?", danger: true, yes: "느슨하게 바꾸기", items: result.loosening,
+      lead: "이 변경은 정책을 느슨하게 해요(더 많이 보여 주게 돼요)." });
   }
 
   // 바꾸는 요청: 확인이 필요하면 확인 창을 띄우고, 확인하면 확인 값을 실어 다시 보낸다.
@@ -251,6 +275,10 @@
         "gate ui를 껐거나 다시 실행했을 수 있어요. gate ui를 실행한 터미널에서 Enter를 누르면 새 주소로 다시 열어요."]));
       return;
     }
+    if (mounts && mounts.error) {
+      box.appendChild(banner([h("strong", { text: "원본 폴더 목록 파일에 문제가 있어요. " }),
+        "안전을 위해 게이트는 고칠 때까지 모든 파일 내용 읽기를 막고 있어요. (", rich(mounts.error), ")"]));
+    }
     if (state && state.invalid) {
       box.appendChild(banner([h("strong", { text: "정책 파일에 문제가 있어 읽을 수 없어요. " }),
         "안전을 위해 게이트는 고칠 때까지 모든 파일 읽기를 막고 있어요. (" + state.policy_file.error + ")"],
@@ -311,7 +339,7 @@
     var file = g.policy_changed_at ? when(g.policy_changed_at) + "에 바꿈 · 게이트는 다음 요청부터 따라요" : "아직 없어요(모두 기본값)";
     box.appendChild(scard("gate", "게이트", null,
       stateBadge(g.state === "on" ? "on" : "off", g.state === "on" ? "켜짐" : (g.state === "off" ? "꺼짐" : "확인 못 함")),
-      gateDesc, [["마지막 요청", last, !!g.last_request], ["정책 파일", file]]));
+      gateDesc, [["마지막 요청", last, !!g.last_request], ["정책 파일", file], ["원본 폴더", folderSummary(g.folders)]]));
 
     var l = status.laya;
     var layaRows = l.state === "unused"
@@ -348,6 +376,16 @@
       nerDesc, [["주소", n.address, true], ["서버", server]], actions));
   }
 
+  // 게이트 카드의 "원본 폴더 N개"(연결된 폴더, 기본 포함. 찾을 수 없는 폴더는 따로 적는다)
+  function folderSummary(f) {
+    if (!f) return "확인하지 못했어요";
+    if (f.error) return "목록 파일에 문제가 있어요 · 아래 “원본 폴더”를 보세요";
+    var parts = [f.base ? f.count + "개" : "추가 " + f.mounts + "개 · 기본 폴더는 알 수 없음"];
+    if (f.missing) parts.push("찾을 수 없음 " + f.missing + "개");
+    if (f.protected_only) parts.push("보호만 남음 " + f.protected_only + "개");
+    return parts.join(" · ");
+  }
+
   function howto(address) {
     var port = (address.split(":").pop() || "8001");
     return h("details", { class: "howto" },
@@ -363,6 +401,262 @@
 
   function setNer(enable) {
     change("ner", { enable: enable }, enable ? "NER을 켰어요. 게이트는 다음 요청부터 이름·주소도 가려요." : "NER을 껐어요.");
+  }
+
+  // ---------- 원본 폴더 ----------
+
+  var MOUNT_CANCEL = {
+    add: "취소했어요. 폴더는 연결하지 않았어요.",
+    remove: "취소했어요. 폴더는 그대로 연결되어 있어요.",
+    unprotect: "취소했어요. 직접 열기 막기는 그대로예요."
+  };
+  var MOUNT_DONE = { add: "폴더를 연결했어요", remove: "게이트에서 뺐어요", unprotect: "보호를 풀었어요" };
+
+  function loadMounts() {
+    return api("GET", "mounts").then(function (data) { mounts = data; mountsError = ""; }, function (err) {
+      mounts = null;
+      mountsError = err && err.message ? err.message : "목록을 불러오지 못했어요.";
+    }).then(function () { renderMounts(); renderBanners(); });
+  }
+
+  function fileCountText(count, capped) {
+    if (capped) return "파일 1만 개 넘음";
+    if (count === null || count === undefined) return "파일 수 모름";
+    return "파일 " + count.toLocaleString("ko-KR") + "개";
+  }
+
+  function ftag(kind, text) { return h("span", { class: "ftag ftag-" + kind, text: text }); }
+
+  function setAddButton(why) {
+    var add = $("mount-add");
+    var note = $("mount-add-why");
+    add.disabled = !!why;
+    note.textContent = why || "";
+    note.hidden = !why;
+    if (why) add.setAttribute("aria-describedby", "mount-add-why"); else add.removeAttribute("aria-describedby");
+  }
+
+  function mountBanner(kind, title, parts) {
+    return h("div", { class: "banner banner-" + kind, role: kind === "error" ? "alert" : null },
+      h("span", { class: "banner-text" }, h("strong", { text: title }), parts));
+  }
+
+  function renderMounts() {
+    var list = $("mount-list");
+    var banners = $("mount-banners");
+    clear(list);
+    clear(banners);
+    if (!mounts) {
+      $("mount-count").textContent = "";
+      if (mountsError) {
+        list.appendChild(h("p", { class: "empty" }, "원본 폴더 목록을 불러오지 못했어요. ", rich(mountsError)));
+        list.appendChild(h("div", { class: "empty" },
+          h("button", { type: "button", class: "btn btn-secondary", onclick: loadMounts, text: "다시 불러오기" })));
+        setAddButton("목록을 불러온 뒤 추가할 수 있어요.");
+      } else {
+        list.appendChild(h("p", { class: "empty", text: "불러오는 중이에요…" }));
+        setAddButton("");
+        $("mount-add").disabled = true;
+      }
+      return;
+    }
+    var folders = mounts.folders || [];
+    var workspaces = mounts.workspaces || [];
+    var edited = workspaces.filter(function (w) { return w.state === "edited"; });
+    var missing = workspaces.filter(function (w) { return w.state === "missing"; });
+    var shown = folders.filter(function (f) { return f.connected; }).length;
+    $("mount-count").textContent = "연결된 폴더 " + shown + "개(기본 포함) · 추가한 폴더 " + mounts.mount_count + "/" + mounts.limit;
+
+    if (edited.length) {
+      banners.appendChild(mountBanner("error", "작업 폴더 설정이 손으로 바뀌어 있어요. ", [
+        "자동으로 덮지 않아서 지금은 폴더를 추가하거나 보호를 풀 수 없어요. 터미널에서 ",
+        h("code", { text: "gate workspace init --force" }), "로 다시 만든 뒤 해 주세요. (",
+        edited.map(function (w, i) { return [i ? ", " : "", h("code", { text: w.path })]; }), ")"]));
+    }
+    if (!workspaces.length) {
+      banners.appendChild(mountBanner("warn", "등록된 작업 폴더가 없어요. ", [
+        "폴더를 연결해도 에이전트가 이 폴더를 직접 여는 것은 막지 못해요. 터미널에서 ",
+        h("code", { text: "gate workspace init" }), "으로 작업 폴더를 만들어 주세요."]));
+    }
+    if (missing.length) {
+      banners.appendChild(h("p", { class: "muted small", text: "찾을 수 없는 작업 폴더 " + missing.length +
+        "곳은 설정을 다시 쓸 때 건너뛰어요." }));
+    }
+    if (mounts.global_setup) {
+      banners.appendChild(h("p", { class: "muted small" }, "전역 설정(", h("code", { text: "gate setup" }),
+        ")을 쓰고 있어요. 폴더를 바꾼 뒤에는 터미널에서 ", h("code", { text: "gate setup" }), "을 다시 실행해야 전역 설정에도 반영돼요."));
+    }
+
+    if (!folders.some(function (f) { return f.kind === "base"; })) list.appendChild(unknownBaseRow());
+    folders.forEach(function (f) { list.appendChild(folderRow(f, edited.length > 0)); });
+    if (!mounts.mount_count) {
+      list.appendChild(h("p", { class: "empty", text: "아직 추가한 폴더가 없어요. [폴더 추가]로 이 컴퓨터의 폴더를 더 연결할 수 있어요." }));
+    }
+
+    var why = "";
+    if (mounts.error) why = "목록 파일에 문제가 있어 지금은 폴더를 추가할 수 없어요.";
+    else if (edited.length) why = "손으로 바뀐 작업 폴더 설정을 먼저 다시 만들어야 추가할 수 있어요.";
+    else if (mounts.mount_count >= mounts.limit) {
+      why = "폴더는 " + mounts.limit + "개까지 추가할 수 있어요(보호만 남은 폴더 포함). 쓰지 않는 폴더의 보호를 풀면 자리가 생겨요.";
+    }
+    setAddButton(why);
+  }
+
+  function unknownBaseRow() {
+    return h("div", { class: "mrow" }, h("div", { class: "mmain" },
+      h("div", { class: "mtitle" }, h("span", { class: "name", text: "기본 폴더" }), h("code", { class: "vpath", text: "/" }), ftag("base", "기본")),
+      h("span", { class: "mpath", text: "알 수 없음" }),
+      h("p", { class: "mdesc", text: "게이트를 띄울 때 정한 폴더예요. 등록된 작업 폴더가 없어 어느 폴더인지 알 수 없어요." })));
+  }
+
+  function folderRow(f, editedWorkspace) {
+    var base = f.kind === "base";
+    var kept = !base && !f.connected;
+    var stale = f.unprotected_workspaces || [];
+    var tags = [base ? ftag("base", "기본") : (f.connected ? ftag("on", "연결됨") : ftag("kept", "보호만 남음"))];
+    if (!f.exists) tags.push(ftag("missing", "찾을 수 없음"));
+    if (stale.length) tags.push(ftag("stale", "작업 폴더 설정에 반영 안 됨"));
+    var meta = [];
+    if (f.exists) meta.push(fileCountText(f.file_count, f.file_count_capped));
+    if (base) meta.push("게이트를 띄울 때 정함 · 화면에서 뺄 수 없어요");
+    else if (f.added_at) {
+      meta.push("추가 " + when(f.added_at, true) + (f.added_by === "ui" ? " · 화면에서" : (f.added_by === "terminal" ? " · 터미널에서" : "")));
+    }
+    var desc = kept ? "게이트에서는 뺐고, 에이전트가 이 폴더를 직접 여는 것만 막고 있어요. 다시 연결하려면 [폴더 추가]에서 같은 폴더를 고르세요."
+      : (!f.exists ? "폴더를 찾을 수 없어요. 외장 디스크를 뺐거나 폴더를 옮기거나 지웠을 수 있어요. 그동안 게이트 목록에는 보이지 않아요." : null);
+    var button = null;
+    if (!base && f.connected) {
+      button = h("button", { type: "button", class: "btn-quiet", "aria-label": "“" + f.name + "” 폴더를 게이트에서 빼기", text: "빼기",
+        onclick: function () { changeMount("remove", f); } });
+    } else if (kept) {
+      button = h("button", { type: "button", class: "btn-quiet", "aria-label": "“" + f.name + "” 폴더의 보호도 풀기", text: "보호도 풀기",
+        disabled: editedWorkspace, title: editedWorkspace ? "손으로 바뀐 작업 폴더 설정을 먼저 다시 만들어야 해요" : null,
+        onclick: function () { changeMount("unprotect", f); } });
+    }
+    var warn = stale.length ? h("div", { class: "warn" }, icon("warn"), h("span", null,
+      "이 폴더를 직접 여는 것이 아직 막히지 않은 작업 폴더가 있어요: ",
+      stale.map(function (path, i) { return [i ? ", " : "", h("code", { text: path })]; }),
+      ". 다음에 폴더를 추가하거나 보호를 풀 때 다시 써요. 손으로 바꾼 설정이면 터미널에서 ",
+      h("code", { text: "gate workspace init --force" }), "로 다시 만들어 주세요.")) : null;
+    return h("div", { class: "mrow" + (kept ? " kept" : "") },
+      h("div", { class: "mmain" },
+        h("div", { class: "mtitle" }, h("span", { class: "name", text: base ? "기본 폴더" : f.name }),
+          h("code", { class: "vpath", title: "게이트 안 경로", text: f.vpath }), tags),
+        h("span", { class: "mpath" }, h("span", { class: "sr-only", text: "실제 경로 " }), f.path),
+        meta.length ? h("div", { class: "mmeta" }, meta.map(function (m) { return h("span", { text: m }); })) : null,
+        desc ? h("p", { class: "mdesc", text: desc }) : null),
+      button ? h("div", { class: "mside" }, button) : null,
+      warn);
+  }
+
+  function showMountResult(kind, payload, path) {
+    var box = $("mount-result");
+    clear(box);
+    if (!kind) { box.hidden = true; return; }
+    box.hidden = false;
+    box.className = "mresult" + (kind === "error" ? " is-error" : (kind === "cancel" ? " is-cancel" : ""));
+    if (kind === "saved") {
+      box.appendChild(h("div", { class: "u-title" }, icon("check"), h("span", { text: MOUNT_DONE[payload.op] || "바꿨어요" })));
+      box.appendChild(h("p", null, rich(payload.message)));
+      (payload.notes || []).forEach(function (n) { box.appendChild(h("div", { class: "warn" }, icon("warn"), h("span", null, rich(n.text)))); });
+    } else {
+      box.appendChild(h("div", { class: "u-title" }, icon(kind === "error" ? "warn" : "info"),
+        h("span", { text: kind === "error" ? "하지 못했어요" : "취소했어요" })));
+      box.appendChild(h("p", null, rich(payload)));
+      if (path) box.appendChild(h("p", { class: "mono" }, h("span", { class: "sr-only", text: "고른 폴더 " }), path));
+    }
+    box.appendChild(h("div", { class: "row-wrap" },
+      h("button", { type: "button", class: "btn btn-secondary", text: "닫기", onclick: function () { showMountResult(null); } })));
+    box.focus();
+  }
+
+  function mountDialog(p, again) {
+    var facts = [["게이트 안 이름", p.name + "  (" + p.vpath + ")"], ["실제 경로", p.path, true]];
+    var lead = again ? "그사이 상태가 바뀌어 다시 계산했어요. 바뀐 내용을 보고 다시 확인해 주세요. " : "";
+    var places = p.workspaces && p.workspaces.length ? p.workspaces.length + "곳" : "없음";
+    if (p.op === "add") {
+      facts.push(["파일 수", fileCountText(p.file_count, p.file_count_capped)]);
+      facts.push(["직접 열기를 막을 작업 폴더", places]);
+      var folderName = (p.path.split("/").pop() || "").normalize("NFC");
+      return {
+        title: p.reconnect ? "이 폴더를 다시 연결할까요?" : "이 폴더를 게이트에 연결할까요?",
+        lead: lead + "연결하면 에이전트가 게이트를 거쳐 이 폴더 문서를 읽을 수 있어요. 정책대로 가리거나 물어봐요. " +
+          "동시에 작업 폴더 설정에서 이 폴더를 직접 열지 못하게 막아요.",
+        facts: facts,
+        items: folderName && folderName !== p.name.normalize("NFC") ? ["같은 이름이 이미 있어 게이트 안 이름 뒤에 숫자를 붙였어요."] : [],
+        warn: p.workspaces && p.workspaces.length ? null
+          : "등록된 작업 폴더가 없어 직접 열기는 막지 못해요. 터미널에서 `gate workspace init`으로 작업 폴더를 먼저 만들면 함께 막아요.",
+        yes: p.reconnect ? "다시 연결" : "연결"
+      };
+    }
+    if (p.op === "remove") {
+      return {
+        title: "이 폴더를 게이트에서 뺄까요?",
+        lead: lead + "게이트에서 이 폴더를 빼요. 에이전트는 이 폴더 문서를 더는 게이트로 읽지 못해요. 직접 열기 막기는 남겨 둬요.",
+        facts: facts,
+        items: ["뺀 폴더는 “보호만 남음”으로 남아요. 다시 연결하려면 [폴더 추가]에서 같은 폴더를 고르세요."],
+        yes: "빼기"
+      };
+    }
+    facts.push(["다시 쓸 작업 폴더", places]);
+    return {
+      title: "이 폴더의 보호도 풀까요?",
+      lead: lead + "목록에서 이 폴더를 지우고, 작업 폴더 설정의 직접 열기 막기도 풀어요.",
+      facts: facts, strong: true, danger: true, yes: "보호 풀기",
+      warn: "풀면 에이전트가 게이트를 거치지 않고 이 폴더를 다시 직접 읽을 수 있어요. 이 폴더에는 가리기·묻기·감사 기록이 모두 적용되지 않아요."
+    };
+  }
+
+  // 확인 창을 보여 주고, 누르면 확인 값을 실어 다시 보낸다. 그사이 바뀌어 다시 확인을 받으면 한 번 더 보여 준다.
+  function confirmMount(name, body, result, again) {
+    var p = result.preview;
+    return ask(mountDialog(p, again)).then(function (ok) {
+      if (!ok) { showMountResult("cancel", MOUNT_CANCEL[p.op]); return; }
+      return api("POST", name, Object.assign({}, body, { confirm: result.confirm })).then(function (second) {
+        if (second.status === "saved") { showMountResult("saved", second); return; }
+        if (second.status === "confirm" && !again) return confirmMount(name, body, second, true);
+        showMountResult("error", "그사이 폴더 상태가 바뀌어 쓰지 않았어요. 목록을 다시 보고 해 주세요.");
+      });
+    });
+  }
+
+  function mountFail(err) {
+    if (lost) return;
+    showMountResult("error", err && err.message ? err.message : "요청이 실패했어요.", err && err.data && err.data.path);
+  }
+
+  function afterMountChange() {
+    busy = false;
+    $("mount-wait").hidden = true;
+    // 목록과 함께 연결 상태(게이트 카드의 원본 폴더 수)도 다시 불러온다.
+    return Promise.all([loadMounts(), loadStatus()]);
+  }
+
+  function addFolder() {
+    if (busy) return;
+    busy = true;
+    say("");
+    showMountResult(null);
+    $("mount-add").disabled = true;
+    $("mount-wait").hidden = false;
+    api("POST", "mounts/pick", {}).then(function (result) {
+      $("mount-wait").hidden = true;
+      if (result.status === "cancelled") { showMountResult("cancel", MOUNT_CANCEL.add); return; }
+      return confirmMount("mounts/add", { pick: result.pick }, result, false);
+    }).catch(mountFail).then(afterMountChange);
+  }
+
+  function changeMount(op, f) {
+    if (busy) return;
+    busy = true;
+    say("");
+    showMountResult(null);
+    var name = "mounts/" + op;
+    var body = { name: f.name };
+    api("POST", name, body).then(function (result) {
+      if (result.status === "saved") { showMountResult("saved", result); return; }
+      return confirmMount(name, body, result, false);
+    }).catch(mountFail).then(afterMountChange);
   }
 
   // ---------- 문장 ----------
@@ -665,6 +959,7 @@
   document.addEventListener("DOMContentLoaded", function () {
     $("sentence-form").addEventListener("submit", interpretSentence);
     $("recheck").addEventListener("click", loadStatus);
+    $("mount-add").addEventListener("click", addFolder);
     $("undo").addEventListener("click", undo);
     $("audit-period").addEventListener("change", loadAudit);
     $("audit-search").addEventListener("input", function () {
@@ -674,11 +969,12 @@
     window.addEventListener("hashchange", showView);
     // 다른 창에 있다 돌아오면 연결 상태를 다시 확인한다(그사이 게이트·서버가 켜지거나 꺼졌을 수 있다).
     document.addEventListener("visibilitychange", function () {
-      if (document.visibilityState === "visible" && SESSION && !busy) loadStatus();
+      if (document.visibilityState === "visible" && SESSION && !busy) { loadStatus(); loadMounts(); }
     });
     renderAuditCategory();
     if (!SESSION) { connectionLost(); return; }
     showView();
     loadState().then(loadStatus);
+    loadMounts();
   });
 })();
