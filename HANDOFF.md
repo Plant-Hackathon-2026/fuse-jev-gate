@@ -9,6 +9,7 @@ _업데이트: 2026-10-31 · 작성 세션: 3d 완료(PR #5 머지) + 점검 페
   - 점검 페이지를 갱신했다.
   - **설정 화면 UI 디자인을 확정했다.** 계획은 `plans/ui-plan.md`에 있다.
 - **사용자 결정:** 모델 관련 작업은 제외한다. "전화번호" 해석과 승인 창 줄이기도 모델 재학습으로 넘긴다(하지 않음).
+- **이 문서는 브랜치 `docs/ui-plan`, PR #6**(https://github.com/Plant-Hackathon-2026/fuse-jev-gate/pull/6)에 있다. 다음 세션은 PR #6 머지 여부부터 확인하고, 머지됐으면 `git checkout main && git pull`로 시작한다.
 - **다음 첫 행동:** 팀원용 평가 보고서(4WaSWgekRir4frkRCq1a2L)를 갱신한다(사용자 결정, 다음 세션 첫 작업). 그다음 Phase 8 UI 구현에 들어간다. 구현 전에 `plans/ui-plan.md` 7절의 미결 5개를 묻는다.
 
 ## 목표
