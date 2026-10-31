@@ -354,10 +354,28 @@ def _loopback_url(raw: str) -> str:
     return urllib.parse.urlunsplit((parts.scheme, parts.netloc, parts.path.rstrip("/"), "", ""))
 
 
-def _check_questions(data: object) -> dict[str, dict[str, str]]:
-    if not (isinstance(data, dict) and len(data) == 1):
-        raise JevError("Laya 질문은 하나여야 합니다")
-    (qid, question), = data.items()
+LAYA_PREFERRED_QUESTION = "has_pii"  # 질문이 여러 개인 체크포인트(팀원 v3)에서 문서 판단에 쓰는 질문
+
+
+def _check_questions(data: object, question_id: str | None = None) -> dict[str, dict[str, str]]:
+    """체크포인트 질문 중 문서 판단에 쓸 예/아니오 질문 하나를 고른다.
+
+    question_id(JEV_QUESTION)를 주면 그 질문, 질문이 하나면 그것, 여럿이면 LAYA_PREFERRED_QUESTION(has_pii)이다.
+    v3처럼 종류별 질문(has_name 등)과 값 하나를 판단하는 질문(is_pii, category)이 함께 있어도 하나만 보낸다.
+    """
+    if not (isinstance(data, dict) and data):
+        raise JevError("Laya 질문이 없습니다")
+    if question_id:
+        qid = question_id
+    elif len(data) == 1:
+        qid = next(iter(data))
+    elif LAYA_PREFERRED_QUESTION in data:
+        qid = LAYA_PREFERRED_QUESTION
+    else:
+        raise JevError(f"질문이 여러 개인 체크포인트입니다. 쓸 질문을 JEV_QUESTION으로 정하세요 (기본 {LAYA_PREFERRED_QUESTION} 없음)")
+    if qid not in data:
+        raise JevError("JEV_QUESTION으로 정한 질문이 체크포인트에 없습니다")
+    question = data[qid]
     if not (isinstance(qid, str) and qid and isinstance(question, dict) and question.get("type") == "noul"
             and isinstance(question.get("instructions"), str) and question["instructions"].strip()):
         raise JevError("Laya 질문은 instructions가 있는 예/아니오(noul) 질문이어야 합니다")
@@ -373,9 +391,10 @@ class LayaJevClient:
     """로컬 laya-serve(TypeSafe Jev와 같은 /v1/systemone API)에 묻는 백엔드.
 
     - 설정은 인자 또는 환경변수: JEV_BASE_URL(필수, 이 컴퓨터 주소만), JEV_MODEL(기본 gate-laya, laya-serve에 등록한 이름),
-      JEV_MODEL_DIR(선택, 체크포인트 폴더. questions.json을 읽고 모델 식별값을 만든다), JEV_API_KEY(선택, LAYA_API_KEY와 같은 값).
+      JEV_MODEL_DIR(선택, 체크포인트 폴더. questions.json을 읽고 모델 식별값을 만든다), JEV_API_KEY(선택, LAYA_API_KEY와 같은 값),
+      JEV_QUESTION(선택, 질문이 여러 개인 체크포인트에서 쓸 질문 ID. 기본은 질문이 하나면 그것, 여럿이면 has_pii).
       키와 주소는 예외 메시지·repr에 넣지 않는다. 프록시와 리디렉트는 쓰지 않는다.
-    - 예/아니오(noul) 질문 하나로 '민감할 확률' p를 받는다. 문서는 LAYA_WINDOW_CHARS 안팎 조각으로 고르게 나눠 batch로 묻고
+    - 예/아니오(noul) 질문 하나로 '민감할 확률' p를 받는다(체크포인트에 질문이 여럿이면 고른 하나만 보낸다). 문서는 LAYA_WINDOW_CHARS 안팎 조각으로 고르게 나눠 batch로 묻고
       가장 큰 p를 쓴다. 서버가 조각을 잘랐다고 하면 문서 일부만 본 것이므로 JevError다.
     - 답 옮기기: p < 0.5면 safe, 아니면 sensitive(예/아니오라 highly_sensitive는 내지 않는다. 정책은 둘을 같게 다룬다).
       확신도는 max(p, 1 - p).
@@ -390,6 +409,7 @@ class LayaJevClient:
         model: str | None = None,
         model_dir: str | os.PathLike | None = None,
         api_key: str | None = None,
+        question: str | None = None,
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
         window_chars: int = LAYA_WINDOW_CHARS,
         env: Mapping[str, str] | None = None,
@@ -408,11 +428,13 @@ class LayaJevClient:
         raw_dir = model_dir if model_dir is not None else env.get("JEV_MODEL_DIR", "")
         self.model_dir = Path(raw_dir).expanduser() if str(raw_dir).strip() else None
         self._api_key = api_key if api_key is not None else (env.get("JEV_API_KEY") or None)
+        self.question = ((question if question is not None else env.get("JEV_QUESTION", "")) or "").strip() or None
         self.timeout = float(timeout)
         self.window_chars = window_chars
         self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
         self._lock = threading.Lock()
-        self._questions = LAYA_DEFAULT_QUESTIONS
+        self._questions = _check_questions(LAYA_DEFAULT_QUESTIONS, self.question) if self.model_dir is None \
+            else LAYA_DEFAULT_QUESTIONS
         self._stamp: tuple[int, ...] | None = None
         self._snapshot()  # 모델 폴더가 잘못됐으면 만들 때 알린다
 
@@ -436,7 +458,7 @@ class LayaJevClient:
                     data = json.loads(qpath.read_text(encoding="utf-8"))
                 except (OSError, ValueError) as exc:
                     raise JevError(f"Laya 질문 파일을 읽을 수 없습니다: {type(exc).__name__}") from None
-                self._questions, self._stamp = _check_questions(data), stamp
+                self._questions, self._stamp = _check_questions(data, self.question), stamp
             return self._questions, self._stamp
 
     def cache_tag(self) -> str:
