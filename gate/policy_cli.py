@@ -355,7 +355,7 @@ def _show(path: Path, entries: tuple[Entry, ...], out: TextIO) -> None:
         f"    Jev가 '안전'이라고 확신도 {policy.allow_threshold:g} 이상으로 답하면 보여줌 {mark(allow_key)}",
         f"    Jev가 '민감'이라고 확신도 {policy.deny_threshold:g} 이상으로 답하면 거부 {mark(deny_key)}",
         "    그 사이는 사람에게 물어봄",
-        "  사람 승인 (맥 대화상자 또는 내 터미널의 gate approve / gate deny. 허용해도 번호는 가린 채로 보여줌)",
+        "  사람 승인 (맥 대화상자 또는 내 터미널의 gate approve / gate deny. 허용해도 가린 정보는 가린 채로 보여줌)",
         f"    답을 기다리는 시간: {policy.approval_timeout_seconds:g}초, 넘으면 거부 {mark(timeout_key)}",
         f"    '이 폴더 허용'을 기억하는 시간: {policy.approval_session_minutes}분 {mark(session_key)}"
         if policy.approval_session_minutes > 0 else

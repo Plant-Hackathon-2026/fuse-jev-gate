@@ -280,7 +280,7 @@ def dialog_message(request: ApprovalRequest, seconds: int) -> str:
     ]
     if request.findings:
         lines.append(f"가린 것: {kinds_text(request.findings)}")
-    lines += ["", "허용해도 번호·비밀값은 가린 채로 보여 줍니다."]
+    lines += ["", "허용해도 가린 정보(번호·비밀값·이름 등)는 가린 채로 보여 줍니다."]
     if request.session_minutes > 0:
         lines.append(f"'이 폴더 허용'은 {clean_text(request.folder)} 바로 안의 파일을 "
                      f"{request.session_minutes}분 동안 다시 묻지 않습니다.")
