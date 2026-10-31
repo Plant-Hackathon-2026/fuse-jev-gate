@@ -67,12 +67,12 @@ from gate.policy_change import (  # noqa: F401  (MAX_HISTORY·history_dir는 이
     apply,
     history,
     history_dir,
-    now,
     plan_add,
     plan_remove,
     plan_undo,
     read_current,
     setting_entry,
+    stamped,
 )
 from gate.policy_text import InterpretError, PolicyInterpreter, interpret, make_interpreter
 
@@ -243,8 +243,7 @@ def _add(path: Path, entries: tuple[Entry, ...], sentence: str, io: _Prompt,
     io.say(result.message)
     if result.entry is None:
         return 1
-    entry = Entry(result.entry.settings, result.entry.context, result.entry.path_rule, result.entry.said, now())
-    change = _plan(plan_add, path, entries, entry)
+    change = _plan(plan_add, path, entries, stamped(result.entry))
     for note in change.notes():
         io.say(_NOTE_TEXT[note])
     if not io.confirm("이대로 저장할까요?"):

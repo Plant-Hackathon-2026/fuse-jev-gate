@@ -67,6 +67,11 @@ def now() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
+def stamped(entry: Entry) -> Entry:
+    """같은 항목에 지금 시각(at)을 붙인다. 문장 해석 결과를 저장하기 직전에 쓴다(gate policy add와 화면이 같다)."""
+    return Entry(entry.settings, entry.context, entry.path_rule, entry.said, now())
+
+
 def read_current(path: Path) -> tuple[Entry, ...]:
     """지금 정책 파일의 항목. 파일이 없으면 빈 묶음(기본값), 잘못되었으면 ChangeError."""
     try:
