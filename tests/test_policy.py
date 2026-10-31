@@ -521,6 +521,7 @@ def test_describe_retired_setting_says_not_found_now():
     assert describe_setting("entities.event.action", "allow") == "사건(NER): 그대로 보여줌 (지금은 찾지 않음)"
     assert describe_setting("entities.plain.action", "allow") == "나이(NER): 그대로 보여줌"
     assert describe_setting("entities.student_id.action", "mask") == "식별번호(학번·사번·여권번호 등)(NER): 가려서 보여줌"
+    assert describe_setting("entities.host.action", "deny") == "IP·내부 주소(규칙): 거부"   # 규칙이 찾는 묶음
 
 
 # --- Phase 4 보완: 비밀값과 자격 증명 파일 ---

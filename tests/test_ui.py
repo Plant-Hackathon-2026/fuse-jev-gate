@@ -886,6 +886,8 @@ def test_effect_text_uses_right_particles():
     assert effect_text("numbers.rrn.visible", "birth") == "주민등록번호를 가릴 때 생년월일(앞 6자리)까지 공개해요."
     assert effect_text("entities.org.action", "deny").startswith("NER이 소속(학교·회사·병원 등)을")
     assert effect_text("entities.plain.action", "mask") == "나이를 [이름]처럼 종류 이름으로 바꿔 보여줘요."  # 다섯 가지 안내 없음
+    assert effect_text("entities.host.action", "mask") == "IP·내부 주소를 [IP]처럼 종류 이름으로 바꿔 보여줘요."
+    assert effect_text("entities.host.action", "deny").startswith("규칙이 IP·내부 주소를 찾은 파일은")
 
 
 def test_state_marks_my_values_and_overridden_entries(make_ui):

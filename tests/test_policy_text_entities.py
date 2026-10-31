@@ -215,8 +215,10 @@ def test_fixed_unsupported_answer_stops_without_saving():
 @pytest.mark.parametrize("sentence, words", [
     ("이름 있는 파일은 거부", "읽기를 거부"),
     ("이름 있는 파일은 물어보고 보여줘", "사람에게 물어본 뒤"),
-    ("이름은 가려줘", "[이름]처럼"),
+    ("이름은 가려줘", "NER이 찾은 부분을 [이름]처럼"),
     ("이름은 그대로 보여줘", "가리지 않습니다"),
+    ("IP 주소는 가려줘", "규칙이 찾은 부분을 [IP]처럼"),        # IP·내부 주소는 규칙이 찾는다
+    ("IP 주소는 가려줘", "IP·내부 주소(규칙): 가려서 보여줌"),
 ])
 def test_entity_action_message_explains_effect(sentence, words):
     assert words in interpret(sentence, keyword()).message

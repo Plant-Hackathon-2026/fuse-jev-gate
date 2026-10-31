@@ -82,6 +82,7 @@ from gate.ner_client import (
     NER_BACKENDS,
     RETIRED_ENTITY_GROUPS,
     RETIRED_ENTITY_NAMES,
+    RULE_GROUPS,
 )
 
 Action = Literal["allow", "mask", "ask_human", "deny"]  # 느슨한 것 → 엄격한 것
@@ -590,7 +591,8 @@ def _describe(key: str, value: object) -> str:
         return f"{RETIRED_ENTITY_NAMES[group]}(NER): {ACTION_NAMES.get(value, value)} (지금은 찾지 않음)"
     if key.startswith("entities."):
         _, group, _ = key.split(".")
-        return f"{ENTITY_NAMES[group]}(NER): {ACTION_NAMES.get(value, value)}"
+        how = "규칙" if group in RULE_GROUPS else "NER"  # IP·내부 주소는 규칙이 찾는다(3e)
+        return f"{ENTITY_NAMES[group]}({how}): {ACTION_NAMES.get(value, value)}"
     shown = f"{value:g}" if isinstance(value, float) else value
     return f"{SETTING_NAMES.get(key, key)}: {shown}"
 

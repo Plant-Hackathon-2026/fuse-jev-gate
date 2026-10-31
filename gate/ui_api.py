@@ -220,15 +220,16 @@ def effect_text(key: str, value: object) -> str:
             "mask": f"{_josa(name, '을', '를')} 가린 뒤 보여줘요.",
         }[value]
     if key.startswith("entities."):
-        text = {
-            "deny": f"NER이 {_josa(name, '을', '를')} 찾은 파일은 읽지 못하게 해요.",
+        rule = key.split(".")[1] in RULE_GROUPS  # IP·내부 주소는 규칙이 찾는다
+        finder, sample = ("규칙이", "[IP]") if rule else ("NER이", "[이름]")
+        return {
+            "deny": f"{finder} {_josa(name, '을', '를')} 찾은 파일은 읽지 못하게 해요.",
             "ask_human": f"{_josa(name, '이', '가')} 있는 파일은 사람에게 물어본 뒤 보여줘요. "
                          f"허용해도 {_josa(name, '은', '는')} 가린 채로 보여줘요.",
-            "mask": f"{_josa(name, '을', '를')} [이름]처럼 종류 이름으로 바꿔 보여줘요.",
+            "mask": f"{_josa(name, '을', '를')} {sample}처럼 종류 이름으로 바꿔 보여줘요.",
             "allow": f"{_josa(name, '을', '를')} 가리지 않고 그대로 보여줘요. "
                      "판단 모델이 문서를 민감하다고 보면 묻거나 막을 수 있어요.",
         }[value]
-        return text
     if key == "ner_backend":
         return "이름·주소·소속도 NER로 찾아서 가려요." if value == "server" else "NER을 쓰지 않아요. 번호·비밀값은 그대로 가려요."
     return describe_setting(key, value)

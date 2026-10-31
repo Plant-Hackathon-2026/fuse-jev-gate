@@ -46,7 +46,7 @@ from typing import Literal, Protocol
 
 from gate.detectors import KINDS
 from gate.jev_client import LAYA_DEFAULT_MODEL, JevError, laya_endpoint, laya_opener, laya_post
-from gate.ner_client import ENTITY_GROUPS
+from gate.ner_client import ENTITY_GROUPS, RULE_GROUPS
 from gate.policy import ACTION_NAMES, KIND_NAMES, VISIBLE_NAMES, Entry, PolicyError, describe_setting, setting_choices
 
 CONFIDENCE_THRESHOLD = 0.7
@@ -132,13 +132,12 @@ _ACTION_NOTES = {
     "ask_human": "이 번호가 있는 파일은 사람에게 물어본 뒤 보여줍니다(허용해도 번호는 가린 채로 보여줍니다).",
     "mask": "번호를 가린 뒤 보여줍니다.",
 }
+# {finder}·{sample}은 묶음에 따라 바뀐다: NER·[이름], IP·내부 주소(host)는 규칙·[IP] (_entity_action_note)
 _ENTITY_ACTION_NOTES = {
-    "deny": "NER(IP·내부 주소는 규칙)이 이 정보를 찾은 파일은 읽기를 거부합니다.",
-    "ask_human": "NER(IP·내부 주소는 규칙)이 이 정보를 찾은 파일은 사람에게 물어본 뒤 보여줍니다"
-                 "(허용해도 이 정보는 가린 채로 보여줍니다).",
-    "mask": "NER(IP·내부 주소는 규칙)이 찾은 부분을 [이름]처럼 종류 이름으로 바꿔 보여줍니다.",
-    "allow": "NER(IP·내부 주소는 규칙)이 찾아도 가리지 않습니다. 다만 판단 모델(Jev)이 문서를 민감하다고 보면 "
-             "사람에게 묻거나 막을 수 있습니다.",
+    "deny": "{finder}이 이 정보를 찾은 파일은 읽기를 거부합니다.",
+    "ask_human": "{finder}이 이 정보를 찾은 파일은 사람에게 물어본 뒤 보여줍니다(허용해도 이 정보는 가린 채로 보여줍니다).",
+    "mask": "{finder}이 찾은 부분을 {sample}처럼 종류 이름으로 바꿔 보여줍니다.",
+    "allow": "{finder}이 찾아도 가리지 않습니다. 다만 판단 모델(Jev)이 문서를 민감하다고 보면 사람에게 묻거나 막을 수 있습니다.",
 }
 UNSUPPORTED_ENTITY_MESSAGE = (
     "지금은 날짜·사건·시간·연도·직함·과목을 따로 찾지 않아요. 저장하지 않았습니다.\n"
@@ -289,7 +288,7 @@ def interpret(
             key = f"entities.{group}.action"
             value = ask("entity_action", setting_choices(key), f"정보 종류: {group} ({_OPTION_GUIDES['entity'][group]})")
             entry = Entry(settings={key: value}, said=text)
-            lines = ["이렇게 이해했어요:", f"  {describe_setting(key, value)}", f"  {_ENTITY_ACTION_NOTES[value]}",
+            lines = ["이렇게 이해했어요:", f"  {describe_setting(key, value)}", f"  {_entity_action_note(group, value)}",
                      f"  (설정 {key} = {value})"]
             return Interpretation("setting", text, "\n".join(lines), entry, tuple(steps))
 
@@ -311,6 +310,11 @@ def interpret(
         return _error(text, str(exc), steps)
     except Exception as exc:  # 해석기 구현이 어떤 예외를 던지든 저장하지 않는다
         return _error(text, f"해석기 오류: {type(exc).__name__}", steps)
+
+
+def _entity_action_note(group: str, value: str) -> str:
+    finder, sample = ("규칙", "[IP]") if group in RULE_GROUPS else ("NER", "[이름]")
+    return _ENTITY_ACTION_NOTES[value].format(finder=finder, sample=sample)
 
 
 def _error(text: str, reason: str, steps: Sequence[Step]) -> Interpretation:
