@@ -352,13 +352,14 @@ uv run python -m sandbox.bypass --settings 시험.json --workspace $DATA/plain-p
 ## 테스트
 
 ```bash
-uv run pytest                     # 맥: 975 통과, 1 skip(FUSE), 약 20초 (사람 승인 시간 초과를 실제로 기다림)
+uv run pytest                     # 맥: 1172 통과, 1 skip(FUSE), 약 30초 (사람 승인 시간 초과를 실제로 기다림)
 
 docker build -f sandbox/gate.Dockerfile -t fuse-jev-gate .
-docker run --rm --device /dev/fuse --cap-add SYS_ADMIN fuse-jev-gate pytest -q    # Linux (FUSE 포함)
+docker run --rm --device /dev/fuse --cap-add SYS_ADMIN fuse-jev-gate pytest -q    # Linux (FUSE 포함): 1173 통과
 
 uv run python -m eval.run_eval --client mock [--policy 정책파일] [--details]        # 샘플 36개 평가
 uv run python -m eval.run_eval --client laya [--details]   # 실제 Laya (laya-serve와 JEV_* 환경변수 필요)
+uv run python -m eval.run_eval --client laya --ner server --details   # 게이트 흐름(NER 포함)과 누출 (NER_BASE_URL도 필요)
 ```
 
 평가 방법과 지표는 [`eval/README.md`](eval/README.md)에 있습니다. Mock 점수는 실제 성능이 아닙니다.
