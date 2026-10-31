@@ -683,6 +683,13 @@ def test_status_of_gate_daemon_socket(make_ui, short_dir, tmp_path):
     assert accepted == [b""]  # 연결만 하고 요청은 보내지 않는다(감사 로그에 남지 않는다)
 
 
+def test_status_with_unusable_socket_path_is_unknown_with_reason(make_ui, tmp_path):
+    long_path = tmp_path / ("x" * 120) / "gate.sock"  # AF_UNIX 경로 길이 제한(맥 104, Linux 108바이트)을 넘는다
+    u = make_ui(socket_path=long_path)
+    _, st = u.get("status", u.launch())
+    assert st["gate"]["state"] == "unknown" and st["gate"]["reason"] and st["gate"]["socket"] == str(long_path)
+
+
 def test_status_without_socket_is_unknown(make_ui):
     u = make_ui()
     _, st = u.get("status", u.launch())

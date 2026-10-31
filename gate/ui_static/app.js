@@ -303,6 +303,7 @@
     var g = status.gate;
     var gateDesc = g.state === "on" ? "에이전트의 파일 요청을 받고 있어요."
       : g.state === "off" ? "꺼져 있어요. 지금은 에이전트가 게이트로 파일을 읽을 수 없어요. 터미널에서 gate serve로 켜요."
+      : g.socket ? "게이트 소켓에 연결해 보지 못해 켜져 있는지 몰라요(" + (g.reason || "알 수 없는 오류") + ")."
       : "게이트 소켓 위치를 몰라 확인하지 못했어요. gate ui를 --socket(또는 GATE_SOCKET)과 함께 실행하면 보여요.";
     var last = g.last_request ? when(g.last_request) : "감사 기록에서 찾지 못했어요";
     var file = g.policy_changed_at ? when(g.policy_changed_at) + "에 바꿈 · 게이트는 다음 요청부터 따라요" : "아직 없어요(모두 기본값)";

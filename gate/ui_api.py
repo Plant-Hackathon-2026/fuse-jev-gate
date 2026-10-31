@@ -289,17 +289,17 @@ def _address(raw_url: str) -> str:
         return raw_url
 
 
-def probe_socket(path: Path, timeout: float = 1.0) -> str:
-    """게이트 소켓에 연결만 해 본다. on | off | unknown. 요청을 보내지 않아 감사 로그에 남지 않는다."""
+def probe_socket(path: Path, timeout: float = 1.0) -> tuple[str, str]:
+    """게이트 소켓에 연결만 해 본다. (on | off | unknown, 이유). 요청을 보내지 않아 감사 로그에 남지 않는다."""
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
         sock.settimeout(timeout)
         try:
             sock.connect(str(path))
         except (FileNotFoundError, ConnectionRefusedError):
-            return "off"
-        except OSError:
-            return "unknown"
-    return "on"
+            return "off", ""
+        except OSError as exc:  # 경로가 너무 김(맥 104바이트), 권한 없음, 시간 초과 등
+            return "unknown", exc.strerror or type(exc).__name__
+    return "on", ""
 
 
 def last_record_time(path: Path | None) -> str | None:
@@ -451,11 +451,8 @@ class UiApp:
         except PolicyError:
             policy = None
         socket_path = self.config.socket
-        if socket_path is None:
-            gate_state = "unknown"
-        else:
-            gate_state = probe_socket(socket_path)
-        gate = {"state": gate_state, "socket": str(socket_path) if socket_path else None,
+        gate_state, gate_reason = ("unknown", "") if socket_path is None else probe_socket(socket_path)
+        gate = {"state": gate_state, "reason": gate_reason, "socket": str(socket_path) if socket_path else None,
                 "last_request": last_record_time(self.config.audit),
                 "policy_changed_at": _iso_mtime(self.config.policy)}
 
