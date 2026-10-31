@@ -423,7 +423,7 @@ class LayaJevClient:
             raise JevError("Jev 타임아웃은 0보다 큰 숫자(초)여야 합니다")
         if isinstance(window_chars, bool) or not isinstance(window_chars, int) or window_chars < 1:
             raise JevError("window_chars는 1 이상인 정수여야 합니다")
-        self._endpoint = _loopback_url(raw_url) + "/v1/systemone/batch"
+        self._endpoint = laya_endpoint(raw_url)
         self.model = (model if model is not None else env.get("JEV_MODEL", "")).strip() or LAYA_DEFAULT_MODEL
         raw_dir = model_dir if model_dir is not None else env.get("JEV_MODEL_DIR", "")
         self.model_dir = Path(raw_dir).expanduser() if str(raw_dir).strip() else None
@@ -431,7 +431,7 @@ class LayaJevClient:
         self.question = ((question if question is not None else env.get("JEV_QUESTION", "")) or "").strip() or None
         self.timeout = float(timeout)
         self.window_chars = window_chars
-        self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
+        self._opener = laya_opener()
         self._lock = threading.Lock()
         self._questions = _check_questions(LAYA_DEFAULT_QUESTIONS, self.question) if self.model_dir is None \
             else LAYA_DEFAULT_QUESTIONS
@@ -486,25 +486,41 @@ class LayaJevClient:
                                                     "windows": len(windows)})
 
     def _post(self, body: dict) -> object:
-        headers = {"Content-Type": "application/json", "Accept": "application/json"}
-        if self._api_key:
-            headers["Authorization"] = f"Bearer {self._api_key}"
-        request = urllib.request.Request(self._endpoint, json.dumps(body, ensure_ascii=False).encode("utf-8"),
-                                         headers, method="POST")
-        try:
-            with self._opener.open(request, timeout=self.timeout) as response:
-                raw = response.read(_LAYA_MAX_RESPONSE_BYTES + 1)
-        except urllib.error.HTTPError as exc:
-            raise JevError(f"Laya 서버가 오류로 답했습니다: HTTP {exc.code}") from None
-        except (urllib.error.URLError, OSError) as exc:
-            reason = getattr(exc, "reason", exc)
-            raise JevError(f"Laya 서버에 연결하지 못했습니다: {type(reason).__name__}") from None
-        if len(raw) > _LAYA_MAX_RESPONSE_BYTES:
-            raise JevError("Laya 응답이 너무 큽니다")
-        try:
-            return json.loads(raw)
-        except ValueError:
-            raise JevError("Laya 응답이 JSON이 아닙니다") from None
+        return laya_post(self._opener, self._endpoint, body, api_key=self._api_key, timeout=self.timeout)
+
+
+def laya_endpoint(raw_url: str) -> str:
+    """laya-serve 주소(이 컴퓨터만)에서 batch 엔드포인트를 만든다. 정책 문장 해석기(gate.policy_text)도 쓴다."""
+    return _loopback_url(raw_url) + "/v1/systemone/batch"
+
+
+def laya_opener() -> urllib.request.OpenerDirector:
+    """프록시와 리디렉트를 쓰지 않는 opener."""
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
+
+
+def laya_post(opener: urllib.request.OpenerDirector, endpoint: str, body: dict, *, api_key: str | None,
+              timeout: float) -> object:
+    """laya-serve에 JSON을 보내고 응답 JSON을 돌려준다. 실패는 JevError이고 메시지에 주소·키·본문을 넣지 않는다."""
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    request = urllib.request.Request(endpoint, json.dumps(body, ensure_ascii=False).encode("utf-8"),
+                                     headers, method="POST")
+    try:
+        with opener.open(request, timeout=timeout) as response:
+            raw = response.read(_LAYA_MAX_RESPONSE_BYTES + 1)
+    except urllib.error.HTTPError as exc:
+        raise JevError(f"Laya 서버가 오류로 답했습니다: HTTP {exc.code}") from None
+    except (urllib.error.URLError, OSError) as exc:
+        reason = getattr(exc, "reason", exc)
+        raise JevError(f"Laya 서버에 연결하지 못했습니다: {type(reason).__name__}") from None
+    if len(raw) > _LAYA_MAX_RESPONSE_BYTES:
+        raise JevError("Laya 응답이 너무 큽니다")
+    try:
+        return json.loads(raw)
+    except ValueError:
+        raise JevError("Laya 응답이 JSON이 아닙니다") from None
 
 
 def _noul_probability(item: object, qid: str) -> float:

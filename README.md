@@ -286,6 +286,8 @@ NER이 찾은 전화번호·이메일·비밀번호·키는 번호 칸(`numbers.
 gate policy show                                   # 내가 정한 항목과 지금 적용 중인 정책
 gate policy add "주민번호는 생년월일까지만 보여줘"      # 문장 → "이렇게 이해했어요" → y/N
 gate policy add "비밀번호가 있는 파일은 거부해줘"
+gate policy add "이름은 가려줘"                       # NER 묶음 (entities.name.action = mask)
+gate policy add "학번이 있는 파일은 물어보고 보여줘"
 gate policy add "병원 기록은 보여주지 마"               # 맥락 규칙 (Jev 질문에 그대로 넣음)
 gate policy set numbers.email.action deny          # 문장 해석 없이 바로 지정
 gate policy set path "가계부/**" deny               # 경로 규칙 (allow | ask_human | deny)
@@ -297,7 +299,8 @@ gate policy undo                                   # 직전 변경 되돌리기 
 - 번호·비밀값 기본값은 **전부 가림**입니다. 주민번호는 `numbers.rrn.visible`을 `birth`(앞 6자리)나 `birth_gender`(앞 7자리)로, 휴대폰은 앞자리(`prefix`), 카드는 끝 4자리(`last4`) 등을 공개할 수 있습니다.
 - 사람 승인 대기 시간(`approval.timeout_seconds`, 기본 30초)과 폴더 승인 기억 시간(`approval.session_minutes`, 기본 60분)도 바꿀 수 있습니다.
 - 기본값 전체와 설명: [`config/policy.yaml`](config/policy.yaml)
-- 문장 해석기도 지금은 Mock입니다. 예시와 다른 표현은 못 알아들을 수 있습니다. 그때는 `gate policy set`을 씁니다.
+- NER 묶음 문장은 한 번에 한 가지만 말합니다("이름이랑 주소는 가려줘"는 다시 말해 달라고 합니다). `plain` 묶음(시간·연도·나이·직함·과목)은 함께 바뀝니다. NER이 꺼져 있으면 저장은 하되 효과가 없다고 알려 줍니다.
+- 문장 해석기도 지금은 Mock(키워드 규칙)입니다. 예시와 다른 표현은 못 알아들을 수 있습니다. 그때는 `gate policy set`을 씁니다. 해석기 평가는 [`eval/README.md`](eval/README.md) "정책 문장 해석 평가"에 있습니다.
 
 ## 사람 승인
 
@@ -352,14 +355,15 @@ uv run python -m sandbox.bypass --settings 시험.json --workspace $DATA/plain-p
 ## 테스트
 
 ```bash
-uv run pytest                     # 맥: 1172 통과, 1 skip(FUSE), 약 30초 (사람 승인 시간 초과를 실제로 기다림)
+uv run pytest                     # 맥: 1266 통과, 1 skip(FUSE), 약 30초 (사람 승인 시간 초과를 실제로 기다림)
 
 docker build -f sandbox/gate.Dockerfile -t fuse-jev-gate .
-docker run --rm --device /dev/fuse --cap-add SYS_ADMIN fuse-jev-gate pytest -q    # Linux (FUSE 포함): 1173 통과
+docker run --rm --device /dev/fuse --cap-add SYS_ADMIN fuse-jev-gate pytest -q    # Linux (FUSE 포함): 1267 통과
 
 uv run python -m eval.run_eval --client mock [--policy 정책파일] [--details]        # 샘플 36개 평가
 uv run python -m eval.run_eval --client laya [--details]   # 실제 Laya (laya-serve와 JEV_* 환경변수 필요)
 uv run python -m eval.run_eval --client laya --ner server --details   # 게이트 흐름(NER 포함)과 누출 (NER_BASE_URL도 필요)
+uv run python -m eval.run_policy_text --interpreter mock [--details]   # 정책 문장 해석기 평가 (문장 120개)
 ```
 
 평가 방법과 지표는 [`eval/README.md`](eval/README.md)에 있습니다. Mock 점수는 실제 성능이 아닙니다.
@@ -368,7 +372,7 @@ uv run python -m eval.run_eval --client laya --ner server --details   # 게이�
 
 - **판단 모델은 아직 승인 창을 자주 띄웁니다.** 기본 Mock은 키워드 규칙이라 실제 성능을 보여 주지 않습니다. 실제 모델(Laya v3)은 민감 문서를 놓치지 않았고 오탐도 2/12로 줄었지만, 안전하다고 답해도 확신이 0.95에 못 미치면 사람에게 묻습니다(상담채팅 안전 문서 3개).
 - **NER은 이름·지명을 놓칠 때가 있습니다.** 샘플 36개에서 이름 5개(성 없이 이름만 쓴 `월매` 등), 도로명 번지, `1990.01.01` 형식 생년월일, 강릉·영주 같은 지명을 놓쳤습니다. 가린 결과를 판단 모델이 다시 보기 때문에 대부분 사람 승인으로 넘어가지만, 판단 모델도 못 알아보면(`월매`) 그대로 나갑니다. 또 판단 모델 v3는 나이·연도도 개인정보로 배워서, 기본 정책이 보여 주는 "30대"·"2016년"이 남은 문서는 잘 가려도 사람에게 묻습니다.
-- 정책 문장(`gate policy add`)으로는 아직 NER 묶음(`entities.*`)을 바꿀 수 없습니다. `gate policy set entities.name.action allow`처럼 직접 지정합니다.
+- **정책 문장 해석기는 키워드 규칙(Mock)입니다.** 실제 모델(Laya v3)에 zero-shot으로 물어보는 해석기도 만들었지만, v3는 이 질문들을 배우지 않아 쓸 수 없었습니다(모든 문장을 "모름"으로 답함). 키워드 규칙은 평가 세트에서 잘못 저장하는 경우가 드물지만, 표현이 달라지면 알아듣지 못하고 다시 말해 달라고 합니다.
 - **맥락 규칙은 아직 효과가 없습니다.** "병원 기록은 보여주지 마" 같은 문장은 Mock도 Laya도 읽지 않습니다(Laya는 고정 질문 하나만 배웠습니다).
 - **Claude Code 세션만 막습니다.** 다른 에이전트나 프로그램은 원본을 그대로 읽습니다. 모두 막으려면 원본을 별도 계정 소유로 두거나 암호화하는 OS 수준 분리가 필요합니다(다음 확장 후보).
 - **샌드박스 우회는 다루지 않습니다.** 설정 파일 바꾸기, bypass 모드, 샌드박스 밖에서 도는 훅은 MDM 관리 설정으로 막는다고 가정합니다. 관리 설정 없이 사용자 설정만 쓰면 프로젝트 설정이 샌드박스를 풀 수 있습니다.

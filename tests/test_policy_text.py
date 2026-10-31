@@ -258,7 +258,7 @@ def test_fail_closed_wrapper_converts_failures():
 
 
 def test_make_interpreter():
-    assert available_interpreters() == ("mock",)
+    assert available_interpreters() == ("laya", "mock")
     result = interpret("카드번호 있는 파일은 거부", make_interpreter())
     assert result.entry == Entry(settings={"numbers.card.action": "deny"}, said="카드번호 있는 파일은 거부")
     with pytest.raises(InterpretError):
