@@ -238,8 +238,8 @@ def test_make_client_passes_options_and_timeout():
     assert client.judge("본문", CTX).label == "highly_sensitive"
 
 
-def test_make_client_only_mock_registered():
-    assert available_backends() == ("mock",)
+def test_make_client_registered_backends():
+    assert available_backends() == ("laya", "mock")
 
 
 @pytest.mark.parametrize("name", ["jev", "typesafe", "", "MOCK"])

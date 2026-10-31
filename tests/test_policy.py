@@ -79,7 +79,7 @@ def test_setting_keys_cover_every_kind():
         assert f"numbers.{kind}.action" in keys
         assert setting_choices(f"numbers.{kind}.visible") == VISIBLE_CHOICES[kind]
         assert setting_choices(f"numbers.{kind}.action") == ("deny", "ask_human", "mask")
-    assert setting_choices("jev_backend") == ("mock",)
+    assert setting_choices("jev_backend") == ("laya", "mock")
     assert setting_choices("jev_timeout_seconds") is None
 
 

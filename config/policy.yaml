@@ -38,7 +38,7 @@ thresholds:
   allow_if_safe_confidence_gte: 0.95      # safe이고 확신도가 이 값 이상이면 허용
   deny_if_sensitive_confidence_gte: 0.95  # safe가 아니고 확신도가 이 값 이상이면 차단
 
-jev_backend: mock            # 지금은 mock(키워드 규칙)만 있다. 실제 로컬 백엔드는 Phase 3b
+jev_backend: mock            # mock(키워드 규칙, 시험용) | laya(로컬 laya-serve. 데몬 환경변수 JEV_BASE_URL 등 필요, README 참고)
 jev_timeout_seconds: 3.0     # 이 시간 안에 답이 없으면 차단
 max_inspect_bytes: 200000    # Jev에 한 번에 넘기는 최대 바이트. 넘으면 나눠서 묻고 가장 엄격한 답을 쓴다
 

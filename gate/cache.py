@@ -1,6 +1,8 @@
 """Jev 판단 캐시 (명세 3.5).
 
-키는 sha256(파일 내용) + 정책 버전 + 요청 맥락 요약이다. 내용·정책·맥락이 같으면 Jev를 다시 부르지 않는다.
+키는 sha256(파일 내용) + 정책 버전 + 요청 맥락 요약 + 모델 식별값이다. 넷이 같으면 Jev를 다시 부르지 않는다.
+- 모델 식별값(gate.jev_client.cache_tag)은 백엔드가 쓰는 모델을 가리킨다. 데몬을 띄워 둔 채 체크포인트를 바꿔도
+  이전 모델의 판단을 쓰지 않게 하려는 것이다. Mock처럼 식별값이 없는 백엔드는 빈 문자열이다.
 - 요청 맥락 요약에는 실제 경로, 요청 프로세스 실행 파일, 목적(purpose)을 넣는다. Jev 답이 이 셋에 따라 달라질 수 있어서다.
   PID는 넣지 않는다. `gate cat`은 부를 때마다 새 프로세스라서 PID를 넣으면 캐시가 맞지 않는다.
 - 정책 버전(gate.policy.Policy.version)이 키에 들어가므로 정책이 바뀌면 이전 판단은 자연히 쓰이지 않는다.
@@ -25,11 +27,12 @@ class CacheKey:
     content_sha256: str
     policy_version: str
     context: str  # context_digest()
+    model: str = ""  # gate.jev_client.cache_tag(). 백엔드 모델이 바뀌면 달라진다
 
     @classmethod
     def build(cls, content_sha256: str, policy_version: str, path: str, process: str | None,
-              purpose: str | None) -> "CacheKey":
-        return cls(content_sha256, policy_version, context_digest(path, process, purpose))
+              purpose: str | None, model: str = "") -> "CacheKey":
+        return cls(content_sha256, policy_version, context_digest(path, process, purpose), model)
 
 
 @dataclass(frozen=True)
