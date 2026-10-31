@@ -515,7 +515,7 @@ fuse-jev-gate/
 - 결과: 작업 폴더 설정(`gate-data/agent-workspace`)과 전역 설정(`gate-data/plain-project` + `--settings <gate setup으로 만든 파일>`) 모두 W14·W15가 **OS 샌드박스에 막혔다**(`Operation not permitted`). 대조군 2/2 통과, 판정 불가 0. 비용은 두 번 합계 약 $0.052다.
 - 테스트: `tests/test_bypass.py`에 판정 테스트 2개(요약 줄이면 breached, 열기 오류면 OS 샌드박스)를 더했다.
 
-### Phase 8: 설정 화면 UI (구현, 2026-11-01, 브랜치 `feat/ui-settings`, PR 전)
+### Phase 8: 설정 화면 UI (완료, 2026-11-01, PR #7 머지)
 
 - 계획·디자인 기준·보안 조건은 `plans/ui-plan.md`에 있다. 디자인 시안: https://claude.ai/artifact/USfowzn1bGWNa6v5nY4ZHc
 - 2026-10-31에 디자인을 확정하고 미결 5개를 정한 뒤(ui-plan 7절, 2절 표 "설정 화면 세부") 구현했다. 자세한 결과·시안과 다른 점은 ui-plan 8절.
