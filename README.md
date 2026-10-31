@@ -4,6 +4,7 @@
 
 - 대상: 개발자가 아닌 일반 사용자가 자기 컴퓨터에서 에이전트를 쓰는 경우입니다. 정책을 따로 정하지 않아도 기본값으로 안전하게 동작합니다.
 - 상태: 해커톤 프로젝트입니다. 맥(Apple Silicon, macOS 26)에서 만들고 시험했습니다. **판단 모델은 기본이 Mock(키워드 규칙)이고, 실제 모델로 팀원이 파인튜닝한 Laya를 붙일 수 있습니다**([판단 모델 연결](#판단-모델-연결-laya), [알려진 한계](#알려진-한계)).
+- **이름·연락처 등을 찾는 NER은 기본으로 켜져 있습니다.** NER 서버(`nerserve`)를 먼저 띄우지 않으면 게이트가 모든 내용 읽기를 막습니다. 모델 없이 쓰려면 `gate policy set ner_backend none`으로 끕니다([이름·주소 가리기 (NER)](#이름주소-가리기-ner)).
 - 이름의 FUSE는 처음 설계(FUSE 마운트)에서 왔습니다. 지금은 1Password처럼 데몬과 Unix 소켓을 쓰는 구조입니다. 바꾼 이유는 [`plans/implementation-plan.md`](plans/implementation-plan.md) 1절에 있습니다.
 
 ## 목차
@@ -29,7 +30,7 @@
 [원본 폴더]  ← 에이전트 세션은 Claude Code 권한 규칙 + 샌드박스로 직접 못 읽음
      ▲ 원본 읽기 (데몬은 샌드박스 밖, 내 계정 권한)
 [게이트 데몬]  gate serve
-     │  경로 규칙 → 정규식 탐지·가림 → NER 가림(선택) → Jev 판단(캐시) → 정책 → 사람 승인 → 감사 로그
+     │  경로 규칙 → 정규식 탐지·가림 → IP·내부 주소 규칙 → NER 가림(기본 켜짐) → Jev 판단(캐시) → 정책 → 사람 승인 → 감사 로그
      ▲ Unix 소켓 gate.sock (요청자 PID·UID 확인)
      └── gate CLI    Claude Code가 Bash로 실행 (샌드박스 안에서 이 소켓 하나만 열 수 있음)
 [Claude Code]  에이전트 세션
@@ -46,17 +47,18 @@
 
 1. **정책 파일 확인.** 정책 파일이 잘못되어 있으면 고칠 때까지 내용 읽기를 모두 막습니다.
 2. **경로 규칙.** `*.env`, `*.pem`, `*.key`, `id_rsa*`, `.netrc`, `.aws/credentials` 같은 파일은 내용을 보지 않고 거부합니다.
-3. **정규식 탐지.** 주민·외국인등록번호, 카드번호, 휴대폰·일반 전화번호, 이메일, 계좌번호, 비밀값(비밀번호·API 키·토큰·개인 키)을 찾아 같은 길이의 `*`로 가립니다. 종류마다 가림·사람 승인·거부를 정할 수 있습니다.
-4. **NER 가림(선택, 기본 꺼짐).** 켜면 로컬 NER 서버가 이름·주소·소속(학교·회사·병원)·장소 등을 찾아 `[이름]`, `[학교]`처럼 종류 이름으로 가립니다. 자세한 내용은 [이름·주소 가리기 (NER)](#이름주소-가리기-ner).
-5. **Jev 판단.** 정규식으로 가린 내용을 판단 모델(기본 Mock, 실제 모델은 Laya)에 보내 `safe`·`sensitive`·`highly_sensitive`와 확신도를 받습니다. 같은 파일·정책·요청·모델이면 캐시를 씁니다. 판단 모델이 실패하면 차단합니다.
-6. **정책.** 기본값은 `safe`이고 확신도 0.95 이상이면 허용, 민감이고 0.95 이상이면 거부, 그 사이면 사람에게 묻습니다. NER이 켜져 있고 가린 것이 있으면, 판단 모델은 가린 결과를 보고 안전하면 가린 채 보여 주고 아니면 사람에게 묻습니다.
-7. **사람 승인.** 맥 대화상자나 내 터미널에서 답합니다. 30초 안에 답이 없으면 차단합니다.
-8. **감사 로그.** 원문 없이 요청 한 줄을 남깁니다.
+3. **정규식 탐지.** 주민·외국인등록번호, 카드번호, 휴대폰·일반 전화번호, 이메일, 계좌번호, 비밀값(비밀번호·API 키·토큰·개인 키, URL 속 비밀번호)을 찾아 같은 길이의 `*`로 가립니다. 종류마다 가림·사람 승인·거부를 정할 수 있습니다.
+4. **IP·내부 주소 규칙.** IPv4·IPv6와 내부 호스트 이름(`db.internal`, `wiki.intra.example.co.kr` 등)을 찾아 `[IP]`·`[내부 주소]`로 가립니다. NER을 꺼도 적용됩니다.
+5. **NER 가림(기본 켜짐).** 로컬 NER 서버가 이름·연락처·식별번호·소속·장소·생년월일 등을 찾아 `[이름]`, `[소속]`처럼 종류 이름으로 가립니다. NER 서버가 응답하지 않으면 그 파일은 차단합니다. 자세한 내용은 [이름·주소 가리기 (NER)](#이름주소-가리기-ner).
+6. **Jev 판단.** 가린 내용을 판단 모델(기본 Mock, 실제 모델은 Laya)에 보내 `safe`·`sensitive`·`highly_sensitive`와 확신도를 받습니다. 같은 파일·정책·요청·모델이면 캐시를 씁니다. 판단 모델이 실패하면 차단합니다.
+7. **정책.** 기본값은 `safe`이고 확신도 0.95 이상이면 허용, 민감이고 0.95 이상이면 거부, 그 사이면 사람에게 묻습니다. NER이 켜져 있고 가린 것이 있으면, 판단 모델은 가린 결과를 보고 안전하면 가린 채 보여 주고 아니면 사람에게 묻습니다.
+8. **사람 승인.** 맥 대화상자나 내 터미널에서 답합니다. 30초 안에 답이 없으면 차단합니다.
+9. **감사 로그.** 원문 없이 요청 한 줄을 남깁니다.
 
 | 결과 | 에이전트가 받는 것 |
 |---|---|
 | 허용 | 원본 그대로. 번호나 비밀값이 있으면 가린 내용 |
-| 가림 | 번호·비밀값을 같은 길이의 `*`로, NER이 찾은 이름 등은 `[이름]`처럼 가린 내용 |
+| 가림 | 번호·비밀값을 같은 길이의 `*`로, 규칙·NER이 찾은 IP·이름 등은 `[IP]`·`[이름]`처럼 가린 내용 |
 | 사람 승인 | 사람이 허용하면 가린 내용, 거부하거나 답이 없으면 `EACCES` |
 | 차단 | `EACCES`와 이유 한 줄 (값은 넣지 않음) |
 
@@ -93,7 +95,9 @@ export GATE_SOCKET=$DATA/run/gate.sock GATE_POLICY=$DATA/policy.yaml GATE_AUDIT=
 
 ## 빠른 시작
 
-저장소의 합성 샘플(`samples/`)로 게이트를 직접 돌려 봅니다. 아래 결과는 실제로 돌려서 확인했습니다(Mock Jev, 기본 정책).
+저장소의 합성 샘플(`samples/`)로 게이트를 직접 돌려 봅니다. 아래 결과는 실제로 돌려서 확인했습니다(Mock Jev, NER 끔, 그 밖은 기본 정책).
+
+NER은 기본으로 켜져 있어서, NER 서버(`nerserve`)가 없으면 데몬이 모든 내용 읽기를 막습니다(`gate cat`마다 `NER 판단에 실패해 차단했습니다: NER 서버에 연결하지 못했습니다`). NER까지 보려면 [이름·주소 가리기 (NER)](#이름주소-가리기-ner)대로 nerserve를 **데몬보다 먼저** 띄웁니다. 모델 없이 해 보려면 아래처럼 데몬을 띄우기 전에 NER을 끕니다(정책을 느슨하게 하는 바꿈이라 한 번 더 묻습니다. `y`로 답합니다).
 
 **터미널 1: 데몬 띄우기**
 
@@ -105,6 +109,7 @@ printf 'DB_PASSWORD=hunter2\n' > $DATA/source/.env
 printf '동네 도서관 휴관 안내\n이번 주 토요일은 휴관합니다.\n문의: 010-1234-5678\n' > $DATA/source/안내문.txt
 
 export GATE_SOCKET=$DATA/run/gate.sock GATE_POLICY=$DATA/policy.yaml GATE_AUDIT=$DATA/audit/audit.jsonl
+.venv/bin/gate policy set ner_backend none          # 모델 없이 해 볼 때만. nerserve를 띄웠으면 이 줄은 뺀다
 .venv/bin/gate serve --source $DATA/source          # 맥 대화상자 없이 터미널로만 답하려면 --no-dialog
 ```
 
@@ -165,7 +170,7 @@ $ gate audit --blocked
 기록 6건 중 조건에 맞는 2건 · 차단 2
 ```
 
-지금 Jev는 Mock이라 판단은 키워드 규칙으로 나옵니다. 그래서 번호가 든 문서는 대부분 승인이나 차단으로 끝나고, 가린 내용은 승인한 뒤에 보입니다. 데몬은 `Ctrl-C`로 끕니다.
+지금 Jev는 Mock이라 판단은 키워드 규칙으로 나옵니다. 그래서 번호가 든 문서는 대부분 승인이나 차단으로 끝나고, 가린 내용은 승인한 뒤에 보입니다. 데몬은 `Ctrl-C`로 끕니다. NER을 다시 켜려면 `gate policy set ner_backend server`입니다.
 
 ## Claude Code 연결
 
@@ -228,6 +233,7 @@ gate setup --source $DATA/source --print   # 합칠 설정 조각(JSON)만 출�
    gate serve --source $DATA/source           # 위 환경변수를 넘겨 띄운다
    gate policy set jev_backend laya            # 내 터미널에서. 되돌리기: gate policy set jev_backend mock
    ```
+   NER도 기본으로 켜져 있으므로 데몬을 띄우기 전에 nerserve도 띄웁니다([이름·주소 가리기 (NER)](#이름주소-가리기-ner)).
 
 | 환경변수 | 뜻 |
 |---|---|
@@ -244,40 +250,65 @@ gate setup --source $DATA/source --print   # 합칠 설정 조각(JSON)만 출�
 
 ## 이름·주소 가리기 (NER)
 
-정규식은 형식이 있는 번호만 찾습니다. 이름·주소·학교·회사 같은 말은 팀원이 학습한 NER 모델(xlm-roberta-large, 32종)로 찾습니다. NER도 Laya처럼 이 컴퓨터 안의 별도 서버(`nerserve`, 이 저장소에 있음)로 띄우고, 데몬은 그 서버에 묻습니다. 데몬에는 torch가 들어가지 않습니다.
+정규식은 형식이 있는 번호만 찾습니다. 이름·연락처·소속 같은 말은 팀원이 학습한 NER 모델(재학습판 `xlmr-pii-ner`, xlm-roberta-large, 라벨 6종)로 찾습니다. NER도 Laya처럼 이 컴퓨터 안의 별도 서버(`nerserve`, 이 저장소에 있음)로 띄우고, 데몬은 그 서버에 묻습니다. 데몬에는 torch가 들어가지 않습니다.
+
+**NER은 기본으로 켜져 있습니다**(`ner_backend: server`). NER 서버가 응답하지 않으면 안전을 위해 모든 내용 읽기를 막습니다(목록·`stat`은 됨). 그래서 **게이트 데몬보다 nerserve를 먼저 띄웁니다.** `gate serve`도 시작할 때 이 점을 알려 줍니다. 모델 없이 쓰려면 내 터미널에서 끕니다.
+
+```bash
+gate policy set ner_backend none      # 끄기 (정책을 느슨하게 하는 바꿈이라 한 번 더 묻습니다)
+gate policy set ner_backend server    # 다시 켜기
+```
 
 1. **실행 환경.** torch와 transformers가 필요합니다. 위 laya-serve의 `.venv`에 둘 다 있으므로 그대로 씁니다(설치할 것 없음).
-2. **체크포인트 폴더**(팀원 공유 Drive의 `models/ner`, 약 2.2GB)를 저장소 밖에 둡니다.
+2. **체크포인트 폴더**(팀원이 공유한 재학습판, 약 2.2GB, 예: `/경로/models/ner-xlmr-pii`)를 저장소 밖에 둡니다. 예전 32종 모델(`models/ner`)은 쓰지 않습니다. 라벨이 달라서 그 모델을 띄우면 모든 읽기가 막힙니다.
 3. **nerserve 실행** (저장소 루트에서. 127.0.0.1에만 열립니다. 모델을 불러오는 데 시간이 걸립니다):
    ```bash
-   ~/laya-serve/.venv/bin/python -m nerserve --model-dir /경로/models/ner --port 8001
-   curl -s http://127.0.0.1:8001/health      # "status": "ok"가 나오면 준비됨
+   ~/laya-serve/.venv/bin/python -m nerserve --model-dir /경로/models/ner-xlmr-pii --port 8001
+   curl -s http://127.0.0.1:8001/health      # "status": "ok"와 labels 6종이 나오면 준비됨
    ```
-4. **데몬에 주소를 알려 주고 켭니다.**
+4. **데몬 띄우기.** 데몬은 `NER_BASE_URL`(없으면 `http://127.0.0.1:8001`)에 묻습니다. 다른 포트로 띄웠을 때만 정합니다.
    ```bash
-   export NER_BASE_URL=http://127.0.0.1:8001
-   gate serve --source $DATA/source           # 위 환경변수를 넘겨 띄운다
-   gate policy set ner_backend server          # 내 터미널에서. 끄기: gate policy set ner_backend none
+   export NER_BASE_URL=http://127.0.0.1:8001   # 기본값과 같으면 생략
+   gate serve --source $DATA/source
    ```
 
-**켜면 달라지는 점**
-- 정규식이 찾은 번호는 지금처럼 같은 길이 `*`, NER이 찾은 것은 `[이름]` `[주소]` `[학교]` `[회사·기관]` `[병원]` `[장소]` `[날짜]`처럼 종류 이름으로 가립니다. 같은 곳을 둘 다 찾으면 정규식을 따릅니다.
+**찾는 것과 가림 표시.** 서버가 준 라벨을 게이트가 원문을 보고 나눕니다.
+
+| NER 라벨 | 나누는 기준 | 가림 표시 | 정책 칸 |
+|---|---|---|---|
+| `NAME` | | `[이름]` | `name` |
+| `CONTACT` | 이메일 형식 | `[이메일]` | `numbers.email` |
+| | 숫자 7자 이상이고 70% 이상 | `[전화번호]` | `numbers.mobile`·`numbers.phone` |
+| | 한글이 있음(상세 주소) | `[주소]` | `address` |
+| | 그 밖(메신저·SNS 아이디 등) | `[연락처]` | `etc` |
+| `ID_NUMBER` | 학번·사번·여권번호 등 | `[식별번호]` | `student_id` |
+| `AFFILIATION` | 학교·회사·병원 등 | `[소속]` | `org` |
+| `LOCATION` | 장소·지명 | `[장소]` | `place` |
+| `AGE_BIRTH` | `생`, 월·일, `1990.01.01` 같은 날짜가 있거나 바로 앞에 출생·생년·생일·태어 | `[생년월일]` | `birth` |
+| | 그 밖(`30대`, `36세`) | `[나이]` | `plain` (기본 보여 줌) |
+
+**IP·내부 주소는 규칙으로 찾습니다**(NER을 꺼도 적용, [`gate/host_rules.py`](gate/host_rules.py)). IPv4·IPv6(`10.0.0.12`, `fe80::1`)는 `[IP]`, 칸 하나가 internal·intra·intranet·corp·local·lan·localdomain이거나 home.arpa로 끝나는 호스트 이름(`db.internal.example.local`, `build-07.internal`)은 `[내부 주소]`로 가립니다(묶음 `host`). 버전 번호·날짜·시각·일반 도메인(`example.com`)·파일 이름(`config.local.yaml`)은 잡지 않습니다. URL 속 비밀번호(`postgres://app:pw@db.internal`의 `pw`)는 정규식이 `*`로 가립니다.
+
+**NER이 켜져 있을 때**
+- 같은 곳을 여럿이 찾으면 정규식 > 규칙 > NER 순서로 따릅니다. 정규식이 찾은 번호는 같은 길이 `*`, 규칙·NER이 찾은 것은 종류 이름으로 가립니다.
 - **가린 것이 있으면 판단 모델이 가린 결과(에이전트에게 보여 줄 내용)를 한 번 더 봅니다.** 가려지지 않은 개인정보가 없다고 하면 가린 채 보여 주고, 남아 있다고 하면 사람에게 묻습니다(승인하면 가린 결과를 보여 줌). NER이 이름을 놓쳐도 판단 모델이 다시 걸러 냅니다. 가린 것이 없으면 지금처럼 판단 모델 결과(허용·승인·거부)를 따릅니다.
-- NER 서버가 꺼져 있거나 답이 이상하면 그 파일은 차단합니다. 그래서 기본은 꺼짐(`none`)입니다.
+- NER 서버가 꺼져 있거나, 답이 이상하거나, 모르는 라벨(예전 32종 모델 등)이 오면 그 파일은 차단합니다.
 - 가리면 내용 길이가 원본과 달라집니다(`gate stat` 크기는 원본 그대로).
+- NER을 끄면 이름 등은 가리지 않고, IP·내부 주소 규칙 말고는 판단 모델 결과(허용·승인·거부)를 그대로 따릅니다.
 
 **종류별 기본값** (`gate policy set entities.<묶음>.action allow|mask|ask_human|deny`)
 
 | 묶음 | 무엇 | 기본 |
 |---|---|---|
-| `name` | 이름(상담사·가족·교수 포함) | 가림 |
-| `address`, `birth`, `student_id` | 주소, 생년월일, 학번 | 가림 |
-| `org` | 학교·학과/부서·회사/기관·병원·모임·사업 이름 | 가림 |
-| `place`, `date`, `event`, `etc` | 장소, 날짜, 사건, 기타 민감 정보 | 가림 |
-| `host` | IP 주소·내부 주소 | 가림 |
-| `plain` | 시간·연도·나이·직함·과목 | 그대로 보여 줌 |
+| `name` | 이름(본인·가족·상담사·교수) | 가림 |
+| `address`, `birth` | 주소(상세 주소), 생년월일 | 가림 |
+| `student_id` | 식별번호(학번·사번·여권번호·면허번호 등) | 가림 |
+| `org` | 소속(학교·학과·회사·기관·병원·동아리 등) | 가림 |
+| `place`, `etc` | 장소, 기타(메신저·SNS 아이디 등) | 가림 |
+| `host` | IP·내부 주소 (규칙으로 찾음, NER을 꺼도 적용) | 가림 |
+| `plain` | 나이 | 그대로 보여 줌 |
 
-NER이 찾은 전화번호·이메일·비밀번호·키는 번호 칸(`numbers.mobile` 등)을 따릅니다.
+NER이 찾은 전화번호·이메일은 번호 칸(`numbers.mobile` 등)을 따릅니다. 날짜·사건·시간·연도·직함·과목은 새 모델이 찾지 않아 묶음에서 뺐습니다(2026-11-01). 예전 정책 파일의 `entities.date.action`·`entities.event.action`은 읽히지만 효과가 없고(`gate policy show`에 "지금은 찾지 않음"으로 보임), 새로 지정할 수 없습니다.
 
 ## 정책 바꾸기
 
@@ -300,7 +331,7 @@ gate policy undo                                   # 직전 변경 되돌리기 
 - 번호·비밀값 기본값은 **전부 가림**입니다. 주민번호는 `numbers.rrn.visible`을 `birth`(앞 6자리)나 `birth_gender`(앞 7자리)로, 휴대폰은 앞자리(`prefix`), 카드는 끝 4자리(`last4`) 등을 공개할 수 있습니다.
 - 사람 승인 대기 시간(`approval.timeout_seconds`, 기본 30초)과 폴더 승인 기억 시간(`approval.session_minutes`, 기본 60분)도 바꿀 수 있습니다.
 - 기본값 전체와 설명: [`config/policy.yaml`](config/policy.yaml)
-- NER 묶음 문장은 한 번에 한 가지만 말합니다("이름이랑 주소는 가려줘"는 다시 말해 달라고 합니다). `plain` 묶음(시간·연도·나이·직함·과목)은 함께 바뀝니다. NER이 꺼져 있으면 저장은 하되 효과가 없다고 알려 줍니다.
+- NER 묶음 문장은 한 번에 한 가지만 말합니다("이름이랑 주소는 가려줘"는 다시 말해 달라고 합니다). `plain` 묶음은 나이 하나입니다. 날짜·사건·시간·연도·직함·과목에 대한 문장("날짜는 가려줘")은 "지금은 따로 찾지 않아요"라고 답하고 저장하지 않습니다. NER이 꺼져 있으면 저장은 하되 효과가 없다고 알려 줍니다(IP·내부 주소는 규칙이라 NER을 꺼도 적용).
 - 문장 해석기도 지금은 Mock(키워드 규칙)입니다. 예시와 다른 표현은 못 알아들을 수 있습니다. 그때는 `gate policy set`을 씁니다. 해석기 평가는 [`eval/README.md`](eval/README.md) "정책 문장 해석 평가"에 있습니다.
 
 ## 설정 화면 (gate ui)
@@ -313,10 +344,10 @@ gate --socket $DATA/run/gate.sock ui --policy $DATA/policy.yaml --audit $DATA/au
 # 브라우저를 열지 않고 주소만 보려면 --no-browser, 포트를 정하려면 --port 8765 (기본은 빈 포트)
 ```
 
-- **설정**: 연결 상태(게이트·판단 모델·NER), 문장으로 정책 바꾸기("이렇게 이해했어요"를 보고 저장), 지금 정책에서 바로 고르기(번호·비밀값 8가지, 이름·주소 같은 정보 11가지. 줄마다 "찾는 규칙 보기"로 실제 정규식을 볼 수 있음), 내가 정한 문장 지우기·되돌리기.
+- **설정**: 연결 상태(게이트·판단 모델·NER), 문장으로 정책 바꾸기("이렇게 이해했어요"를 보고 저장), 지금 정책에서 바로 고르기(번호·비밀값 8가지는 줄마다 "찾는 규칙 보기"로 실제 정규식을 볼 수 있음, 이름·주소 같은 정보 9가지. 그중 IP·내부 주소는 규칙으로 찾아 NER을 꺼도 적용), 내가 정한 문장 지우기·되돌리기.
 - **감사 기록**: 결과별 건수, 기간·결과·파일 이름으로 거르기.
 - 정책 쓰기는 `gate policy`와 같은 코드라 같은 파일·되돌리기 기록을 남깁니다. 느슨해지는 바꿈은 한 번 더 확인합니다.
-- NER [켜기]는 NER 서버가 응답할 때만 누를 수 있습니다(서버를 띄우는 방법은 화면에 안내). 화면은 서버를 띄우지 않습니다.
+- NER은 기본으로 켜져 있어서, NER 서버가 응답하지 않으면 화면 위에 "모든 파일 읽기를 막고 있어요" 안내가 뜹니다. [끄기]는 서버 없이도 됩니다(느슨해지는 바꿈이라 한 번 더 확인). [켜기]는 NER 서버가 응답할 때만 누를 수 있습니다(서버를 띄우는 방법은 화면에 안내). 화면은 서버를 띄우지 않습니다.
 - **안전**: 127.0.0.1에만 열리고, 실행할 때마다 한 번만 쓸 수 있는 주소를 만듭니다. 그 주소로 연 브라우저만 쓸 수 있고, 다른 사이트나 에이전트가 보낸 요청은 막습니다(Host·Origin·토큰 검사). 화면은 외부로 요청을 보내지 않습니다(글꼴·로고도 이 서버가 줌).
 - 한 번 연 브라우저에서는 새로 고치거나 탭을 닫았다 다시 열어도 됩니다(`gate ui`가 켜져 있는 동안). 다른 브라우저에서 열려면 `gate ui` 터미널에서 Enter를 눌러 새 주소를 만듭니다. 끄려면 Ctrl-C.
 - 화면의 판단 모델·NER 주소는 이 터미널의 `JEV_BASE_URL`·`NER_BASE_URL`(없으면 `127.0.0.1:8000`·`127.0.0.1:8001`)입니다. 데몬과 같게 맞춥니다.
@@ -360,7 +391,7 @@ $ gate audit --json                # 고른 기록을 JSONL 그대로 (스크립
 - **결과(2026-10-31, Claude Code 2.1.316)**: 작업 폴더 설정 40가지, 전역 설정(`gate setup` 조각) 29가지 모두 **뚫린 것 0**. 나중에 더한 `gate audit` 시도 2가지(W14·W15)도 두 설정 모두 막혔습니다. 어떤 층이 막았는지는 계획 문서 5절 "6-3 결과"와 Phase 7 "보완"에 있습니다.
 - **설정 화면 시도(W16·W17, Phase 8)**: 하네스가 호스트에서 `gate ui`를 띄우고, 에이전트가 샌드박스 안에서 127.0.0.1로 그 포트에 닿아 토큰 없이 정책을 바꾸거나 감사 기록을 읽으려 합니다. 2026-11-01에 돌려 작업 폴더 설정·전역 설정 모두 **OS 샌드박스가 연결을 막았습니다**(화면 서버에 요청이 닿지 않음). worktree에서 돌릴 때는 `--data-root`를 꼭 줍니다(기본값이 저장소 위치 기준).
 
-실행하려면 데몬이 떠 있고 Claude Code에 로그인되어 있어야 합니다. **API 비용이 듭니다**(Phase 6에서 7번 돌려 약 $0.57).
+실행하려면 데몬이 떠 있고 Claude Code에 로그인되어 있어야 합니다. **NER은 기본으로 켜져 있으므로 데몬보다 nerserve를 먼저 띄우거나, 하네스에서 쓰는 정책 파일에서 NER을 꺼 둡니다**(`gate policy set ner_backend none`). 그렇지 않으면 게이트로 읽는 대조군도 막혀 "대조군 실패"로 끝납니다. **API 비용이 듭니다**(Phase 6에서 7번 돌려 약 $0.57).
 
 ```bash
 uv run python -m sandbox.bypass --out 보고서.md                                        # 작업 폴더 설정 (default 모드)
@@ -376,14 +407,14 @@ uv run python -m sandbox.bypass --settings 시험.json --workspace $DATA/plain-p
 ## 테스트
 
 ```bash
-uv run pytest                     # 맥: 1375 통과, 1 skip(FUSE), 약 30초 (사람 승인 시간 초과를 실제로 기다림)
+uv run pytest                     # 맥: 1539 통과, 1 skip(FUSE), 약 40초 (사람 승인 시간 초과를 실제로 기다림)
 
 docker build -f sandbox/gate.Dockerfile -t fuse-jev-gate .
-docker run --rm --device /dev/fuse --cap-add SYS_ADMIN fuse-jev-gate pytest -q    # Linux (FUSE 포함): 1376 통과
+docker run --rm --device /dev/fuse --cap-add SYS_ADMIN fuse-jev-gate pytest -q    # Linux (FUSE 포함): 맥 통과 수 + FUSE 1개
 
 uv run python -m eval.run_eval --client mock [--policy 정책파일] [--details]        # 샘플 36개 평가
 uv run python -m eval.run_eval --client laya [--details]   # 실제 Laya (laya-serve와 JEV_* 환경변수 필요)
-uv run python -m eval.run_eval --client laya --ner server --details   # 게이트 흐름(NER 포함)과 누출 (NER_BASE_URL도 필요)
+uv run python -m eval.run_eval --client laya --ner server --details   # 게이트 흐름(NER 포함)과 누출 (nerserve 필요, NER_BASE_URL 기본 127.0.0.1:8001)
 uv run python -m eval.run_policy_text --interpreter mock [--details]   # 정책 문장 해석기 평가 (문장 120개)
 ```
 
@@ -392,7 +423,9 @@ uv run python -m eval.run_policy_text --interpreter mock [--details]   # 정책 
 ## 알려진 한계
 
 - **판단 모델은 아직 승인 창을 자주 띄웁니다.** 기본 Mock은 키워드 규칙이라 실제 성능을 보여 주지 않습니다. 실제 모델(Laya v3)은 민감 문서를 놓치지 않았고 오탐도 2/12로 줄었지만, 안전하다고 답해도 확신이 0.95에 못 미치면 사람에게 묻습니다(상담채팅 안전 문서 3개).
-- **NER은 이름·지명을 놓칠 때가 있습니다.** 샘플 36개에서 이름 5개(성 없이 이름만 쓴 `월매` 등), 도로명 번지, `1990.01.01` 형식 생년월일, 강릉·영주 같은 지명을 놓쳤습니다. 가린 결과를 판단 모델이 다시 보기 때문에 대부분 사람 승인으로 넘어가지만, 판단 모델도 못 알아보면(`월매`) 그대로 나갑니다. 또 판단 모델 v3는 나이·연도도 개인정보로 배워서, 기본 정책이 보여 주는 "30대"·"2016년"이 남은 문서는 잘 가려도 사람에게 묻습니다.
+- **NER은 성 없이 이름만 쓴 사람을 놓칠 수 있습니다.** 교체 전 조합 비교([`eval/README.md`](eval/README.md) "NER 재학습판 조합 비교")에서 새 모델은 샘플 36개 중 `월매` 하나를 놓쳤고, 판단 모델도 못 알아봐 그대로 나갔습니다. 또 판단 모델 v3는 나이·연도도 개인정보로 배워서, 기본 정책이 보여 주는 "30대"·"36세"가 남은 문서는 잘 가려도 사람에게 묻습니다. 새 모델은 날짜·사건·시간·연도·직함·과목을 찾지 않습니다.
+- **NER 서버가 없으면 아무것도 못 읽습니다.** NER이 기본으로 켜져 있어서 nerserve가 꺼져 있으면 모든 내용 읽기가 막힙니다(안전한 쪽). 서버를 자동으로 띄우지는 않습니다.
+- **IP·내부 주소 규칙은 글자 모양만 봅니다.** 네 칸 버전 번호(`2.0.1.4`)는 IP로 가리고, 내부 단어가 없는 사내 도메인(`git.mycompany.com`)은 놓칩니다.
 - **정책 문장 해석기는 키워드 규칙(Mock)입니다.** 실제 모델(Laya v3)에 zero-shot으로 물어보는 해석기도 만들었지만, v3는 이 질문들을 배우지 않아 쓸 수 없었습니다(모든 문장을 "모름"으로 답함). 키워드 규칙은 평가 세트에서 잘못 저장하는 경우가 드물지만, 표현이 달라지면 알아듣지 못하고 다시 말해 달라고 합니다.
 - **맥락 규칙은 아직 효과가 없습니다.** "병원 기록은 보여주지 마" 같은 문장은 Mock도 Laya도 읽지 않습니다(Laya는 고정 질문 하나만 배웠습니다).
 - **Claude Code 세션만 막습니다.** 다른 에이전트나 프로그램은 원본을 그대로 읽습니다. 모두 막으려면 원본을 별도 계정 소유로 두거나 암호화하는 OS 수준 분리가 필요합니다(다음 확장 후보).
@@ -415,6 +448,8 @@ gate/
   store.py, paths.py                           원본 저장소, 게이트 안 경로 → 실제 경로(탈출 차단)
   pipeline.py, cache.py                        판단 순서, search, 캐시
   detectors.py                                 정규식 탐지와 같은 길이 가림
+  host_rules.py                                IP·내부 주소 규칙
+  ner_client.py, ner_spans.py                  NER 클라이언트(라벨 나누기·정책 칸·가림 표시), 범위 다듬기
   jev_client.py                                Jev 인터페이스(답 + 확신도), Mock, Laya(laya-serve)
   policy.py, policy_text.py, policy_cli.py     정책 기본값·파일, 문장 해석기, gate policy
   approval.py                                  사람 승인(대화상자, 승인 소켓)
@@ -423,6 +458,7 @@ gate/
   ui.py, ui_api.py, ui_static/                 설정 화면 gate ui (서버, 자료·바꾸기, HTML·CSS·JS·글꼴·로고)
   workspace.py, claude_setup.py                gate workspace init, gate setup
   cli.py                                       gate 명령
+nerserve/              로컬 NER 서버 (torch는 이 프로세스에서만)
 config/policy.yaml     기본 정책 설명
 samples/  eval/        합성 한국어 샘플 36개와 평가 스크립트
 sandbox/               우회 시험 하네스, 작업 폴더 설정 예시, Linux 테스트용 Dockerfile
