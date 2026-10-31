@@ -3,7 +3,7 @@
 내 컴퓨터에서 AI 에이전트(Claude Code)를 쓸 때, 에이전트가 원본 문서를 **게이트를 거쳐서만** 읽게 하는 도구입니다. 게이트는 파일마다 허용·가림·사람 승인·차단 중 하나로 답합니다. 주민등록번호·연락처·비밀번호 같은 값은 같은 길이의 `*`로 가려서 돌려줍니다.
 
 - 대상: 개발자가 아닌 일반 사용자가 자기 컴퓨터에서 에이전트를 쓰는 경우입니다. 정책을 따로 정하지 않아도 기본값으로 안전하게 동작합니다.
-- 상태: 해커톤 프로젝트입니다. 맥(Apple Silicon, macOS 26)에서 만들고 시험했습니다. **판단 모델 Jev는 아직 Mock(키워드 규칙)입니다**([알려진 한계](#알려진-한계)).
+- 상태: 해커톤 프로젝트입니다. 맥(Apple Silicon, macOS 26)에서 만들고 시험했습니다. **판단 모델은 기본이 Mock(키워드 규칙)이고, 실제 모델로 팀원이 파인튜닝한 Laya를 붙일 수 있습니다**([판단 모델 연결](#판단-모델-연결-laya), [알려진 한계](#알려진-한계)).
 - 이름의 FUSE는 처음 설계(FUSE 마운트)에서 왔습니다. 지금은 1Password처럼 데몬과 Unix 소켓을 쓰는 구조입니다. 바꾼 이유는 [`plans/implementation-plan.md`](plans/implementation-plan.md) 1절에 있습니다.
 
 ## 목차
@@ -12,6 +12,7 @@
 - [설치](#설치)
 - [빠른 시작](#빠른-시작)
 - [Claude Code 연결](#claude-code-연결)
+- [판단 모델 연결 (Laya)](#판단-모델-연결-laya)
 - [정책 바꾸기](#정책-바꾸기)
 - [사람 승인](#사람-승인)
 - [감사 로그](#감사-로그)
@@ -44,7 +45,7 @@
 1. **정책 파일 확인.** 정책 파일이 잘못되어 있으면 고칠 때까지 내용 읽기를 모두 막습니다.
 2. **경로 규칙.** `*.env`, `*.pem`, `*.key`, `id_rsa*`, `.netrc`, `.aws/credentials` 같은 파일은 내용을 보지 않고 거부합니다.
 3. **정규식 탐지.** 주민·외국인등록번호, 카드번호, 휴대폰·일반 전화번호, 이메일, 계좌번호, 비밀값(비밀번호·API 키·토큰·개인 키)을 찾아 같은 길이의 `*`로 가립니다. 종류마다 가림·사람 승인·거부를 정할 수 있습니다.
-4. **Jev 판단.** 가린 내용을 Jev에 보내 `safe`·`sensitive`·`highly_sensitive`와 확신도를 받습니다. 같은 파일·정책·요청이면 캐시를 씁니다. Jev가 실패하면 차단합니다.
+4. **Jev 판단.** 가린 내용을 판단 모델(기본 Mock, 실제 모델은 Laya)에 보내 `safe`·`sensitive`·`highly_sensitive`와 확신도를 받습니다. 같은 파일·정책·요청·모델이면 캐시를 씁니다. 판단 모델이 실패하면 차단합니다.
 5. **정책.** 기본값은 `safe`이고 확신도 0.95 이상이면 허용, 민감이고 0.95 이상이면 거부, 그 사이면 사람에게 묻습니다.
 6. **사람 승인.** 맥 대화상자나 내 터미널에서 답합니다. 30초 안에 답이 없으면 차단합니다.
 7. **감사 로그.** 원문 없이 요청 한 줄을 남깁니다.
@@ -201,6 +202,42 @@ gate setup --source $DATA/source --print   # 합칠 설정 조각(JSON)만 출�
 | 샌드박스 끄기 | `failIfUnavailable: true`, `allowUnsandboxedCommands: false` |
 | Claude 설정 파일·MCP 정의 수정, bypass 모드 | 작업 폴더 설정에만 넣음(`gate setup`에는 없음). MDM이 없을 때를 위한 방어 |
 
+## 판단 모델 연결 (Laya)
+
+기본 판단 모델은 시험용 Mock입니다. 실제 모델로는 팀원이 파인튜닝한 [Laya](https://huggingface.co/convaiinnovations/laya)(Apache-2.0) 체크포인트를 씁니다. Laya는 로컬 서버 `laya-serve`로 띄우고, 게이트 데몬이 그 서버에 묻습니다. 문서는 이 컴퓨터 밖으로 나가지 않습니다.
+
+1. **laya-serve 설치** (저장소 밖, 약 740MB):
+   ```bash
+   mkdir -p ~/laya-serve && cd ~/laya-serve
+   uv venv --python 3.12 .venv && VIRTUAL_ENV=$PWD/.venv uv pip install "laya[serve]==0.4.18"
+   ```
+2. **체크포인트 폴더**(팀원 공유 Drive의 `models/laya`, 약 680MB)를 저장소 밖에 둡니다. 폴더째 씁니다(`model.safetensors`, `questions.json`, `rl_agent_config.json`, `encoder/`, `tokenizer/`).
+3. **laya-serve 실행.** `LAYA_HOST`를 빼면 0.0.0.0(다른 컴퓨터에서도 접속 가능)으로 열리고, `LAYA_MODELS`를 빼면 공식 체크포인트를 모두 내려받습니다. 둘 다 꼭 지정합니다.
+   ```bash
+   LAYA_HOST=127.0.0.1 LAYA_PORT=8000 \
+   LAYA_MODELS=gate-laya LAYA_DEFAULT_MODEL=gate-laya \
+   LAYA_EXTRA_MODELS='{"gate-laya": "/경로/models/laya"}' \
+   HF_HUB_OFFLINE=1 USE_TF=0 ~/laya-serve/.venv/bin/laya-serve
+   ```
+4. **데몬에 주소를 알려 주고 백엔드를 바꿉니다.**
+   ```bash
+   export JEV_BASE_URL=http://127.0.0.1:8000 JEV_MODEL=gate-laya JEV_MODEL_DIR=/경로/models/laya
+   gate serve --source $DATA/source           # 위 환경변수를 넘겨 띄운다
+   gate policy set jev_backend laya            # 내 터미널에서. 되돌리기: gate policy set jev_backend mock
+   ```
+
+| 환경변수 | 뜻 |
+|---|---|
+| `JEV_BASE_URL` | laya-serve 주소. 이 컴퓨터(127.0.0.1, localhost, ::1)만 받습니다 |
+| `JEV_MODEL` | laya-serve에 등록한 이름 (기본 `gate-laya`) |
+| `JEV_MODEL_DIR` | 체크포인트 폴더. 질문(`questions.json`)을 여기서 읽고, 폴더가 바뀌면 판단 캐시를 새로 씁니다 |
+| `JEV_API_KEY` | laya-serve에 `LAYA_API_KEY`를 걸었을 때만 같은 값 |
+
+- Laya는 "개인을 특정할 수 있는 정보나 비밀정보가 들어 있는가?"에 예/아니오 확률 p로 답합니다. 기본 정책으로는 p ≤ 0.05면 허용, p ≥ 0.95면 차단, 그 사이는 사람에게 묻습니다.
+- 문서는 450자 안팎 조각으로 나눠 묻고 가장 높은 p를 씁니다. laya-serve가 꺼져 있거나 답이 이상하면 차단합니다.
+- **체크포인트 바꾸기:** 새 폴더로 바꾸고 laya-serve를 다시 띄운 뒤 `uv run python -m eval.run_eval --client laya`로 샘플 36개를 다시 평가합니다. 데몬은 다시 띄우지 않아도 됩니다.
+- 지금 체크포인트의 평가(샘플 36개): 민감 문서는 모두 잡았고(미탐 0/24), 개인정보가 없는 문서 12개 중 6개를 민감으로 봤습니다. 자세한 내용은 [`eval/README.md`](eval/README.md)에 있습니다.
+
 ## 정책 바꾸기
 
 정책은 **사람이 자기 터미널에서만** 바꿉니다. 아무것도 정하지 않으면 기본값으로 동작합니다. 데몬은 요청마다 정책 파일이 바뀌었는지 보고 다시 읽으므로 재시작할 필요가 없습니다.
@@ -275,19 +312,21 @@ uv run python -m sandbox.bypass --settings 시험.json --workspace $DATA/plain-p
 ## 테스트
 
 ```bash
-uv run pytest                     # 맥: 911 통과, 1 skip(FUSE), 약 20초 (사람 승인 시간 초과를 실제로 기다림)
+uv run pytest                     # 맥: 975 통과, 1 skip(FUSE), 약 20초 (사람 승인 시간 초과를 실제로 기다림)
 
 docker build -f sandbox/gate.Dockerfile -t fuse-jev-gate .
 docker run --rm --device /dev/fuse --cap-add SYS_ADMIN fuse-jev-gate pytest -q    # Linux (FUSE 포함)
 
 uv run python -m eval.run_eval --client mock [--policy 정책파일] [--details]        # 샘플 36개 평가
+uv run python -m eval.run_eval --client laya [--details]   # 실제 Laya (laya-serve와 JEV_* 환경변수 필요)
 ```
 
 평가 방법과 지표는 [`eval/README.md`](eval/README.md)에 있습니다. Mock 점수는 실제 성능이 아닙니다.
 
 ## 알려진 한계
 
-- **Jev는 Mock입니다.** 키워드 규칙이라 실제 판단 성능을 보여 주지 않습니다. 가린 값(`***`)도 단서로 세서, 번호가 든 문서는 대부분 승인이나 차단으로 끝납니다. 맥락 규칙("병원 기록은 보여주지 마")도 아직 효과가 없습니다. 실제 로컬 백엔드는 `gate/jev_client.py`에 구현 하나를 추가해 바꿔 끼웁니다.
+- **판단 모델의 오탐이 많습니다.** 기본 Mock은 키워드 규칙이라 실제 성능을 보여 주지 않습니다. 실제 모델(Laya)은 민감 문서를 놓치지 않았지만 상담 외 문서 형식(자기소개서·이력서·진료 메모)에서 개인정보가 없어도 민감으로 보는 일이 많아(샘플 오탐 6/12) 승인 창이 자주 뜹니다. 재학습한 체크포인트로 바꿔 다시 평가할 예정입니다.
+- **맥락 규칙은 아직 효과가 없습니다.** "병원 기록은 보여주지 마" 같은 문장은 Mock도 Laya도 읽지 않습니다(Laya는 고정 질문 하나만 배웠습니다).
 - **Claude Code 세션만 막습니다.** 다른 에이전트나 프로그램은 원본을 그대로 읽습니다. 모두 막으려면 원본을 별도 계정 소유로 두거나 암호화하는 OS 수준 분리가 필요합니다(다음 확장 후보).
 - **샌드박스 우회는 다루지 않습니다.** 설정 파일 바꾸기, bypass 모드, 샌드박스 밖에서 도는 훅은 MDM 관리 설정으로 막는다고 가정합니다. 관리 설정 없이 사용자 설정만 쓰면 프로젝트 설정이 샌드박스를 풀 수 있습니다.
 - MCP 도구와 세션 간 메시지 도구는 막지 않습니다. MCP 서버는 샌드박스 밖에서 돌아서, 화면 제어나 브라우저 자동화 같은 로컬 MCP가 있으면 원본을 열 수 있습니다.
@@ -308,7 +347,7 @@ gate/
   store.py, paths.py                           원본 저장소, 게이트 안 경로 → 실제 경로(탈출 차단)
   pipeline.py, cache.py                        판단 순서, search, 캐시
   detectors.py                                 정규식 탐지와 같은 길이 가림
-  jev_client.py                                Jev 인터페이스(답 + 확신도)와 Mock
+  jev_client.py                                Jev 인터페이스(답 + 확신도), Mock, Laya(laya-serve)
   policy.py, policy_text.py, policy_cli.py     정책 기본값·파일, 문장 해석기, gate policy
   approval.py                                  사람 승인(대화상자, 승인 소켓)
   audit.py, audit_cli.py                       감사 로그, gate audit
