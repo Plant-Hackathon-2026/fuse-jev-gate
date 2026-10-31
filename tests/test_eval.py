@@ -244,3 +244,69 @@ def test_evaluate_passes_policy_visibility_and_context():
     evaluate(samples, client, masker=recording_masker, policy=policy)
     assert seen[0]["rrn"] == "birth"
     assert client.calls[0].context.user_policy == ("병원 기록은 보여주지 마",)
+
+
+# --- 게이트 흐름 (3c) ---
+
+class PerfectNer:
+    """가려져야 할 글자(must_hide.csv)를 모두 이름으로 찾는 가짜 NER. 흐름과 누출 세기 확인용이다."""
+
+    def __init__(self, words):
+        self.words = sorted(set(words), key=len, reverse=True)
+
+    def cache_tag(self):
+        return "ner:perfect"
+
+    def find(self, text):
+        from gate.ner_client import Entity, NerResult
+        taken: list[tuple[int, int]] = []
+        for word in self.words:
+            start = text.find(word)
+            while start != -1:
+                end = start + len(word)
+                if all(end <= s or e <= start for s, e in taken):
+                    taken.append((start, end))
+                start = text.find(word, start + 1)
+        return NerResult(tuple(Entity("NAME", s, e, 0.9) for s, e in sorted(taken)), "ner:perfect")
+
+
+def test_must_hide_file_matches_samples():
+    must_hide = run_eval.load_must_hide()
+    samples = {s.path: s for s in load_labels()}
+    assert {p for p in must_hide} == {p for p, s in samples.items() if s.case != "none"}
+    for path, rows in must_hide.items():
+        text = (run_eval.PROJECT_ROOT / path).read_text(encoding="utf-8")
+        assert all(m.text in text for m in rows), path
+
+
+def test_gate_run_without_ner_leaks_names_when_jev_says_safe():
+    must_hide = run_eval.load_must_hide()
+    samples = load_labels()
+    safe = MockJevClient("fixed", label="safe", confidence=0.99)
+    runs = run_eval.run_gate(samples, safe, None, must_hide)
+    leaked = {m.group for r in runs for m in r.leaked}
+    assert "name" in leaked and not leaked & {"phone", "email", "rrn", "card"}  # 번호는 정규식이 가린다
+    sensitive = MockJevClient("fixed", label="sensitive", confidence=0.99)
+    runs = run_eval.run_gate(samples, sensitive, None, must_hide)
+    assert all(r.outcome == "deny" and r.shown is None for r in runs)  # NER이 없으면 3b처럼 차단
+
+
+def test_gate_run_with_ner_rechecks_masked_result_and_counts_leaks():
+    must_hide = run_eval.load_must_hide()
+    samples = load_labels()
+    ner = PerfectNer(m.text for ms in must_hide.values() for m in ms)
+    safe = MockJevClient("fixed", label="safe", confidence=0.99)
+    runs = run_eval.run_gate(samples, safe, ner, must_hide)
+    assert {r.outcome for r in runs if r.sample.case != "none"} == {"mask"}
+    assert {r.outcome for r in runs if r.sample.case == "none"} == {"allow"}
+    sensitive = MockJevClient("fixed", label="sensitive", confidence=0.99)
+    runs = run_eval.run_gate(samples, sensitive, ner, must_hide)
+    by_case = {(r.sample.case, r.outcome) for r in runs}
+    assert {o for c, o in by_case if c != "none"} == {"ask_human"}  # 가린 결과도 민감하면 사람에게
+    assert {o for c, o in by_case if c == "none"} == {"deny"}       # 가린 것이 없으면 Jev대로
+    assert all(not r.leaked for r in runs)
+    assert all(r.shown is not None for r in runs if r.outcome == "ask_human")  # 승인하면 보일 내용
+    report = run_eval.format_gate_runs(runs, must_hide, ner_name="server")
+    assert "식별자" in report and "준식별자" in report
+    details = run_eval.format_gate_details(runs, show=True)
+    assert "[이름]" in details and "(보이지 않음)" in details
