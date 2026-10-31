@@ -14,6 +14,7 @@ class ReadResult:
     data: bytes
     decision: str                                       # allow | mask
     masked: dict[str, int] = field(default_factory=dict)  # 가린 종류별 건수
+    labeled: dict[str, int] | None = None  # 그중 `[이름]`처럼 종류 이름으로 가린 것. None이면 예전 데몬이라 모른다
 
 
 class _SocketClient:
@@ -46,7 +47,8 @@ class GateClient(_SocketClient):
 
     def read(self, path: str, offset: int = 0, size: int | None = None, purpose: str | None = None) -> ReadResult:
         response = self.request("cat", path=path, offset=offset, size=size, purpose=purpose)
-        return ReadResult(base64.b64decode(response["data_b64"]), response["decision"], response.get("masked", {}))
+        return ReadResult(base64.b64decode(response["data_b64"]), response["decision"], response.get("masked", {}),
+                          response.get("labeled"))
 
     def cat(self, path: str, offset: int = 0, size: int | None = None, purpose: str | None = None) -> bytes:
         return self.read(path, offset, size, purpose).data

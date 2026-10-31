@@ -92,9 +92,13 @@ class Judgment:
     cached: bool = False
     approval: Approval | None = None          # 사람 승인 결과. once·session·remembered면 승인, deny·timeout이면 차단
     approved_by: AnsweredBy | None = None     # 누가 답했나. remembered·timeout이면 None
+    # findings 중 규칙·NER이 `[이름]`처럼 종류 이름으로 가린 것의 종류별 건수. 나머지는 정규식이 같은 길이 `*`로 가렸다.
+    # NER도 휴대폰·일반 전화·이메일 칸을 쓰므로(정규식이 놓친 번호) 종류 이름만으로는 가린 방식을 알 수 없어 따로 센다.
+    labeled: Mapping[str, int] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "findings", MappingProxyType(dict(self.findings)))
+        object.__setattr__(self, "labeled", MappingProxyType(dict(self.labeled)))
 
 
 @dataclass(frozen=True)
@@ -238,6 +242,7 @@ class Inspector:
         entity_counts = Counter(slot for _, slot in hidden)
         counts += entity_counts
         common["findings"] = dict(counts)
+        common["labeled"] = dict(entity_counts)
         by_entity = slot_action(policy, [slot for _, slot in hidden])
         if by_entity == "deny":
             denied = {k: n for k, n in entity_counts.items() if policy.slot_rule(k) == "deny"}

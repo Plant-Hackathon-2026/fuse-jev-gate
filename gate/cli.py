@@ -30,6 +30,7 @@ import os
 import signal
 import sys
 import threading
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TextIO
 
@@ -38,6 +39,7 @@ from gate.approval import Approvals, DialogChannel, Pending, clean_text, kinds_t
 from gate.audit import AuditLog
 from gate.client import ApprovalClient, GateClient
 from gate.daemon import ApprovalServer, GateServer, RequestEvent
+from gate.detectors import KINDS as NUMBER_KINDS
 from gate.peer import Peer
 from gate.ner_client import DEFAULT_BASE_URL as DEFAULT_NER_URL
 from gate.pipeline import Inspector
@@ -240,11 +242,30 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.buffer.write(result.data)
             sys.stdout.buffer.flush()
             if result.masked:
-                print(f"gate: 개인정보 일부를 같은 길이의 *로 가렸습니다 ({kinds_text(result.masked)})", file=sys.stderr)
+                print(mask_notice(result.masked, result.labeled), file=sys.stderr)
     except GateError as exc:
         print(f"gate: {getattr(args, 'path', '')}: {exc.message} ({exc.name})", file=sys.stderr)
         return 1
     return 0
+
+
+def mask_notice(masked: Mapping[str, int], labeled: Mapping[str, int] | None) -> str:
+    """gate cat이 가린 내용을 돌려줄 때 stderr에 쓰는 안내. 실제로 가린 방식만 말한다.
+
+    정규식은 같은 길이 `*`로, 규칙(IP·내부 주소)과 NER은 `[이름]`처럼 종류 이름으로 가린다(gate.pipeline).
+    labeled는 masked 중 종류 이름으로 가린 것이다. None이면 그 정보를 주지 않는 예전 데몬이라 번호 종류(정규식 종류)는
+    `*`, 그 밖은 종류 이름으로 가렸다고 본다(이때는 NER이 찾은 전화번호·이메일도 `*`로 안내된다).
+    """
+    if labeled is None:
+        labeled = {kind: n for kind, n in masked.items() if kind not in NUMBER_KINDS}
+    stars = {kind: n - labeled.get(kind, 0) for kind, n in masked.items() if n > labeled.get(kind, 0)}
+    labels = {kind: n for kind, n in labeled.items() if n > 0}
+    if stars and labels:
+        return (f"gate: 개인정보 일부를 같은 길이의 *로 ({kinds_text(stars)}), "
+                f"[이름]처럼 종류 이름으로 ({kinds_text(labels)}) 가렸습니다")
+    if labels:
+        return f"gate: 개인정보 일부를 [이름]처럼 종류 이름으로 가렸습니다 ({kinds_text(labels)})"
+    return f"gate: 개인정보 일부를 같은 길이의 *로 가렸습니다 ({kinds_text(stars)})"
 
 
 def _search(client: GateClient, args: argparse.Namespace) -> int:

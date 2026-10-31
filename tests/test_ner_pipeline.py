@@ -131,6 +131,7 @@ def test_names_are_replaced_with_kind_names_and_numbers_keep_stars(source, tmp_p
     assert (j.action, j.stage) == ("mask", "jev")
     assert verdict.data.decode() == INTRO_SHOWN
     assert dict(j.findings) == {"mobile": 1, "name": 1, "org": 1}  # 정규식과 겹친 NER 전화번호는 세지 않는다
+    assert dict(j.labeled) == {"name": 1, "org": 1}               # 종류 이름으로 가린 것. 휴대폰 번호는 `*`
     assert "이름" in j.reason and "소속" in j.reason
     assert ner.texts == [INTRO]                              # NER은 원문을 본다
     assert jev.calls[0].text == INTRO_SHOWN                  # Jev는 가린 결과(보여 줄 내용)를 본다
@@ -173,6 +174,7 @@ def test_rechecked_document_shows_masked_content_when_approved(source, tmp_path)
     assert (verdict.judgment.action, verdict.judgment.stage) == ("mask", "human")
     assert verdict.data.decode() == "담당자는 [이름]입니다.\n"
     assert dict(approvals.asked.findings) == {"name": 1}
+    assert dict(verdict.judgment.labeled) == {"name": 1}  # 승인한 뒤에도 가린 방식이 남는다
 
 
 def test_regex_only_masking_is_also_rechecked_when_ner_is_on(source, tmp_path):
@@ -278,6 +280,7 @@ def test_ner_phone_that_regex_missed_follows_number_rule(source, tmp_path):
     inspector, _, _ = make(source, tmp_path, ner=FakeNer())
     verdict = inspector.inspect(PEER, "/해외.txt")
     assert (verdict.data.decode(), dict(verdict.judgment.findings)) == ("연락처 [전화번호]\n", {"phone": 1})
+    assert dict(verdict.judgment.labeled) == {"phone": 1}  # 정규식 칸 이름이지만 `*`가 아니라 종류 이름으로 가렸다
     inspector, _, _ = make(source, tmp_path, ner=FakeNer(), settings={"numbers.phone.action": "deny"})
     verdict = inspector.inspect(PEER, "/해외.txt")
     assert (verdict.judgment.action, verdict.judgment.stage) == ("deny", "entity")
@@ -310,6 +313,7 @@ def test_rules_run_even_when_ner_is_off(source, tmp_path):
     j = verdict.judgment
     assert (j.action, verdict.data.decode()) == ("mask", "DB는 [내부 주소]([IP])이고 담당자는 홍길동입니다.\n")
     assert dict(j.findings) == {"host": 2} and "IP·내부 주소" in j.reason
+    assert dict(j.labeled) == {"host": 2}
     assert ner.texts == []
     assert jev.calls[0].text == "DB는 [내부 주소]([IP])이고 담당자는 홍길동입니다.\n"   # Jev는 보여 줄 내용을 본다
     inspector, _, _ = make(source, tmp_path, jev=MockJevClient("fixed", **SENSITIVE))
@@ -337,6 +341,7 @@ def test_regex_wins_over_rules(source, tmp_path):
     assert verdict.data.decode() == ("url: postgres://app:*******@[내부 주소]:5432/app\n"
                                      "*****@**.********.*******.*****\n")
     assert dict(verdict.judgment.findings) == {"secret": 1, "email": 1, "host": 1}
+    assert dict(verdict.judgment.labeled) == {"host": 1}
 
 
 def test_host_rule_follows_entities_host_action_without_ner(source, tmp_path):
