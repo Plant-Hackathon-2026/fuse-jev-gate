@@ -7,9 +7,11 @@ torch가 필요 없는 부분만 여기에 둔다. 데몬 쪽 테스트 묶음�
 1. group_tokens: 한 창의 토큰 (start, end, BIO 라벨, P(개체)) 목록에서 P(개체) ≥ threshold인 토큰을 이어 개체로 만든다.
    같은 종류이고 I-면 앞 개체에 붙이고, 아니면 새 개체를 시작한다. 개체 점수는 토큰 P(개체)의 평균이다.
 2. best_per_span: 겹치는 창에서 같은 (start, end)가 여러 번 나오면 점수 높은 것 하나만 남긴다.
-3. refine: 앞뒤 공백을 떼고, 형식 없는 종류는 낱말 끝까지 넓힌 뒤 끝의 조사 하나를 뗀다. 그다음 merge.
+3. refine: 앞뒤 공백을 떼고, 낱말 끝까지 넓힌 뒤 끝의 조사 하나를 뗀다. 그다음 merge.
    조사는 넓히면서 붙은 글자에서만 뗀다(모델이 개체로 본 끝 글자는 조사처럼 보여도 남긴다).
-   주소·장소는 "로"·"도"를 떼지 않는다(도로명·지명의 일부인 경우가 많다).
+   연락처(상세 주소가 들어 있다)·장소는 "로"·"도"를 떼지 않는다(도로명·지명의 일부인 경우가 많다).
+   라벨은 팀원 재학습판(xlmr-pii-ner) 6종이다(NAME·CONTACT·ID_NUMBER·AFFILIATION·LOCATION·AGE_BIRTH, 2026-11-01).
+   형식이 정해진 종류는 없다. 이메일·전화번호도 CONTACT 안에 섞여 있어 낱말 넓히기를 그대로 쓴다.
 4. merge: 겹치면 하나로(범위는 합집합, 종류·점수는 점수 높은 쪽), 바로 붙어 있고 종류가 같으면 하나로.
 
 범위는 파이썬 str 인덱스(코드 포인트)이고 end는 포함하지 않는다. 결과는 start 순이고 서로 겹치지 않는다.
@@ -22,11 +24,9 @@ from dataclasses import dataclass
 # (start, end, BIO 라벨, P(개체)). 라벨은 O를 뺀 라벨 중 확률이 가장 큰 것(예: "B-NAME").
 Token = tuple[int, int, str, float]
 
-# 형식이 있는 값은 낱말로 넓히거나 조사를 떼지 않고 앞뒤 공백만 다듬는다.
-EXACT_KINDS = frozenset({
-    "API_KEY", "CLOUD_KEY", "TOKEN", "PASSWORD", "PRIVATE_KEY", "DB_URL",
-    "IP_ADDRESS", "INTERNAL_HOST", "EMAIL", "PHONE",
-})
+# 형식이 있는 값은 낱말로 넓히거나 조사를 떼지 않고 앞뒤 공백만 다듬는다. 지금 라벨(6종)에는 없다
+# (기존 32종 모델의 IP·키·이메일 같은 종류가 여기 있었다).
+EXACT_KINDS: frozenset[str] = frozenset()
 
 # 낱말 끝에서 떼는 조사(와 자주 붙는 서술격·대화체 끝말). 긴 것부터 맞춰 보고 하나만 뗀다.
 JOSA: tuple[str, ...] = tuple(sorted({
@@ -38,10 +38,10 @@ JOSA: tuple[str, ...] = tuple(sorted({
     "은", "는", "이", "가", "을", "를", "에", "의", "로", "도", "만", "와", "과", "랑",
 }, key=lambda j: (-len(j), j)))
 
-# 종류별로 떼지 않는 끝말. 주소·장소에서 "로"·"도"는 도로명(예시로)·지명(경기도, 제주도)의 일부인 경우가 많다.
+# 종류별로 떼지 않는 끝말. 연락처(상세 주소)·장소에서 "로"·"도"는 도로명(예시로)·지명(경기도, 제주도)의 일부인 경우가 많다.
 _KEEP_ENDINGS: dict[str, frozenset[str]] = {
-    "ADDRESS": frozenset({"로", "도"}),
-    "PLACE": frozenset({"로", "도"}),
+    "CONTACT": frozenset({"로", "도"}),
+    "LOCATION": frozenset({"로", "도"}),
 }
 
 _WORD_CHAR = re.compile(r"[가-힣A-Za-z0-9]")

@@ -128,7 +128,7 @@ class _JevResult:
 @dataclass(frozen=True)
 class _NerOutcome:
     enabled: bool
-    spans: tuple[tuple[Entity, str], ...] = ()  # (개체, 정책 칸). 정규식 범위를 뺀 뒤, 쓰지 않는 종류는 뺀 것
+    spans: tuple[tuple[Entity, str], ...] = ()  # (개체, 정책 칸). 정규식 범위를 뺀 것
     error: str | None = None
     model: str = ""  # NER 모델 식별값. 가린 결과를 Jev에 물을 때 판단 캐시 키에 넣는다
 
@@ -290,11 +290,8 @@ class Inspector:
                     self._ner_cache[(digest, model)] = entities
                     while len(self._ner_cache) > MAX_NER_CACHE:
                         self._ner_cache.popitem(last=False)
-            spans = []
-            for e in outside(entities, [(f.start, f.end) for f in found], text):
-                slot = policy_slot(e.label, text[e.start:e.end])
-                if slot is not None:
-                    spans.append((e, slot))
+            spans = [(e, policy_slot(e.label, text[e.start:e.end]))
+                     for e in outside(entities, [(f.start, f.end) for f in found], text)]
             return _NerOutcome(True, tuple(spans), model=model)
         except Exception as exc:
             detail = str(exc) if isinstance(exc, NerError) else type(exc).__name__

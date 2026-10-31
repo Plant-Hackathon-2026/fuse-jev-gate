@@ -16,9 +16,9 @@ from gate.store import PlainStore
 
 PEER = Peer(pid=4321, uid=501, exe="/usr/local/bin/claude")
 INTRO = "지원자 홍길동은 가온대학교를 졸업했습니다.\n연락처는 010-1234-5678입니다.\n"
-INTRO_SHOWN = "지원자 [이름]은 [학교]를 졸업했습니다.\n연락처는 ***-****-****입니다.\n"
-NAMES = {"홍길동": "NAME", "가온대학교": "SCHOOL", "30대": "AGE", "+1 415 555 0100": "PHONE",
-         "010-1234-5678": "PHONE", "MIIEvgIBADAN": "PRIVATE_KEY", "김": "NAME"}
+INTRO_SHOWN = "지원자 [이름]은 [소속]를 졸업했습니다.\n연락처는 ***-****-****입니다.\n"
+NAMES = {"홍길동": "NAME", "가온대학교": "AFFILIATION", "30대": "AGE", "+1 415 555 0100": "PHONE",
+         "010-1234-5678": "PHONE", "김": "NAME"}
 
 
 class FakeNer:
@@ -59,7 +59,6 @@ def source(tmp_path):
     (root / "나이만.txt").write_text("환자는 30대입니다.\n", encoding="utf-8")
     (root / "회의.txt").write_text("회의는 화요일입니다.\n", encoding="utf-8")
     (root / "해외.txt").write_text("연락처 +1 415 555 0100\n", encoding="utf-8")
-    (root / "키.txt").write_text("값 MIIEvgIBADAN 끝\n", encoding="utf-8")
     (root / "깨짐.txt").write_bytes(b"\xff\xfe " + "김".encode() + b" \x80\n")
     return root
 
@@ -232,7 +231,7 @@ def test_entity_rules(source, tmp_path):
 
     inspector, _, _ = make(source, tmp_path, ner=FakeNer(), settings={"entities.name.action": "allow"})
     verdict = inspector.inspect(PEER, "/자소서.txt")
-    assert verdict.data.decode() == "지원자 홍길동은 [학교]를 졸업했습니다.\n연락처는 ***-****-****입니다.\n"
+    assert verdict.data.decode() == "지원자 홍길동은 [소속]를 졸업했습니다.\n연락처는 ***-****-****입니다.\n"
     assert dict(verdict.judgment.findings) == {"mobile": 1, "org": 1}
 
     inspector, _, _ = make(source, tmp_path, ner=FakeNer(), settings={"entities.plain.action": "mask"})
@@ -254,10 +253,13 @@ def test_ner_phone_that_regex_missed_follows_number_rule(source, tmp_path):
     assert (verdict.judgment.action, verdict.judgment.stage) == ("deny", "entity")
 
 
-def test_ner_private_key_label_is_ignored(source, tmp_path):
-    inspector, _, _ = make(source, tmp_path, ner=FakeNer())
-    verdict = inspector.inspect(PEER, "/키.txt")
-    assert (verdict.judgment.action, verdict.data.decode()) == ("allow", "값 MIIEvgIBADAN 끝\n")
+@pytest.mark.parametrize("label", ["SCHOOL", "CONTACT", "PRIVATE_KEY"])
+def test_unknown_kind_from_ner_denies(source, tmp_path, label):
+    """게이트 종류가 아닌 것(기존 32종 모델 라벨, 나누지 않은 서버 라벨)이 오면 차단한다."""
+    inspector, jev, _ = make(source, tmp_path, ner=FakeNer(words={"가온대학교": label}))
+    verdict = inspector.inspect(PEER, "/자소서.txt")
+    assert (verdict.judgment.action, verdict.judgment.stage) == ("deny", "entity")
+    assert "모르는 종류" in verdict.judgment.reason and jev.calls == []
 
 
 def test_non_utf8_bytes_are_kept_and_positions_match(source, tmp_path):

@@ -824,8 +824,10 @@ def test_audit_row_cleans_agent_text():
 # --- 상태 화면 문구 ---
 
 def test_effect_text_uses_right_particles():
-    assert effect_text("entities.student_id.action", "ask_human") == \
-        "학번이 있는 파일은 사람에게 물어본 뒤 보여줘요. 허용해도 학번은 가린 채로 보여줘요."
+    assert effect_text("entities.name.action", "ask_human") == \
+        "이름이 있는 파일은 사람에게 물어본 뒤 보여줘요. 허용해도 이름은 가린 채로 보여줘요."
+    assert effect_text("entities.student_id.action", "ask_human").startswith(
+        "식별번호(학번·사번·여권번호 등)가 있는 파일은 ")  # 괄호 앞 낱말의 받침으로 조사를 고른다
     assert effect_text("numbers.card.action", "mask") == "카드번호를 가린 뒤 보여줘요."
     assert effect_text("numbers.rrn.visible", "birth") == "주민등록번호를 가릴 때 생년월일(앞 6자리)까지 공개해요."
     assert effect_text("entities.org.action", "deny").startswith("NER이 소속(학교·회사·병원 등)을")
