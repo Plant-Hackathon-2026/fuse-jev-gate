@@ -3,6 +3,7 @@
 - 정책 파일이 없으면 기본값, 있으면 지정값으로 동작한다. 실행 중인 데몬이 정책 변경을 바로 반영한다.
 - 같은 파일을 다시 읽으면 Jev를 호출하지 않는다(gate cat은 부를 때마다 새 프로세스여도).
 - 데몬 결과와 평가 스크립트(eval.run_eval.gate_outcome)의 결과가 샘플 전체에서 같다.
+- 이 파일은 정규식·Jev·정책을 본다. NER은 명시적으로 끈다(기본은 켜짐, tests/test_ner_pipeline.py가 따로 본다).
 """
 
 import errno
@@ -55,7 +56,8 @@ def test_daemon_matches_eval_on_every_sample(tmp_path, socket_dir):
         shutil.copyfile(ROOT / s.path, target)
 
     expected = {r.sample.path: gate_outcome(r) for r in evaluate(samples, MockJevClient(), masker=mask)}
-    server = GateServer(socket_dir / "gate.sock", PlainStore(source))  # 검사기를 주지 않으면 기본 정책 + 기본 백엔드
+    store = PlainStore(source)  # 기본 정책 + 기본 Jev 백엔드. 평가 스크립트(evaluate)는 NER 없이 내므로 NER은 끈다
+    server = GateServer(socket_dir / "gate.sock", store, inspector=Inspector(store, ner_factory=lambda p: None))
     _serve(server)
     try:
         client = GateClient(server.socket_path)
@@ -90,7 +92,8 @@ def demo(tmp_path, socket_dir):
     policy_path = tmp_path / "gate-data" / "policy.yaml"
     store = PlainStore(source)
     server = GateServer(socket_dir / "gate.sock", store,
-                        inspector=Inspector(store, PolicySource(policy_path), jev_factory=lambda policy: jev))
+                        inspector=Inspector(store, PolicySource(policy_path), jev_factory=lambda policy: jev,
+                                            ner_factory=lambda policy: None))
     _serve(server)
     yield server.socket_path, source, jev, policy_path
     server.shutdown()
@@ -210,6 +213,7 @@ def test_cli_masks_config_secrets_and_policy_can_deny(demo):
 
 import os  # noqa: E402
 import signal  # noqa: E402
+import socket  # noqa: E402
 import time  # noqa: E402
 
 from gate.audit import content_hmac_of, read_records  # noqa: E402
@@ -232,7 +236,7 @@ def test_human_approval_end_to_end(tmp_path, socket_dir):
     (source / "진료" / "메모.txt").write_text(note, encoding="utf-8")
     policy_path, audit_path = tmp_path / "policy.yaml", tmp_path / "audit" / "audit.jsonl"
     write_entries(policy_path, [Entry(path_rule=PathRule("진료/**", "ask_human")),
-                                Entry(settings={"approval.timeout_seconds": 2.0})])
+                                Entry(settings={"approval.timeout_seconds": 2.0, "ner_backend": "none"})])
     sock = socket_dir / "run" / "gate.sock"
     daemon = subprocess.Popen(
         [sys.executable, "-m", "gate.cli", "--socket", str(sock), "serve", "--source", str(source),
@@ -299,3 +303,30 @@ def test_human_approval_end_to_end(tmp_path, socket_dir):
 
 def stat_mode(path) -> int:
     return os.stat(path).st_mode & 0o777
+
+
+def test_default_daemon_has_ner_on_and_blocks_without_ner_server(tmp_path, socket_dir):
+    """정책 파일 없이 띄운 gate serve는 NER 켜짐(기본)이다. NER 서버가 없으면 모든 내용 읽기가 막히고, 시작할 때 알린다."""
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "회의.txt").write_text("회의는 화요일입니다.\n", encoding="utf-8")
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        closed = f"http://127.0.0.1:{s.getsockname()[1]}"
+    sock = socket_dir / "run" / "gate.sock"
+    env = {k: v for k, v in os.environ.items() if k not in ("GATE_POLICY", "GATE_AUDIT", "GATE_APPROVE_SOCKET")}
+    env["NER_BASE_URL"] = closed
+    daemon = subprocess.Popen(
+        [sys.executable, "-m", "gate.cli", "--socket", str(sock), "serve", "--source", str(source), "--no-dialog"],
+        cwd=ROOT, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    try:
+        assert _wait(lambda: sock.exists()), "데몬이 소켓을 열지 않았습니다"
+        read = _gate(sock, "cat", "/회의.txt")
+        assert read.returncode == 1 and read.stdout == b""
+        assert "NER 판단에 실패해 차단했습니다" in read.stderr.decode()
+        assert _gate(sock, "ls", "/").returncode == 0  # 목록은 내용을 읽지 않아 그대로 된다
+    finally:
+        daemon.send_signal(signal.SIGTERM)
+        _, log = daemon.communicate(timeout=10)
+    log = log.decode()
+    assert "gate: NER 켜짐" in log and "gate policy set ner_backend none" in log

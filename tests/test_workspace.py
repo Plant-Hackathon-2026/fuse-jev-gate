@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from gate import cli
-from gate.workspace import GatePaths, WorkspaceError, agent_settings, init_workspace, resolve_paths
+from gate.workspace import GatePaths, WorkspaceError, agent_guide, agent_settings, init_workspace, resolve_paths
 
 EXAMPLE_ROOT = Path("/path/to/hackathon/gate-data")
 EXAMPLE = GatePaths(
@@ -76,6 +76,15 @@ def test_init_writes_settings_and_guide(data):
     assert json.loads(settings.read_text(encoding="utf-8")) == agent_settings(paths)
     assert str(paths.gate_bin) in guide.read_text(encoding="utf-8")
     assert init_workspace(root / "agent-workspace", paths) == {settings: "그대로", guide: "그대로"}
+
+
+def test_guide_tells_agent_both_masking_forms():
+    """정규식은 같은 길이 `*`, 규칙·NER은 `[이름]`처럼 종류 이름으로 가린다. 에이전트가 둘 다 원래 값이 아님을 알게 한다."""
+    guide = agent_guide(EXAMPLE)
+    line = next(line for line in guide.splitlines() if "가려져 나옵니다" in line)
+    for form in ("같은 길이의 `*`", "`[이름]`", "`[IP]`"):
+        assert form in line, form
+    assert "원래 값이 아닙니다" in line
 
 
 def test_init_does_not_overwrite_different_file_without_force(data):

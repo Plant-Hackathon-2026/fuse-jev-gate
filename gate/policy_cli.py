@@ -46,7 +46,7 @@ from pathlib import Path
 from typing import TextIO
 
 from gate.detectors import KINDS
-from gate.ner_client import ENTITY_GROUPS, ENTITY_NAMES
+from gate.ner_client import ENTITY_GROUPS, ENTITY_NAMES, RULE_GROUPS
 from gate.policy import (
     ACTION_NAMES,
     DEFAULT_PATH_RULES,
@@ -339,11 +339,12 @@ def _show(path: Path, entries: tuple[Entry, ...], out: TextIO) -> None:
                      f" · 가릴 때 {VISIBLE_NAMES[policy.visible[kind]]} {mark(visible_key)}")
 
     ner_on = policy.ner_backend != "none"
-    lines.append("  이름·주소·소속 등 종류별 처리 (NER이 찾은 것, `[이름]`처럼 종류 이름으로 가림)"
-                 + ("" if ner_on else " — 지금 NER이 꺼져 있어 쓰지 않음"))
+    lines.append("  이름·주소·소속 등 종류별 처리 (NER·규칙이 찾은 것, `[이름]`처럼 종류 이름으로 가림)"
+                 + ("" if ner_on else " — 지금 NER이 꺼져 있어 IP·내부 주소(규칙)만 적용"))
     for group in ENTITY_GROUPS:
         key = f"entities.{group}.action"
-        lines.append(f"    {ENTITY_NAMES[group]}: {ACTION_NAMES[policy.entity_rule(group)]} {mark(key)}")
+        how = " (규칙으로 찾음, NER을 꺼도 적용)" if group in RULE_GROUPS else ""
+        lines.append(f"    {ENTITY_NAMES[group]}: {ACTION_NAMES[policy.entity_rule(group)]} {mark(key)}{how}")
     if ner_on:
         lines.append("    가린 것이 있으면 가린 결과를 Jev에 다시 물어, 안전하면 보여주고 아니면 사람에게 물어봄")
 
@@ -354,7 +355,7 @@ def _show(path: Path, entries: tuple[Entry, ...], out: TextIO) -> None:
         f"    Jev가 '안전'이라고 확신도 {policy.allow_threshold:g} 이상으로 답하면 보여줌 {mark(allow_key)}",
         f"    Jev가 '민감'이라고 확신도 {policy.deny_threshold:g} 이상으로 답하면 거부 {mark(deny_key)}",
         "    그 사이는 사람에게 물어봄",
-        "  사람 승인 (맥 대화상자 또는 내 터미널의 gate approve / gate deny. 허용해도 번호는 가린 채로 보여줌)",
+        "  사람 승인 (맥 대화상자 또는 내 터미널의 gate approve / gate deny. 허용해도 가린 정보는 가린 채로 보여줌)",
         f"    답을 기다리는 시간: {policy.approval_timeout_seconds:g}초, 넘으면 거부 {mark(timeout_key)}",
         f"    '이 폴더 허용'을 기억하는 시간: {policy.approval_session_minutes}분 {mark(session_key)}"
         if policy.approval_session_minutes > 0 else

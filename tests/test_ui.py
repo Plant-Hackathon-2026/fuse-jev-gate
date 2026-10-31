@@ -498,6 +498,7 @@ def test_stricter_set_saves_without_confirm_and_same_value_is_unchanged(make_ui)
     ("ner_backend", "server"), ("jev_backend", "mock"), ("thresholds.allow_if_safe_confidence_gte", "0.5"),
     ("numbers.rrn", "birth"), ("numbers.rrn.visible", "last4"), ("numbers.card.action", "allow"),
     ("entities.nobody.action", "mask"), (None, "x"), ("numbers.card.action", 3),
+    ("entities.date.action", "mask"), ("entities.event.action", "deny"),   # 2026-11-01 NER 교체로 뺀 묶음
 ])
 def test_set_only_takes_number_and_entity_choices(make_ui, key, value):
     u = make_ui()
@@ -530,6 +531,7 @@ def test_interpret_does_not_save(make_ui):
 
 @pytest.mark.parametrize("sentence, outcome", [
     ("아무거나", "unclear"), ("공개 폴더는 그냥 보여줘", "path"), ("병원 기록은 보여줘도 돼", "unsupported"), ("", "unclear"),
+    ("날짜는 가려줘", "unsupported"), ("직함은 그대로 보여줘", "unsupported"),   # 지금 찾지 않는 정보
 ])
 def test_unsaveable_interpretation_has_message_and_no_ticket(make_ui, sentence, outcome):
     u = make_ui()
@@ -556,8 +558,41 @@ def test_example_sentences_are_understood():
 
 def test_ner_entity_note(make_ui):
     u = make_ui()
-    _, result = u.post("interpret", {"sentence": "이름은 가려줘"}, u.launch())
+    write_entries(u.policy, [Entry(settings={"ner_backend": "none"})])
+    session = u.launch()
+    _, result = u.post("interpret", {"sentence": "이름은 가려줘"}, session)
     assert result["notes"] == ["ner_off", "no_change"]
+    _, result = u.post("interpret", {"sentence": "IP 주소는 가려줘"}, session)
+    assert result["notes"] == ["no_change"]  # host는 규칙이 찾아 NER을 꺼도 적용된다
+
+
+def test_entity_rows_are_nine_and_host_says_rules(make_ui):
+    u = make_ui()
+    _, data = u.get("state", u.launch())
+    rows = {row["group"]: row for row in data["entities"]}
+    assert list(rows) == ["name", "address", "birth", "student_id", "org", "place", "etc", "host", "plain"]
+    assert rows["host"]["hint"] == "규칙으로 찾아요 · NER을 꺼도 적용돼요" and rows["host"]["rule"] is True
+    assert not any(row["rule"] for group, row in rows.items() if group != "host")
+    assert rows["plain"]["name"] == "나이" and rows["plain"]["hint"] == ""     # 다섯 가지 안내는 뺐다
+    assert rows["student_id"]["name"] == "식별번호(학번·사번·여권번호 등)"
+
+
+def test_retired_entries_are_listed_without_effect(make_ui):
+    """예전 정책 파일의 날짜·사건 설정은 목록에 남고(지울 수 있다) 효과가 없다고 보여 준다."""
+    u = make_ui()
+    u.policy.parent.mkdir(parents=True)
+    u.policy.write_text("version: 1\nentries:\n- set: {entities.date.action: deny}\n"
+                        "- set: {entities.name.action: deny, entities.event.action: allow}\n"
+                        "- set: {ner_backend: server}\n", encoding="utf-8")
+    session = u.launch()
+    _, data = u.get("state", session)
+    assert data["invalid"] is False
+    first, second, _ = data["entries"]
+    assert first["no_effect"] == "지금은 찾지 않는 정보" and "날짜(NER): 거부 (지금은 찾지 않음)" in first["result"]
+    assert second["no_effect"] == "" and "사건(NER): 그대로 보여줌 (지금은 찾지 않음)" in second["result"]
+    assert "date" not in {row["group"] for row in data["entities"]}
+    status, done = u.post("remove", {"number": 1, "fingerprint": first["fingerprint"]}, session)
+    assert status == 200 and done["status"] == "saved"
 
 
 # --- gate policy와 같은 결과 ---
@@ -612,10 +647,15 @@ def test_ui_changes_write_the_same_files_as_gate_policy(make_ui, tmp_path, fixed
     assert snapshot(u.policy)["history-dir-mode"] == 0o700
 
 
+NER_OFF = Entry(settings={"ner_backend": "none"})  # 기본은 켜짐이라 켜기를 시험할 때는 먼저 끈 파일에서 시작한다
+
+
 def test_ner_toggle_writes_the_same_as_gate_policy_set(make_ui, tmp_path, health, fixed_now):
     ner = health()
     cli_policy = tmp_path / "cli" / "policy.yaml"
     u = make_ui(tmp_path / "ui" / "policy.yaml", ner_url=ner.url)
+    write_entries(cli_policy, [NER_OFF])
+    write_entries(u.policy, [NER_OFF])
     session = u.launch()
     assert gate_policy(cli_policy, "set", "ner_backend", "server")[0] == 0
     assert u.post("ner", {"enable": True}, session)[1]["status"] == "saved"
@@ -637,10 +677,11 @@ def test_ner_enable_is_refused_when_health_fails(make_ui, health, kind):
         server = health(health={"status": "loading"}) if kind == "loading" else health(status=500)
         url = server.url
     u = make_ui(ner_url=url)
+    write_entries(u.policy, [NER_OFF])
     session = u.launch()
     status, data = u.post("ner", {"enable": True}, session)
     assert (status, data["error"]) == (409, "ner-down")
-    assert not u.policy.exists()
+    assert read_entries(u.policy) == (NER_OFF,)
     _, st = u.get("status", session)
     assert st["ner"]["responding"] is False and st["ner"]["state"] == "unused"
 
@@ -655,6 +696,7 @@ def test_ner_enable_refuses_non_ip_address(make_ui, health):
 def test_ner_enable_then_server_down_shows_down_and_disable_needs_no_health(make_ui, health):
     server = health()
     u = make_ui(ner_url=server.url)
+    write_entries(u.policy, [NER_OFF])
     session = u.launch()
     assert u.post("ner", {"enable": True}, session)[1]["status"] == "saved"
     _, st = u.get("status", session)
@@ -665,6 +707,18 @@ def test_ner_enable_then_server_down_shows_down_and_disable_needs_no_health(make
     _, first = u.post("ner", {"enable": False}, session)
     _, done = u.post("ner", {"enable": False, "confirm": first["confirm"]}, session)
     assert done["status"] == "saved" and build_policy(read_entries(u.policy)).ner_backend == "none"
+
+
+def test_default_policy_has_ner_on_and_shows_down_without_server(make_ui):
+    """기본은 NER 켜짐이다(3e). 서버가 없으면 상태가 '응답 없음'이라 화면이 모든 읽기가 막힌다고 알린다."""
+    u = make_ui()
+    session = u.launch()
+    _, data = u.get("state", session)
+    assert data["ner_backend"] == "server" and not u.policy.exists()
+    _, st = u.get("status", session)
+    assert st["ner"]["enabled"] is True and st["ner"]["state"] == "down"
+    _, first = u.post("ner", {"enable": False}, session)  # 끄기는 서버 없이도 되고 느슨해지는 바꿈이라 확인받는다
+    assert first["status"] == "confirm" and first["loosening"]
 
 
 def test_ner_enable_value_must_be_bool(make_ui):
@@ -824,24 +878,29 @@ def test_audit_row_cleans_agent_text():
 # --- 상태 화면 문구 ---
 
 def test_effect_text_uses_right_particles():
-    assert effect_text("entities.student_id.action", "ask_human") == \
-        "학번이 있는 파일은 사람에게 물어본 뒤 보여줘요. 허용해도 학번은 가린 채로 보여줘요."
+    assert effect_text("entities.name.action", "ask_human") == \
+        "이름이 있는 파일은 사람에게 물어본 뒤 보여줘요. 허용해도 이름은 가린 채로 보여줘요."
+    assert effect_text("entities.student_id.action", "ask_human").startswith(
+        "식별번호(학번·사번·여권번호 등)가 있는 파일은 ")  # 괄호 앞 낱말의 받침으로 조사를 고른다
     assert effect_text("numbers.card.action", "mask") == "카드번호를 가린 뒤 보여줘요."
     assert effect_text("numbers.rrn.visible", "birth") == "주민등록번호를 가릴 때 생년월일(앞 6자리)까지 공개해요."
     assert effect_text("entities.org.action", "deny").startswith("NER이 소속(학교·회사·병원 등)을")
-    assert effect_text("entities.plain.action", "mask").endswith("다섯 가지가 함께 바뀌어요.")
+    assert effect_text("entities.plain.action", "mask") == "나이를 [이름]처럼 종류 이름으로 바꿔 보여줘요."  # 다섯 가지 안내 없음
+    assert effect_text("entities.host.action", "mask") == "IP·내부 주소를 [IP]처럼 종류 이름으로 바꿔 보여줘요."
+    assert effect_text("entities.host.action", "deny").startswith("규칙이 IP·내부 주소를 찾은 파일은")
 
 
 def test_state_marks_my_values_and_overridden_entries(make_ui):
     u = make_ui()
     write_entries(u.policy, [Entry(settings={"numbers.card.action": "deny"}, said="카드번호 있는 파일은 거부"),
                              Entry(settings={"numbers.card.action": "ask_human"}),
-                             Entry(settings={"entities.name.action": "deny"})])
+                             Entry(settings={"entities.name.action": "deny"}),
+                             Entry(settings={"entities.host.action": "deny"}), NER_OFF])
     _, data = u.get("state", u.launch())
     card = next(row for row in data["numbers"] if row["kind"] == "card")
     assert card["action"] == {"key": "numbers.card.action", "value": "ask_human", "default": "mask",
                               "choices": ["deny", "ask_human", "mask"], "mine": True}
-    assert [e["no_effect"] for e in data["entries"]] == ["뒤에 정한 것이 덮어씀", "", "NER을 켜야 효과 있음"]
+    assert [e["no_effect"] for e in data["entries"]] == ["뒤에 정한 것이 덮어씀", "", "NER을 켜야 효과 있음", "", ""]
     assert data["entries"][0]["fingerprint"] == fingerprint(read_entries(u.policy)[0])
     name = next(row for row in data["entities"] if row["group"] == "name")
     assert name["value"] == "deny" and name["mine"] and name["choices"] == ["deny", "ask_human", "mask", "allow"]

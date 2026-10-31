@@ -15,18 +15,18 @@ H013,어느 학교 다니는지 나오는 파일은 열어 보지 마,setting,en
 H014,소속 부서가 적혀 있으면 내가 오케이 할 때까지 기다려,setting,entities.org.action=ask_human,entity,부서=DEPARTMENT → org. '오케이 할 때까지 기다려' → 물어봄
 H015,어디서 만났는지 같은 장소 정보는 지워 줬으면 해,setting,entities.place.action=mask,entity,장소=PLACE. 바람 표현 → 가림
 H016,지역 이름이 나오는 문서는 에이전트한테 넘기지 마,setting,entities.place.action=deny,entity,지역 이름=지명 → place(address 아님). 문서를 넘기지 마 → 거부
-H017,날짜 나오는 파일은 아예 차단하면 안 될까?,setting,entities.date.action=deny,entity,'~하면 안 될까?'는 금지가 아니라 부탁 → 차단=거부
-H018,날짜가 적혀 있으면 넘기기 전에 내 허락부터 받아,setting,entities.date.action=ask_human,entity,'허락부터 받아' → 물어봄
-H019,사고나 사건 이름은 안 보이게 처리해 주세요,setting,entities.event.action=mask,entity,사고·사건 이름=EVENT
-H020,사건 이름 정도는 에이전트가 봐도 문제없어,setting,entities.event.action=allow,entity,'봐도 문제없어' → 그대로
+H017,날짜 나오는 파일은 아예 차단하면 안 될까?,unsupported,,entity,'~하면 안 될까?'는 금지가 아니라 부탁 → 차단=거부. 2026-11-01 NER 교체로 찾지 않음(전 정답 entities.date.action=deny)
+H018,날짜가 적혀 있으면 넘기기 전에 내 허락부터 받아,unsupported,,entity,'허락부터 받아' → 물어봄. 2026-11-01 NER 교체로 찾지 않음(전 정답 entities.date.action=ask_human)
+H019,사고나 사건 이름은 안 보이게 처리해 주세요,unsupported,,entity,사고·사건 이름=EVENT. 2026-11-01 NER 교체로 찾지 않음(전 정답 entities.event.action=mask)
+H020,사건 이름 정도는 에이전트가 봐도 문제없어,unsupported,,entity,'봐도 문제없어' → 그대로. 2026-11-01 NER 교체로 찾지 않음(전 정답 entities.event.action=allow)
 H021,어디로 분류할지 애매한 기타 민감 정보라도 섞인 파일이면 에이전트는 못 보게 해,setting,entities.etc.action=deny,entity,기타 민감 정보=etc. 파일이 주어인 '못 보게' → 거부
 H022,기타 민감 정보는 나한테 확인받은 다음에 보여주면 좋겠어,setting,entities.etc.action=ask_human,entity,'확인받은 다음에' → 물어봄
 H023,회사 내부 서버 IP가 새면 곤란하니까 가려 줘,setting,entities.host.action=mask,entity,'회사'가 꾸밈말이고 끝말은 서버 IP → host(org 아님)
 H024,로그에 IP가 찍혀 있으면 읽기 전에 나한테 물어봐 줘,setting,entities.host.action=ask_human,entity,'로그에'는 내용 위치이지 경로 규칙이 아님 → host
 H025,개발 서버 호스트명은 숨길 필요 없어요,setting,entities.host.action=allow,entity,호스트명=INTERNAL_HOST → host
-H026,직책 같은 건 가리지 말고 놔둬,setting,entities.plain.action=allow,entity,직책=TITLE → plain. 기본값과 같음
+H026,직책 같은 건 가리지 말고 놔둬,unsupported,,entity,직책=TITLE → plain. 기본값과 같음. 2026-11-01 NER 교체로 찾지 않음(전 정답 entities.plain.action=allow)
 H027,나이가 적혀 있으면 그 파일은 못 열게 해 줘,setting,entities.plain.action=deny,entity,나이=AGE → plain 묶음 전체가 거부로 바뀜
-H028,수강 과목은 가려 줬으면 좋겠는데,setting,entities.plain.action=mask,entity,과목=COURSE → plain. 말끝 흐리는 바람
+H028,수강 과목은 가려 줬으면 좋겠는데,unsupported,,entity,과목=COURSE → plain. 말끝 흐리는 바람. 2026-11-01 NER 교체로 찾지 않음(전 정답 entities.plain.action=mask)
 H029,"주민번호 뒷자리 첫 숫자까지는 보여줘도 돼, 남녀 구분은 필요하거든",setting,numbers.rrn.visible=birth_gender,number,뒷자리 첫 숫자=성별 자리 → birth_gender. '보여줘도 돼'지만 번호라 공개 범위
 H030,카드 번호는 마지막 4개 숫자만 남기고 나머지는 별표 처리해,setting,numbers.card.visible=last4,number,마지막 4개 숫자=last4
 H031,폰 번호 있으면 나한테 먼저 물어보면 안 될까?,setting,numbers.mobile.action=ask_human,number,폰 번호=휴대폰(mobile). '~하면 안 될까?' 부탁

@@ -47,8 +47,11 @@ def test_token_changes_when_the_file_changes_in_between(policy_file):
 
 
 def test_notes(policy_file):
-    ner = pc.plan_add(policy_file, (), Entry(settings={"entities.name.action": "deny"}, said="이름 있는 파일은 거부"))
+    off = (Entry(settings={"ner_backend": "none"}),)
+    ner = pc.plan_add(policy_file, off, Entry(settings={"entities.name.action": "deny"}, said="이름 있는 파일은 거부"))
     assert ner.notes() == ("ner_off",)
+    on = pc.plan_add(policy_file, (), Entry(settings={"entities.name.action": "deny"}))
+    assert on.notes() == ()  # 기본은 NER 켜짐이라 안내하지 않는다
     context = pc.plan_add(policy_file, (), Entry(context="병원 기록은 보여주지 마", said="병원 기록은 보여주지 마"))
     assert context.notes() == ("context_mock",)
     same = pc.plan_add(policy_file, (), Entry(settings={"numbers.card.action": "mask"}))
@@ -100,3 +103,46 @@ def test_write_failure_is_change_error_and_leaves_no_history(policy_file, monkey
     with pytest.raises(pc.ChangeError, match="정책 파일을 쓸 수 없습니다"):
         pc.apply(change)
     assert pc.history(policy_file) == []
+
+
+# --- 뺀 묶음과 규칙 묶음 (3e, 2026-11-01 NER 교체) ---
+
+@pytest.mark.parametrize("key", ["entities.date.action", "entities.event.action"])
+def test_retired_keys_cannot_be_added(policy_file, key):
+    with pytest.raises(pc.ChangeError, match="지정할 수 없습니다"):
+        pc.setting_entry(key, ["mask"])
+    with pytest.raises(pc.ChangeError, match="따로 찾지 않습니다"):
+        pc.plan_add(policy_file, (), Entry(settings={key: "mask"}))   # 코드가 만든 항목도 새로 더하지 않는다
+    assert not policy_file.exists()
+    assert "2026" not in pc.retired_message(key)   # 터미널 안내에도 내부 날짜는 넣지 않는다
+
+
+def test_old_entries_with_retired_keys_stay_and_can_be_removed(policy_file):
+    old = Entry.from_dict({"set": {"entities.date.action": "deny"}, "said": "날짜는 거부"})
+    write_entries(policy_file, [old])
+    change = pc.plan_add(policy_file, pc.read_current(policy_file), pc.setting_entry("numbers.card.action", ["deny"]))
+    pc.apply(change)
+    assert [dict(e.settings) for e in read_entries(policy_file)] == [{"entities.date.action": "deny"},
+                                                                     {"numbers.card.action": "deny"}]
+    pc.apply(pc.plan_remove(policy_file, read_entries(policy_file), "1"))
+    assert [dict(e.settings) for e in read_entries(policy_file)] == [{"numbers.card.action": "deny"}]
+
+
+def test_host_setting_has_no_ner_off_note(policy_file):
+    write_entries(policy_file, [Entry(settings={"ner_backend": "none"})])
+    entries = pc.read_current(policy_file)
+    host = pc.plan_add(policy_file, entries, Entry(settings={"entities.host.action": "deny"}))
+    assert host.notes() == ()                                   # IP·내부 주소는 규칙이라 NER을 꺼도 적용
+    name = pc.plan_add(policy_file, entries, Entry(settings={"entities.name.action": "deny"}))
+    assert name.notes() == ("ner_off",)
+    assert pc.needs_ner("entities.name.action") and not pc.needs_ner("entities.host.action")
+    assert not pc.needs_ner("entities.date.action") and not pc.needs_ner("numbers.card.action")
+
+
+def test_turning_ner_off_is_loosening_and_needs_confirm(policy_file):
+    change = pc.plan_add(policy_file, (), pc.setting_entry("ner_backend", ["none"]), "set")
+    assert change.needs_confirm
+    assert change.loosening == ("NER(이름·주소·소속 가리기) 백엔드: server → NER(이름·주소·소속 가리기) 백엔드: none",)
+    back_on = pc.plan_add(policy_file, (Entry(settings={"ner_backend": "none"}),),
+                          pc.setting_entry("ner_backend", ["server"]), "set")
+    assert not back_on.needs_confirm

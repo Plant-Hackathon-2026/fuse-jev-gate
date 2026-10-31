@@ -8,7 +8,11 @@
   ls      {"entries": [{"name", "type"}]}
   stat    {"stat": {"type", "size", "mode", "mtime_ns"}}          (크기는 원본 그대로. 정규식이 가린 부분은 길이가 같지만
           NER이 `[이름]`처럼 가리면 cat 내용 길이가 달라진다(3c). 끝까지 읽으려면 size 없이 읽거나 빈 응답이 올 때까지 읽는다)
-  cat     {"data_b64", "decision": "allow" | "mask", "masked": {"종류": 건수}}   (종류는 번호 종류 또는 NER 묶음)
+  cat     {"data_b64", "decision": "allow" | "mask", "masked": {"종류": 건수}, "labeled": {"종류": 건수}}
+          masked는 가린 종류별 건수(종류는 번호 종류 또는 NER 묶음)이고, labeled는 그중 규칙·NER이 `[이름]`처럼 종류 이름으로
+          가린 것이다(나머지는 정규식이 같은 길이 `*`로 가렸다). 둘 다 mask일 때만 온다. labeled는 나중에 더했다(2026-11-01).
+          NER이 정규식이 놓친 전화번호·이메일도 같은 칸(mobile·phone·email)으로 세서 종류만으로는 가린 방식을 알 수 없어서다.
+          labeled가 없는 예전 데몬 응답은 받는 쪽(gate.cli)이 번호 종류는 `*`, 그 밖은 종류 이름으로 가렸다고 본다.
           차단(정책·Jev·사람 거부·승인 시간 초과)은 EACCES다. 사람 승인이 필요하면 데몬이 답을 기다린 뒤 응답한다.
   search  요청 {"path", "pattern", "ignore_case": false, "purpose", "max_results": 100}
           결과 {"matches": [{"path", "line", "text"}], "skipped": [{"path", "errno", "message"}],

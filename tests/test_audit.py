@@ -168,7 +168,8 @@ def test_raw_content_and_found_values_never_reach_the_log(tmp_path):
     (root / "연락처.txt").write_text(f"담당자 연락처 {FAKE_PHONE}\n", encoding="utf-8")
     (root / "주민.txt").write_text(f"주민번호 {FAKE_RRN}\n", encoding="utf-8")
     jev = MockJevClient("fixed", label="safe", confidence=0.99)
-    inspector = Inspector(PlainStore(root), PolicySource(tmp_path / "policy.yaml"), jev_factory=lambda policy: jev)
+    inspector = Inspector(PlainStore(root), PolicySource(tmp_path / "policy.yaml"), jev_factory=lambda policy: jev,
+                          ner_factory=lambda policy: None)  # 정규식이 찾은 값을 본다. NER은 명시적으로 끈다
     purpose = f"{FAKE_PHONE} 번호와 {FAKE_RRN} 확인"
     log_path = tmp_path / "logs" / "audit.jsonl"
     with AuditLog(log_path) as log:

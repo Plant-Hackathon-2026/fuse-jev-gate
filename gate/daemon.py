@@ -92,6 +92,7 @@ def handle_request(store: Store, inspector: Inspector, peer: Peer | None, reques
     response = {"data_b64": base64.b64encode(data).decode("ascii"), "decision": verdict.judgment.action}
     if verdict.judgment.action == "mask":
         response["masked"] = dict(verdict.judgment.findings)
+        response["labeled"] = dict(verdict.judgment.labeled)
     return response, verdict.judgment
 
 

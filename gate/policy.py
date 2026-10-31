@@ -25,9 +25,13 @@
 설정 키 (setting_keys(), 기본값은 config/policy.yaml에 설명과 함께 있다)
   numbers.<종류>.action   mask | ask_human | deny     정규식이 그 종류를 찾았을 때. 기본 mask (종류에는 비밀값 secret도 있다)
   numbers.<종류>.visible  종류별 공개 범위              gate.detectors.VISIBLE_CHOICES. 기본 none(전부 가림)
-  entities.<묶음>.action  allow | mask | ask_human | deny   NER이 그 묶음을 찾았을 때(3c). 기본 mask, plain(시간·연도·나이·직함·과목)은 allow
-                                                       묶음은 gate.ner_client.ENTITY_GROUPS. 전화·이메일·비밀값은 numbers 칸을 따른다
-  ner_backend, ner_timeout_seconds                     NER 백엔드(none | server, 기본 none = 끔), NER 응답 제한 시간(초)
+  entities.<묶음>.action  allow | mask | ask_human | deny   NER·규칙이 그 묶음을 찾았을 때(3c, 3e). 기본 mask, plain(나이)은 allow
+                                                       묶음은 gate.ner_client.ENTITY_GROUPS. 전화·이메일은 numbers 칸을 따른다.
+                                                       host(IP·내부 주소)는 규칙이 찾아 NER을 꺼도 적용된다
+  (뺀 키) entities.date.action, entities.event.action  2026-11-01 NER 교체로 찾지 않는 묶음. 예전 정책 파일에 있으면 읽되
+                                                       효과가 없다(정책 설정에 넣지 않음). 새로 지정할 수는 없다(validate_setting이 거부)
+  ner_backend, ner_timeout_seconds                     NER 백엔드(server | none, 기본 server = 켬), NER 응답 제한 시간(초).
+                                                       NER 서버가 없으면 모든 내용 읽기가 차단된다(끄려면 none)
   thresholds.allow_if_safe_confidence_gte              Jev가 safe이고 확신도가 이 값 이상이면 허용
   thresholds.deny_if_sensitive_confidence_gte          Jev가 safe가 아니고 확신도가 이 값 이상이면 차단 (그 사이는 사람 승인)
   jev_backend, jev_timeout_seconds, max_inspect_bytes  Jev 백엔드 이름, 타임아웃(초), Jev 한 번에 넘기는 최대 바이트
@@ -71,7 +75,15 @@ import yaml
 
 from gate.detectors import KINDS, VISIBLE_CHOICES, Finding
 from gate.jev_client import JevDecision, available_backends
-from gate.ner_client import DEFAULT_ENTITY_ACTIONS, ENTITY_GROUPS, ENTITY_NAMES, NER_BACKENDS
+from gate.ner_client import (
+    DEFAULT_ENTITY_ACTIONS,
+    ENTITY_GROUPS,
+    ENTITY_NAMES,
+    NER_BACKENDS,
+    RETIRED_ENTITY_GROUPS,
+    RETIRED_ENTITY_NAMES,
+    RULE_GROUPS,
+)
 
 Action = Literal["allow", "mask", "ask_human", "deny"]  # 느슨한 것 → 엄격한 것
 ACTIONS: tuple[Action, ...] = get_args(Action)
@@ -168,7 +180,8 @@ class Entry:
         if self.settings is not None:
             if not isinstance(self.settings, Mapping) or not self.settings:
                 raise PolicyError("set은 비어 있지 않은 '설정 키: 값' 묶음이어야 합니다")
-            checked = {key: validate_setting(key, value) for key, value in self.settings.items()}
+            checked = {key: _retired_value(key, value) if key in RETIRED_SETTING_KEYS else validate_setting(key, value)
+                       for key, value in self.settings.items()}
             object.__setattr__(self, "settings", MappingProxyType(checked))
         if self.context is not None and (not isinstance(self.context, str) or not self.context.strip()):
             raise PolicyError("context는 비어 있지 않은 문장이어야 합니다")
@@ -225,6 +238,9 @@ def _entity_settings() -> dict[str, tuple[str, ...]]:
 
 
 _CHOICES: dict[str, tuple[str, ...]] = {**_number_settings(), **_entity_settings(), "ner_backend": NER_BACKENDS}
+# 뺀 묶음의 키(2026-11-01). 정책 파일에서 읽을 때만 받고(Entry에 남아 gate policy show가 보여 준다) 정책에는 넣지 않는다.
+RETIRED_SETTING_KEYS: frozenset[str] = frozenset(f"entities.{group}.action" for group in RETIRED_ENTITY_GROUPS)
+_RETIRED_CHOICES = ("deny", "ask_human", "mask", "allow")
 _DEFAULTS: dict[str, object] = {
     **{key: ("mask" if key.endswith(".action") else "none") for key in _number_settings()},
     **{f"entities.{group}.action": action for group, action in DEFAULT_ENTITY_ACTIONS.items()},
@@ -235,8 +251,9 @@ _DEFAULTS: dict[str, object] = {
     "max_inspect_bytes": 200_000,
     "approval.timeout_seconds": 30.0,
     "approval.session_minutes": 60,
-    # NER 서버가 없으면 모든 읽기가 차단되므로 기본은 끔이다. 끄면 3b와 똑같이 동작한다(3c, 2026-10-31)
-    "ner_backend": "none",
+    # 기본은 켬이다(3e, 2026-11-01 사용자 결정). NER 서버(NER_BASE_URL, 없으면 127.0.0.1:8001)가 없으면 모든 내용 읽기가
+    # 차단된다(fail-closed). 끄면(none) 규칙(IP·내부 주소) 말고는 3b와 똑같이 동작한다
+    "ner_backend": "server",
     "ner_timeout_seconds": 10.0,
 }
 _FLOAT_RANGES = {
@@ -264,8 +281,24 @@ def setting_choices(key: str) -> tuple[str, ...] | None:
     return _CHOICES.get(key)
 
 
+def is_retired(key: object) -> bool:
+    """2026-11-01 NER 교체로 뺀 묶음의 키인가(entities.date.action, entities.event.action)."""
+    return key in RETIRED_SETTING_KEYS
+
+
+def _retired_value(key: str, value: object) -> object:
+    """뺀 키의 값. 효과는 없지만 정책 파일이 깨졌는지는 지금처럼 본다(예전 선택지가 아니면 PolicyError)."""
+    if not isinstance(value, str) or value not in _RETIRED_CHOICES:
+        raise PolicyError(f"{key}는 {', '.join(_RETIRED_CHOICES)} 중 하나여야 합니다: {value!r}")
+    return value
+
+
 def validate_setting(key: object, value: object) -> object:
-    """설정 하나를 검사해 정리한 값을 돌려준다. 모르는 키나 값이면 PolicyError."""
+    """설정 하나를 검사해 정리한 값을 돌려준다. 모르는 키나 값, 뺀 키(is_retired)면 PolicyError."""
+    if is_retired(key):
+        group = key.split(".")[1]
+        raise PolicyError(f"{key}는 지정할 수 없습니다. 지금은 {RETIRED_ENTITY_NAMES[group]}을(를) 따로 찾지 않습니다"
+                          "(2026-11-01 NER 교체)")
     if key not in _DEFAULTS:
         raise PolicyError(f"알 수 없는 설정 키: {key!r}")
     choices = setting_choices(key)
@@ -357,13 +390,14 @@ class Policy:
 
 
 def build_policy(entries: Sequence[Entry] = ()) -> Policy:
-    """기본값 위에 사용자 항목을 차례로 적용한다. 같은 설정을 여러 번 지정하면 나중 것이 이긴다."""
+    """기본값 위에 사용자 항목을 차례로 적용한다. 같은 설정을 여러 번 지정하면 나중 것이 이긴다.
+    뺀 키(is_retired)는 건너뛴다(예전 정책 파일이 그대로 읽히되 효과가 없다)."""
     settings = default_settings()
     path_rules = list(DEFAULT_PATH_RULES)
     context_rules: list[str] = []
     for entry in entries:
         if entry.settings is not None:
-            settings.update(entry.settings)
+            settings.update((k, v) for k, v in entry.settings.items() if not is_retired(k))
         elif entry.context is not None:
             context_rules.append(entry.context.strip())
         else:
@@ -552,15 +586,19 @@ def _describe(key: str, value: object) -> str:
         _, kind, what = key.split(".")
         names = ACTION_NAMES if what == "action" else VISIBLE_NAMES
         return f"{KIND_NAMES[kind]}: {names.get(value, value)}"
+    if is_retired(key):
+        _, group, _ = key.split(".")
+        return f"{RETIRED_ENTITY_NAMES[group]}(NER): {ACTION_NAMES.get(value, value)} (지금은 찾지 않음)"
     if key.startswith("entities."):
         _, group, _ = key.split(".")
-        return f"{ENTITY_NAMES[group]}(NER): {ACTION_NAMES.get(value, value)}"
+        how = "규칙" if group in RULE_GROUPS else "NER"  # IP·내부 주소는 규칙이 찾는다(3e)
+        return f"{ENTITY_NAMES[group]}({how}): {ACTION_NAMES.get(value, value)}"
     shown = f"{value:g}" if isinstance(value, float) else value
     return f"{SETTING_NAMES.get(key, key)}: {shown}"
 
 
 def describe_setting(key: str, value: object) -> str:
-    """설정 하나를 사용자에게 보여 줄 한국어 한 줄로 바꾼다."""
+    """설정 하나를 사용자에게 보여 줄 한국어 한 줄로 바꾼다. 뺀 키는 "(지금은 찾지 않음)"을 붙인다."""
     return _describe(key, value)
 
 

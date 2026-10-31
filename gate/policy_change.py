@@ -12,6 +12,8 @@
     (되돌리면 기본값). 최근 MAX_HISTORY개만 둔다. 쓰기에 실패하면 방금 쌓은 기록을 지운다.
   - undo는 가장 최근 기록을 정책 파일에 쓰고 그 기록을 지운다. undo 자체는 기록하지 않는다(다시 실행하기는 없다).
   - 정책 파일은 write_entries로 원자적으로 쓴다(임시 파일 → rename, 0600).
+  - 뺀 키(gate.policy.is_retired: entities.date·event.action)는 새 항목으로 더하지 못한다. 예전 정책 파일에 있던
+    항목은 그대로 두고(지우기·되돌리기는 된다) 효과만 없다.
 """
 
 import hashlib
@@ -24,6 +26,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
+from gate.ner_client import RETIRED_ENTITY_NAMES, RULE_GROUPS
 from gate.policy import (
     Entry,
     PathRule,
@@ -32,6 +35,7 @@ from gate.policy import (
     build_policy,
     default_settings,
     dump_entries,
+    is_retired,
     loosened,
     read_entries,
     setting_keys,
@@ -46,7 +50,7 @@ _HISTORY_NAME = re.compile(r"^(\d{6,})\.yaml$")
 ChangeAction = Literal["add", "set", "remove", "undo"]
 # 저장 전에 알려 줄 점. 글은 보여 주는 쪽(gate policy, gate ui)이 따로 쓴다.
 #   context_mock: 맥락 규칙인데 지금 Jev가 Mock이다(Mock은 맥락 규칙을 판단에 쓰지 않는다)
-#   ner_off:      NER 묶음 설정인데 지금 NER이 꺼져 있다(효과 없음)
+#   ner_off:      NER 묶음 설정인데 지금 NER이 꺼져 있다(효과 없음). 규칙이 찾는 host 묶음은 NER을 꺼도 적용되어 빼고 본다
 #   no_change:    지금 정책과 같은 값이라 동작이 바뀌지 않는다
 Note = Literal["context_mock", "ner_off", "no_change"]
 
@@ -154,12 +158,19 @@ class Change:
         if self.action in ("add", "set") and entry is not None:
             if entry.context is not None and self.after_policy.jev_backend == "mock":
                 out.append("context_mock")
-            if entry.settings and any(key.startswith("entities.") for key in entry.settings) \
+            if entry.settings and any(needs_ner(key) for key in entry.settings) \
                     and self.after_policy.ner_backend == "none":
                 out.append("ner_off")
             if self.before_policy is not None and self.after_policy.version == self.before_policy.version:
                 out.append("no_change")
         return tuple(out)
+
+
+def needs_ner(key: str) -> bool:
+    """NER이 켜져 있어야 효과가 있는 설정인가. 규칙이 찾는 host 묶음과 뺀 키는 아니다."""
+    if not key.startswith("entities.") or is_retired(key):
+        return False
+    return key.split(".")[1] not in RULE_GROUPS
 
 
 def _build(entries: Sequence[Entry]) -> Policy:
@@ -170,7 +181,11 @@ def _build(entries: Sequence[Entry]) -> Policy:
 
 
 def plan_add(path: Path, entries: Sequence[Entry], entry: Entry, action: ChangeAction = "add") -> Change:
-    """entries 뒤에 entry를 더하는 바꿈. 문장으로 더하기(add)와 바로 지정(set)이 같이 쓴다."""
+    """entries 뒤에 entry를 더하는 바꿈. 문장으로 더하기(add)와 바로 지정(set)이 같이 쓴다.
+    entry에 뺀 키가 있으면 ChangeError(새로 저장하지 않는다)."""
+    retired = [key for key in (entry.settings or {}) if is_retired(key)]
+    if retired:
+        raise ChangeError(retired_message(retired[0]))
     before = tuple(entries)
     after = (*before, entry)
     before_policy, after_policy = build_policy(before), _build(after)
@@ -187,11 +202,20 @@ def setting_entry(key: str, values: Sequence[str]) -> Entry:
             return Entry(path_rule=PathRule(values[0], values[1]), at=now())
         except PolicyError as exc:
             raise ChangeError(str(exc)) from exc
+    if is_retired(key):
+        raise ChangeError(retired_message(key))
     if key not in setting_keys():
         raise ChangeError(f"알 수 없는 설정 키: {key}\n  쓸 수 있는 키: {', '.join(setting_keys())}, path")
     if len(values) != 1:
         raise ChangeError(f"값은 하나만 씁니다: gate policy set {key} <값>")
     return Entry(settings={key: parse_value(key, values[0])}, at=now())
+
+
+def retired_message(key: str) -> str:
+    """뺀 키를 지정하려 할 때의 안내."""
+    name = RETIRED_ENTITY_NAMES[key.split(".")[1]]
+    return (f"{key}는 지정할 수 없습니다. 지금은 {name}을(를) 따로 찾지 않습니다(이름·주소를 찾는 NER 모델을 바꾸면서 뺐습니다).\n"
+            "  예전 정책 파일에 있는 항목은 그대로 읽히지만 효과가 없습니다(`gate policy remove <번호>`로 지울 수 있습니다).")
 
 
 def parse_value(key: str, raw: str) -> object:

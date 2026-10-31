@@ -63,7 +63,10 @@ def _start(server):
 @pytest.fixture
 def gate(source, socket_dir):
     events = []
-    server = GateServer(socket_dir / "run" / "gate.sock", PlainStore(source), on_request=events.append)
+    # 이 파일은 소켓·정규식·Jev를 본다. NER은 명시적으로 끈다(기본은 켜짐, tests/test_ner_pipeline.py가 따로 본다).
+    store = PlainStore(source)
+    server = GateServer(socket_dir / "run" / "gate.sock", store, on_request=events.append,
+                        inspector=Inspector(store, ner_factory=lambda p: None))
     _start(server)
     yield server, GateClient(server.socket_path), events
     server.shutdown()
@@ -215,7 +218,7 @@ def judged(source, socket_dir, tmp_path):
     jev = MockJevClient("fixed", label="safe", confidence=0.99, by_path={"/readme.txt": ("sensitive", 0.97)})
     events = []
     store = PlainStore(source)
-    inspector = Inspector(store, PolicySource(policy_path), jev_factory=lambda policy: jev)
+    inspector = Inspector(store, PolicySource(policy_path), jev_factory=lambda policy: jev, ner_factory=lambda p: None)
     server = GateServer(socket_dir / "gate.sock", store, on_request=events.append, inspector=inspector)
     _start(server)
     yield GateClient(server.socket_path), jev, policy_path, events
@@ -227,7 +230,7 @@ def test_cat_masks_numbers_and_reports_decision(judged):
     client, jev, _, events = judged
     result = client.read("/연락처.txt", purpose="상담 요약")
     assert result.data == "상담 연락처 ***-****-**** 입니다.\n".encode()
-    assert (result.decision, result.masked) == ("mask", {"mobile": 1})
+    assert (result.decision, result.masked, result.labeled) == ("mask", {"mobile": 1}, {})
     assert client.read("/상담/2026-03.txt").decision == "allow"
     judgment = settled(events, 1).judgment
     assert (judgment.action, dict(judgment.findings)) == ("mask", {"mobile": 1})
@@ -298,6 +301,86 @@ def test_cat_rejects_bad_fields(judged, fields):
     assert exc.value.errno == errno.EINVAL
 
 
+# --- gate cat 끝 안내: 정규식은 같은 길이 `*`, 규칙·NER은 `[이름]`처럼 종류 이름 ---
+
+from gate import cli  # noqa: E402
+from gate.cli import mask_notice  # noqa: E402
+from gate.ner_client import Entity, NerResult  # noqa: E402
+
+STARS_ONLY = "gate: 개인정보 일부를 같은 길이의 *로 가렸습니다 (휴대폰 번호 1건)"
+LABELS_ONLY = "gate: 개인정보 일부를 [이름]처럼 종류 이름으로 가렸습니다 (이름 1건, IP·내부 주소 1건, 일반 전화번호 1건)"
+BOTH = "gate: 개인정보 일부를 같은 길이의 *로 (휴대폰 번호 1건), [이름]처럼 종류 이름으로 (이름 1건) 가렸습니다"
+
+
+class WordNer:
+    """words의 글자가 처음 나오는 곳을 개체 하나로 돌려주는 가짜 NER."""
+
+    def __init__(self, words):
+        self.words = words
+
+    def cache_tag(self):
+        return "ner:test"
+
+    def find(self, text):
+        found = [Entity(label, text.find(w), text.find(w) + len(w), 0.9) for w, label in self.words.items() if w in text]
+        return NerResult(tuple(sorted(found, key=lambda e: e.start)), "ner:test")
+
+
+@pytest.fixture
+def ner_gate(source, socket_dir, tmp_path):
+    """NER이 켜진(기본 정책) 데몬. 가린 결과는 Jev가 safe라고 답해 가린 채 보여 준다."""
+    (source / "번호.txt").write_text("연락처 010-1234-5678\n", encoding="utf-8")
+    (source / "이름.txt").write_text("담당 홍길동, 서버 10.0.0.12, 대표번호 1588-1234\n", encoding="utf-8")
+    (source / "둘다.txt").write_text("담당 홍길동 010-1234-5678\n", encoding="utf-8")
+    ner = WordNer({"홍길동": "NAME", "1588-1234": "PHONE", "010-1234-5678": "PHONE"})
+    jev = MockJevClient("fixed", label="safe", confidence=0.99)
+    store = PlainStore(source)
+    inspector = Inspector(store, PolicySource(tmp_path / "없음.yaml"), jev_factory=lambda p: jev,
+                          ner_factory=lambda p: ner)
+    server = GateServer(socket_dir / "run" / "gate.sock", store, inspector=inspector)
+    _start(server)
+    yield server.socket_path
+    server.shutdown()
+    server.server_close()
+
+
+@pytest.mark.parametrize("path, shown, masked, labeled, notice", [
+    ("/번호.txt", "연락처 ***-****-****\n", {"mobile": 1}, {}, STARS_ONLY),
+    # 규칙(IP)과 NER만. 정규식이 놓친 대표번호도 칸은 일반 전화번호지만 `*`가 아니라 [전화번호]로 가렸다
+    ("/이름.txt", "담당 [이름], 서버 [IP], 대표번호 [전화번호]\n", {"name": 1, "host": 1, "phone": 1},
+     {"name": 1, "host": 1, "phone": 1}, LABELS_ONLY),
+    ("/둘다.txt", "담당 [이름] ***-****-****\n", {"name": 1, "mobile": 1}, {"name": 1}, BOTH),
+])
+def test_cli_cat_notice_names_the_masking_actually_used(ner_gate, capsys, path, shown, masked, labeled, notice):
+    result = GateClient(ner_gate).read(path)
+    assert (result.data.decode(), result.masked, result.labeled) == (shown, masked, labeled)
+    assert cli.main(["--socket", str(ner_gate), "cat", path]) == 0
+    out, err = capsys.readouterr()
+    assert out == shown
+    assert err == notice + "\n"
+
+
+def test_mask_notice_by_kind():
+    assert mask_notice({"mobile": 1}, {}) == STARS_ONLY
+    assert mask_notice({"name": 1, "host": 1, "phone": 1}, {"name": 1, "host": 1, "phone": 1}) == LABELS_ONLY
+    assert mask_notice({"mobile": 1, "name": 1}, {"name": 1}) == BOTH
+    # 같은 칸을 정규식과 NER이 나눠 가린 경우(휴대폰 번호 2건 중 1건은 정규식이 놓쳐 NER이 찾았다)
+    assert mask_notice({"mobile": 2}, {"mobile": 1}) == (
+        "gate: 개인정보 일부를 같은 길이의 *로 (휴대폰 번호 1건), [이름]처럼 종류 이름으로 (휴대폰 번호 1건) 가렸습니다")
+
+
+def test_old_daemon_response_without_labeled_is_read_by_kind_names(monkeypatch):
+    """labeled가 없는 예전 데몬 응답: 번호 종류는 `*`, 그 밖은 종류 이름으로 가렸다고 본다."""
+    client = GateClient("/없는/소켓")
+    monkeypatch.setattr(client, "request", lambda op, **fields: {
+        "ok": True, "data_b64": "", "decision": "mask", "masked": {"mobile": 1, "name": 1}})
+    result = client.read("/둘다.txt")
+    assert (result.masked, result.labeled) == ({"mobile": 1, "name": 1}, None)
+    assert mask_notice(result.masked, result.labeled) == BOTH
+    assert mask_notice({"mobile": 1}, None) == STARS_ONLY
+    assert mask_notice({"host": 1}, None) == "gate: 개인정보 일부를 [이름]처럼 종류 이름으로 가렸습니다 (IP·내부 주소 1건)"
+
+
 # --- Phase 5: 사람 승인 (게이트 소켓 + 승인 소켓) ---
 
 from gate.approval import Approvals  # noqa: E402
@@ -316,7 +399,7 @@ def asking_gate(source, socket_dir, tmp_path):
     events, answers = [], []
     server = GateServer(socket_dir / "run" / "gate.sock", store, on_request=events.append,
                         inspector=Inspector(store, PolicySource(policy_path), jev_factory=lambda p: jev,
-                                            approvals=approvals))
+                                            ner_factory=lambda p: None, approvals=approvals))
     approval_server = ApprovalServer(socket_dir / "run" / "approve.sock", approvals,
                                      on_answer=lambda *a: answers.append(a))
     _start(server)

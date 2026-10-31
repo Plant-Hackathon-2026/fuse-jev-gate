@@ -1,4 +1,4 @@
-"""NER 서버 실행: python -m nerserve --model-dir ../models/ner [--host 127.0.0.1] [--port 8001] [--device auto]
+"""NER 서버 실행: python -m nerserve --model-dir ../models/ner-xlmr-pii [--host 127.0.0.1] [--port 8001] [--device auto]
 
 모델을 읽기 전에 주소부터 확인한다(루프백이 아니면 바로 끝낸다). 로그에는 원문을 남기지 않는다.
 """

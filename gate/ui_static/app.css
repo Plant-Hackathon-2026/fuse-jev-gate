@@ -165,7 +165,7 @@ select.input { padding-right: 8px; }
 .mine-tag { display: inline-flex; align-items: center; min-height: 22px; padding: 0 8px; border: 1px solid var(--forest-700); color: var(--forest-700); font-size: 12px; font-weight: 700; }
 .tag { display: inline-flex; align-items: center; min-height: 24px; padding: 0 8px; border: 1px solid var(--forest-700); color: var(--forest-700); font-size: 12px; font-weight: 700; }
 .tag-dashed { border: 1px dashed var(--sage-600); color: var(--ink-2); }
-.grey-tag { display: inline-flex; align-items: center; min-height: 26px; padding: 0 10px; background: var(--stone); color: var(--ink-2); font-size: 13px; font-weight: 700; }
+.grey-tag { display: inline-flex; align-items: center; min-height: 22px; padding: 0 8px; background: var(--stone); color: var(--ink-2); font-size: 12px; font-weight: 700; }
 
 /* --- 연결 상태 카드 --- */
 .cards { display: flex; flex-wrap: wrap; gap: 16px; }

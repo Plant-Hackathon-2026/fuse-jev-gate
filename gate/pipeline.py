@@ -5,12 +5,15 @@
   2. 경로 규칙: 요청 경로와 실제 경로(심볼릭 링크를 따라간 것) 둘 다로 본다.
      deny면 내용을 읽지 않고 끝낸다. allow면 검사 없이 원본을 돌려준다. ask_human이면 아래 검사를 마친 뒤 묻는다.
   3. 파일 전체를 읽어 정규식으로 가린다(mask_bytes, 종류별 공개 범위는 정책). 찾은 종류별 동작이 deny면 Jev를 부르지 않는다.
-  3c. NER(ner_backend가 none이 아닐 때): 원문을 로컬 NER 서버에 보내 이름·주소·소속 등의 위치를 받는다.
-     정규식 범위와 겹치는 부분은 뺀다(정규식 우선). 칸(entities 묶음 또는 numbers 종류)별 동작이 allow인 개체는 그대로 두고,
-     deny면 Jev를 부르지 않고 차단한다. NER 실패(서버 없음, 타임아웃, 형식 오류)는 차단이다.
+  3e. 규칙(gate.host_rules): IP 주소·내부 주소를 찾는다. NER을 꺼도 늘 돈다. 정규식 범위와 겹치는 부분은 뺀다.
+  3c. NER(ner_backend가 none이 아닐 때, 기본 켜짐): 원문을 로컬 NER 서버에 보내 이름·연락처·소속 등의 위치를 받는다.
+     정규식·규칙 범위와 겹치는 부분은 뺀다(우선순위: 정규식 > 규칙 > NER). 규칙과 NER 개체를 합쳐(겹치지 않는다)
+     칸(entities 묶음 또는 numbers 종류)별 동작이 allow인 개체는 그대로 두고, deny면 Jev를 부르지 않고 차단한다.
+     NER 실패(서버 없음, 타임아웃, 형식 오류)는 차단이다.
   4. 캐시 → Jev. 가린 내용과 요청 맥락(요청 프로세스, 실제 경로, 목적, 사용자 맥락 규칙)을 넘긴다.
      max_inspect_bytes보다 크면 나눠 묻고 가장 엄격한 답을 쓴다. Jev 오류·예외·형식 오류는 차단이다.
-     - NER이 꺼져 있거나 가린 것이 없으면: 정규식만 가린 내용(3b와 같음). 답은 임계값 두 개로 허용·승인·차단.
+     - NER이 꺼져 있거나 가린 것이 없으면: 정규식(과 규칙)으로 가린 내용(3b와 같은 흐름). 답은 임계값 두 개로 허용·승인·차단.
+       NER이 꺼져 있으면 규칙으로 가렸어도 이 흐름이다.
      - NER이 켜져 있고 가린 것(정규식·NER)이 있으면(3c ②, 2026-10-31 사용자 결정): 정규식과 NER로 가린 결과, 즉 에이전트에게
        보여 줄 내용을 묻는다. 안전(safe)이면 가린 채 보여 주고, 아니면 가려지지 않은 정보가 남았다고 보고 사람에게 묻는다.
        NER이 이름을 놓쳐도 Jev가 한 번 더 걸러 내게 하려는 것이다(팀원 v3의 has_pii가 "가려지지 않은 채 남았는가"를 묻는다).
@@ -23,8 +26,8 @@
   ask=False여도 이미 받은 폴더 승인은 쓴다.
 - 빈 파일은 Jev에 묻지 않고 허용한다(보여 줄 내용이 없다). 경로 규칙이 ask_human이면 빈 파일도 묻는다.
 - Jev에는 가린 내용을 UTF-8로 풀어 넘긴다. UTF-8이 아닌 바이트는 U+FFFD로 바꾼다. 판단용 사본일 뿐이고,
-  돌려주는 내용은 바이트 그대로다. 정규식이 가린 부분은 같은 길이 `*`, NER이 가린 부분은 `[이름]`처럼 종류 이름이라
-  NER이 무언가를 가리면 길이가 원본과 달라진다.
+  돌려주는 내용은 바이트 그대로다. 정규식이 가린 부분은 같은 길이 `*`, 규칙·NER이 가린 부분은 `[이름]`·`[IP]`처럼
+  종류 이름이라 무언가를 가리면 길이가 원본과 달라진다.
 - NER 결과(위치만, 원문 없음)는 내용 해시 + NER 모델 식별값으로 캐시한다. 정책과 무관한 값이라 정책이 바뀌어도 그대로 쓴다.
 - 나눠 물을 때 경계에 걸친 맥락(앞 조각의 이름 + 뒤 조각의 병명 등)은 Jev가 한 번에 보지 못한다.
 """
@@ -42,6 +45,7 @@ from typing import Literal
 from gate.approval import AnsweredBy, Approval, ApprovalRequest, Approvals
 from gate.cache import CachedJudgment, CacheKey, JudgmentCache
 from gate.detectors import mask_bytes
+from gate.host_rules import find_hosts
 from gate.jev_client import JevClient, JevDecision, JevError, RequestContext, cache_tag, make_client
 from gate.ner_client import MASK_TEXT, Entity, NerClient, NerError, NerResult, make_ner_client, outside, policy_slot
 from gate.peer import Peer
@@ -88,9 +92,13 @@ class Judgment:
     cached: bool = False
     approval: Approval | None = None          # 사람 승인 결과. once·session·remembered면 승인, deny·timeout이면 차단
     approved_by: AnsweredBy | None = None     # 누가 답했나. remembered·timeout이면 None
+    # findings 중 규칙·NER이 `[이름]`처럼 종류 이름으로 가린 것의 종류별 건수. 나머지는 정규식이 같은 길이 `*`로 가렸다.
+    # NER도 휴대폰·일반 전화·이메일 칸을 쓰므로(정규식이 놓친 번호) 종류 이름만으로는 가린 방식을 알 수 없어 따로 센다.
+    labeled: Mapping[str, int] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "findings", MappingProxyType(dict(self.findings)))
+        object.__setattr__(self, "labeled", MappingProxyType(dict(self.labeled)))
 
 
 @dataclass(frozen=True)
@@ -128,7 +136,7 @@ class _JevResult:
 @dataclass(frozen=True)
 class _NerOutcome:
     enabled: bool
-    spans: tuple[tuple[Entity, str], ...] = ()  # (개체, 정책 칸). 정규식 범위를 뺀 뒤, 쓰지 않는 종류는 뺀 것
+    spans: tuple[tuple[Entity, str], ...] = ()  # (개체, 정책 칸). 정규식·규칙 범위를 뺀 것
     error: str | None = None
     model: str = ""  # NER 모델 식별값. 가린 결과를 Jev에 물을 때 판단 캐시 키에 넣는다
 
@@ -139,6 +147,12 @@ def default_jev_factory(policy: Policy) -> JevClient:
 
 def default_ner_factory(policy: Policy) -> "NerClient | None":
     return make_ner_client(policy.ner_backend, timeout=policy.ner_timeout_seconds)
+
+
+def _rule_spans(text: str, regex_ranges: list[tuple[int, int]]) -> list[tuple[Entity, str]]:
+    """규칙(IP·내부 주소, 3e)이 찾은 것. 정규식 범위를 뺀다(정규식 우선). 칸은 host다."""
+    found = [Entity(hit.kind, hit.start, hit.end, 1.0) for hit in find_hosts(text)]
+    return [(e, policy_slot(e.label, text[e.start:e.end])) for e in outside(found, regex_ranges, text)]
 
 
 def split_utf8(data: bytes, max_bytes: int) -> list[bytes]:
@@ -216,13 +230,19 @@ class Inspector:
         if not data and by_path is None:
             return Verdict(Judgment("allow", "빈 파일입니다", "empty", **common), data)
 
-        ner = self._entities(policy, data, digest, found) if data else _NerOutcome(False)
+        text = data.decode("utf-8", "surrogateescape")
+        regex_ranges = [(f.start, f.end) for f in found]
+        rules = _rule_spans(text, regex_ranges)
+        ner = self._entities(policy, text, digest, regex_ranges + [(e.start, e.end) for e, _ in rules]) \
+            if data else _NerOutcome(False)
         if ner.error is not None:
             return Verdict(Judgment("deny", ner.error, "entity", **common))
-        hidden = [(e, slot) for e, slot in ner.spans if policy.slot_rule(slot) != "allow"]
+        spans = sorted([*rules, *ner.spans], key=lambda span: span[0].start)
+        hidden = [(e, slot) for e, slot in spans if policy.slot_rule(slot) != "allow"]
         entity_counts = Counter(slot for _, slot in hidden)
         counts += entity_counts
         common["findings"] = dict(counts)
+        common["labeled"] = dict(entity_counts)
         by_entity = slot_action(policy, [slot for _, slot in hidden])
         if by_entity == "deny":
             denied = {k: n for k, n in entity_counts.items() if policy.slot_rule(k) == "deny"}
@@ -235,9 +255,9 @@ class Inspector:
 
         # 3c ②(2026-10-31 사용자 결정): NER이 켜져 있고 가린 것이 있으면 Jev는 가린 결과(보여 줄 내용)를 판단한다.
         # 안전이면 가린 채로 보여 주고, 아니면(가려지지 않은 정보가 남았다고 보면) 사람에게 묻는다. Jev 오류는 차단 그대로.
+        # NER이 꺼져 있으면 규칙으로 가렸어도 3b 흐름이다. Jev는 어느 쪽이든 보여 줄 내용(shown)을 본다.
         recheck = ner.enabled and bool(counts)
-        judged = shown if recheck else masked
-        jev = self._judge(policy, peer, real, purpose, judged, digest, ner.model if recheck else "") if data else None
+        jev = self._judge(policy, peer, real, purpose, shown, digest, ner.model if recheck else "") if data else None
         jev_info = {} if jev is None else {"jev_label": jev.label, "jev_confidence": jev.confidence,
                                            "jev_calls": jev.calls, "cached": jev.cached}
         jev_effective = jev.action if jev else None
@@ -268,13 +288,13 @@ class Inspector:
             return Verdict(Judgment("mask", reason, "jev", **common, **jev_info), shown)
         return Verdict(Judgment("allow", "허용했습니다", "jev", **common, **jev_info), data)
 
-    def _entities(self, policy: Policy, data: bytes, digest: str, found) -> _NerOutcome:
-        """NER로 개체를 찾는다. 꺼져 있으면 enabled=False. 실패하면 error(차단 이유)를 채운다."""
+    def _entities(self, policy: Policy, text: str, digest: str, taken: list[tuple[int, int]]) -> _NerOutcome:
+        """NER로 개체를 찾는다. 꺼져 있으면 enabled=False. 실패하면 error(차단 이유)를 채운다.
+        taken(정규식·규칙이 찾은 범위)과 겹치는 부분은 뺀다."""
         try:
             client = self._ner_client(policy)
             if client is None:
                 return _NerOutcome(False)
-            text = data.decode("utf-8", "surrogateescape")
             tag = client.cache_tag()
             with self._lock:
                 entities = self._ner_cache.get((digest, tag))
@@ -290,11 +310,7 @@ class Inspector:
                     self._ner_cache[(digest, model)] = entities
                     while len(self._ner_cache) > MAX_NER_CACHE:
                         self._ner_cache.popitem(last=False)
-            spans = []
-            for e in outside(entities, [(f.start, f.end) for f in found], text):
-                slot = policy_slot(e.label, text[e.start:e.end])
-                if slot is not None:
-                    spans.append((e, slot))
+            spans = [(e, policy_slot(e.label, text[e.start:e.end])) for e in outside(entities, taken, text)]
             return _NerOutcome(True, tuple(spans), model=model)
         except Exception as exc:
             detail = str(exc) if isinstance(exc, NerError) else type(exc).__name__

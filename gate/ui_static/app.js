@@ -264,7 +264,8 @@
       }
       if (status.ner.state === "down") {
         box.appendChild(banner([h("strong", { text: "NER 서버가 응답하지 않아요. " }),
-          "안전을 위해 지금 모든 파일 읽기를 막고 있어요. 서버를 다시 띄우거나 아래 연결 상태에서 NER을 꺼 주세요."], recheck()));
+          "NER은 기본으로 켜져 있어서, 안전을 위해 지금 모든 파일 읽기를 막고 있어요. "
+          + "서버를 먼저 띄우거나 아래 연결 상태에서 NER을 꺼 주세요."], recheck()));
       }
     }
   }
@@ -325,9 +326,9 @@
       layaDesc, layaRows));
 
     var n = status.ner;
-    var nerDesc = n.state === "connected" ? "이름·주소·소속을 찾아서 가리고 있어요."
+    var nerDesc = n.state === "connected" ? "이름·연락처·소속을 찾아서 가리고 있어요."
       : n.state === "down" ? "켜져 있는데 서버가 응답하지 않아요. 안전을 위해 모든 읽기를 막고 있어요."
-      : "켜면 이름·주소·소속도 찾아서 가려요. 번호·비밀값은 지금도 가려요.";
+      : "켜면 이름·연락처·소속도 찾아서 가려요. 번호·비밀값·IP·내부 주소는 지금도 가려요.";
     var server = n.responding ? "응답함" : "응답 없음 · 켜기 전에 서버부터 띄워야 해요";
     var actions = h("div", { class: "row-wrap" });
     if (n.enabled) {
@@ -515,10 +516,13 @@
       h("details", { class: "rule-box" }, h("summary", { text: "찾는 규칙 보기" }), body));
   }
 
-  function entityRow(row) {
+  // host(IP·내부 주소)는 규칙이 찾아 NER을 꺼도 적용된다(row.rule). 그 줄에는 NER 꺼짐 안내를 붙이지 않는다.
+  function entityRow(row, nerOn) {
+    var off = !nerOn && !row.rule;
     return h("div", { class: "prow" + (row.mine ? " mine" : "") },
       h("div", { class: "pname" }, h("span", { class: "name", text: row.name }),
         row.mine ? h("span", { class: "mine-tag", text: "내가 바꿈" }) : null,
+        off ? h("span", { class: "grey-tag", text: "NER 꺼짐" }) : null,
         row.hint ? h("span", { class: "hint", text: row.hint }) : null),
       seg(row.name + " 처리 방식", row.key, row.choices, row.value));
   }
@@ -547,8 +551,9 @@
         h("h3", null, "NER로 찾는 정보 ", h("span", { class: "sub", text: "이름·주소 등 문맥으로" })),
         h("span", { class: "tag tag-dashed", text: "NER 모델 필요" })),
       h("span", { class: "note-text" + (nerOn ? "" : " attn"),
-        text: nerOn ? "NER이 찾은 정보를 이렇게 처리해요." : "NER을 쓰지 않아 지금은 적용되지 않아요" })));
-    state.entities.forEach(function (row) { entities.appendChild(entityRow(row)); });
+        text: nerOn ? "NER이 찾은 정보를 이렇게 처리해요. IP·내부 주소는 규칙으로 찾아요."
+          : "NER을 쓰지 않아 IP·내부 주소(규칙) 말고는 지금 적용되지 않아요" })));
+    state.entities.forEach(function (row) { entities.appendChild(entityRow(row, nerOn)); });
   }
 
   function renderEntries() {
