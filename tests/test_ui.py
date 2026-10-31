@@ -498,6 +498,7 @@ def test_stricter_set_saves_without_confirm_and_same_value_is_unchanged(make_ui)
     ("ner_backend", "server"), ("jev_backend", "mock"), ("thresholds.allow_if_safe_confidence_gte", "0.5"),
     ("numbers.rrn", "birth"), ("numbers.rrn.visible", "last4"), ("numbers.card.action", "allow"),
     ("entities.nobody.action", "mask"), (None, "x"), ("numbers.card.action", 3),
+    ("entities.date.action", "mask"), ("entities.event.action", "deny"),   # 2026-11-01 NER 교체로 뺀 묶음
 ])
 def test_set_only_takes_number_and_entity_choices(make_ui, key, value):
     u = make_ui()
@@ -530,6 +531,7 @@ def test_interpret_does_not_save(make_ui):
 
 @pytest.mark.parametrize("sentence, outcome", [
     ("아무거나", "unclear"), ("공개 폴더는 그냥 보여줘", "path"), ("병원 기록은 보여줘도 돼", "unsupported"), ("", "unclear"),
+    ("날짜는 가려줘", "unsupported"), ("직함은 그대로 보여줘", "unsupported"),   # 지금 찾지 않는 정보
 ])
 def test_unsaveable_interpretation_has_message_and_no_ticket(make_ui, sentence, outcome):
     u = make_ui()
@@ -556,8 +558,41 @@ def test_example_sentences_are_understood():
 
 def test_ner_entity_note(make_ui):
     u = make_ui()
-    _, result = u.post("interpret", {"sentence": "이름은 가려줘"}, u.launch())
+    write_entries(u.policy, [Entry(settings={"ner_backend": "none"})])
+    session = u.launch()
+    _, result = u.post("interpret", {"sentence": "이름은 가려줘"}, session)
     assert result["notes"] == ["ner_off", "no_change"]
+    _, result = u.post("interpret", {"sentence": "IP 주소는 가려줘"}, session)
+    assert result["notes"] == ["no_change"]  # host는 규칙이 찾아 NER을 꺼도 적용된다
+
+
+def test_entity_rows_are_nine_and_host_says_rules(make_ui):
+    u = make_ui()
+    _, data = u.get("state", u.launch())
+    rows = {row["group"]: row for row in data["entities"]}
+    assert list(rows) == ["name", "address", "birth", "student_id", "org", "place", "etc", "host", "plain"]
+    assert rows["host"]["hint"] == "규칙으로 찾아요 · NER을 꺼도 적용돼요" and rows["host"]["rule"] is True
+    assert not any(row["rule"] for group, row in rows.items() if group != "host")
+    assert rows["plain"]["name"] == "나이" and rows["plain"]["hint"] == ""     # 다섯 가지 안내는 뺐다
+    assert rows["student_id"]["name"] == "식별번호(학번·사번·여권번호 등)"
+
+
+def test_retired_entries_are_listed_without_effect(make_ui):
+    """예전 정책 파일의 날짜·사건 설정은 목록에 남고(지울 수 있다) 효과가 없다고 보여 준다."""
+    u = make_ui()
+    u.policy.parent.mkdir(parents=True)
+    u.policy.write_text("version: 1\nentries:\n- set: {entities.date.action: deny}\n"
+                        "- set: {entities.name.action: deny, entities.event.action: allow}\n"
+                        "- set: {ner_backend: server}\n", encoding="utf-8")
+    session = u.launch()
+    _, data = u.get("state", session)
+    assert data["invalid"] is False
+    first, second, _ = data["entries"]
+    assert first["no_effect"] == "지금은 찾지 않는 정보" and "날짜(NER): 거부 (지금은 찾지 않음)" in first["result"]
+    assert second["no_effect"] == "" and "사건(NER): 그대로 보여줌 (지금은 찾지 않음)" in second["result"]
+    assert "date" not in {row["group"] for row in data["entities"]}
+    status, done = u.post("remove", {"number": 1, "fingerprint": first["fingerprint"]}, session)
+    assert status == 200 and done["status"] == "saved"
 
 
 # --- gate policy와 같은 결과 ---
@@ -831,7 +866,7 @@ def test_effect_text_uses_right_particles():
     assert effect_text("numbers.card.action", "mask") == "카드번호를 가린 뒤 보여줘요."
     assert effect_text("numbers.rrn.visible", "birth") == "주민등록번호를 가릴 때 생년월일(앞 6자리)까지 공개해요."
     assert effect_text("entities.org.action", "deny").startswith("NER이 소속(학교·회사·병원 등)을")
-    assert effect_text("entities.plain.action", "mask").endswith("다섯 가지가 함께 바뀌어요.")
+    assert effect_text("entities.plain.action", "mask") == "나이를 [이름]처럼 종류 이름으로 바꿔 보여줘요."  # 다섯 가지 안내 없음
 
 
 def test_state_marks_my_values_and_overridden_entries(make_ui):

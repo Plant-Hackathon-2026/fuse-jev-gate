@@ -1,7 +1,8 @@
 """설정 화면(gate ui)의 자료와 바꾸기. HTTP와 상관없는 부분이다(gate.ui가 HTTP로 감싸고 토큰·Host·Origin을 검사한다).
 
 읽기
-  state()   지금 정책(번호·비밀값 8줄, NER 묶음 11줄), 내가 정한 항목, 기본값, 정규식 정보("찾는 규칙 보기")
+  state()   지금 정책(번호·비밀값 8줄, NER 묶음 9줄), 내가 정한 항목, 기본값, 정규식 정보("찾는 규칙 보기").
+            NER 묶음 중 host(IP·내부 주소)는 규칙이 찾아 NER을 꺼도 적용된다(rule: true). 뺀 묶음(날짜·사건)은 줄이 없다
   status()  게이트 데몬·판단 모델(Laya)·NER 서버 상태
   audit()   감사 기록(기간·결과·파일 이름으로 거르기)
 바꾸기 (계산·완화 판단·되돌리기 기록·0600 쓰기는 모두 gate.policy_change. `gate policy`와 같은 파일·기록을 만든다)
@@ -45,7 +46,7 @@ from gate import audit_cli
 from gate.approval import clean_text, kinds_text
 from gate.detectors import KINDS, PATTERNS, VISIBLE_CHOICES, mask
 from gate.jev_client import LAYA_DEFAULT_MODEL
-from gate.ner_client import ENTITY_GROUPS, ENTITY_NAMES
+from gate.ner_client import DEFAULT_BASE_URL, ENTITY_GROUPS, ENTITY_NAMES, RULE_GROUPS
 from gate.policy import (
     KIND_NAMES,
     VISIBLE_NAMES,
@@ -55,6 +56,7 @@ from gate.policy import (
     build_policy,
     default_settings,
     describe_setting,
+    is_retired,
     read_entries,
     setting_choices,
 )
@@ -63,6 +65,7 @@ from gate.policy_change import (
     ChangeError,
     apply,
     history,
+    needs_ner,
     plan_add,
     plan_remove,
     plan_undo,
@@ -73,7 +76,7 @@ from gate.policy_change import (
 from gate.policy_text import PolicyInterpreter, interpret, make_interpreter
 
 DEFAULT_JEV_URL = "http://127.0.0.1:8000"
-DEFAULT_NER_URL = "http://127.0.0.1:8001"
+DEFAULT_NER_URL = DEFAULT_BASE_URL  # 데몬(gate.ner_client)과 같은 기본 주소
 HEALTH_TIMEOUT_SECONDS = 1.5
 AUDIT_LIMIT = 200
 TICKET_SECONDS = 30 * 60
@@ -117,11 +120,11 @@ RULES: dict[str, RuleText] = {
                        "공개 범위를 고를 수 없게 제품에 고정한 안전 규칙이에요. 비밀값은 일부라도 보이면 안 되니 값 전체를 가려요."),
 }
 
-# NER 묶음 아래 작은 설명(이름만으로 뜻이 덜 드러나는 것)
+# NER 묶음 아래 작은 설명(이름만으로 뜻이 덜 드러나는 것). host는 규칙이 찾는다는 점을 알린다.
 ENTITY_HINTS = {
     "name": "본인·가족·상담사·교수 이름",
     "org": "학교·학과·회사·병원·동아리 이름",
-    "plain": "다섯 가지가 함께 바뀌어요",
+    "host": "규칙으로 찾아요 · NER을 꺼도 적용돼요",
 }
 
 APPROVAL_LABELS = {"once": "이번만 허용", "session": "이 폴더 허용", "remembered": "폴더 승인 기억",
@@ -225,7 +228,7 @@ def effect_text(key: str, value: object) -> str:
             "allow": f"{_josa(name, '을', '를')} 가리지 않고 그대로 보여줘요. "
                      "판단 모델이 문서를 민감하다고 보면 묻거나 막을 수 있어요.",
         }[value]
-        return text + (" 다섯 가지가 함께 바뀌어요." if key == "entities.plain.action" else "")
+        return text
     if key == "ner_backend":
         return "이름·주소·소속도 NER로 찾아서 가려요." if value == "server" else "NER을 쓰지 않아요. 번호·비밀값은 그대로 가려요."
     return describe_setting(key, value)
@@ -423,7 +426,7 @@ class UiApp:
         key = f"entities.{group}.action"
         return {"group": group, "name": ENTITY_NAMES[group], "hint": ENTITY_HINTS.get(group, ""), "key": key,
                 "value": policy.entity_rule(group), "default": defaults[key], "choices": list(setting_choices(key)),
-                "mine": key in last_set}
+                "mine": key in last_set, "rule": group in RULE_GROUPS}
 
     @staticmethod
     def _entry_row(index: int, entry: Entry, policy: Policy, last_set: dict) -> dict:
@@ -436,11 +439,13 @@ class UiApp:
             kind = "path"
             result = f"경로 규칙 · {entry.path_rule.pattern} → {describe_path_action(entry.path_rule.action)}"
         no_effect = ""
-        if overridden:
+        if entry.settings and all(is_retired(k) for k in entry.settings):
+            no_effect = "지금은 찾지 않는 정보"
+        elif overridden:
             no_effect = "뒤에 정한 것이 덮어씀"
         elif kind == "context":
             no_effect = "지금은 효과 없음"
-        elif entry.settings and any(k.startswith("entities.") for k in entry.settings) and policy.ner_backend == "none":
+        elif entry.settings and any(needs_ner(k) for k in entry.settings) and policy.ner_backend == "none":
             no_effect = "NER을 켜야 효과 있음"
         return {"number": index + 1, "said": entry.said, "at": entry.at, "kind": kind, "result": result,
                 "no_effect": no_effect, "fingerprint": fingerprint(entry)}
@@ -521,7 +526,7 @@ class UiApp:
             entries = read_current(self.config.policy)
         except ChangeError as exc:
             raise UiError(409, "policy-invalid", str(exc)) from exc
-        change = plan_add(self.config.policy, entries, result.entry)
+        change = _plan_add(self.config.policy, entries, result.entry)
         notes = [n for n in change.notes() if n != "context_mock"]
         if result.entry.context is not None:
             notes.insert(0, "context_unused")  # Mock·Laya 모두 맥락 규칙을 읽지 않는다(plans/implementation-plan.md 6절)
@@ -534,7 +539,7 @@ class UiApp:
             entry = self.tickets.get(ticket)
             if entry is None:
                 raise UiError(410, "ticket-expired", "해석한 지 오래되어 저장하지 않았어요. 문장을 다시 해석해 주세요.")
-            result = self._commit(plan_add(self.config.policy, self._entries(), stamped(entry)), confirm)
+            result = self._commit(_plan_add(self.config.policy, self._entries(), stamped(entry)), confirm)
             if result["status"] == "saved":
                 self.tickets.drop(ticket)
         return result
@@ -553,7 +558,7 @@ class UiApp:
                 entry = setting_entry(key, [value])
             except ChangeError as exc:
                 raise UiError(400, "bad-value", str(exc)) from exc
-            return self._commit(plan_add(self.config.policy, entries, entry, "set"), confirm)
+            return self._commit(_plan_add(self.config.policy, entries, entry, "set"), confirm)
 
     def remove(self, number: object, expected: object, confirm: object = None) -> dict:
         if isinstance(number, bool) or not isinstance(number, int):
@@ -588,7 +593,7 @@ class UiApp:
             entries = self._entries()
             if build_policy(entries).ner_backend == target:
                 return {"ok": True, "status": "unchanged"}
-            change = plan_add(self.config.policy, entries, setting_entry("ner_backend", [target]), "set")
+            change = _plan_add(self.config.policy, entries, setting_entry("ner_backend", [target]), "set")
             return self._commit(change, confirm)
 
     def _entries(self) -> tuple[Entry, ...]:
@@ -608,6 +613,14 @@ class UiApp:
         except ChangeError as exc:
             raise UiError(500, "write-failed", str(exc)) from exc
         return {"ok": True, "status": "saved", "version": policy.version}
+
+
+def _plan_add(path: Path, entries, entry: Entry, action: str = "add") -> Change:
+    """plan_add의 ChangeError(뺀 키 등)를 화면에 돌려줄 400으로 바꾼다."""
+    try:
+        return plan_add(path, entries, entry, action)
+    except ChangeError as exc:
+        raise UiError(400, "bad-value", str(exc)) from exc
 
 
 def describe_path_action(action: str) -> str:
