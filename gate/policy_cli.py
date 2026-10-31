@@ -27,7 +27,11 @@ require_tty
   없는 곳에서 `y`를 흘려 넣는 것을 한 겹 더 막을 뿐 **보안 경계가 아니다**(script 등으로 가짜 터미널을 만들 수 있다).
   진짜 경계는 정책 파일과 기록 폴더 쓰기를 샌드박스로 막는 것이다(Phase 6). show는 터미널이 없어도 된다.
 
-되돌리기 기록
+계산과 묻기
+  바꿈 계산·검사(완화 판단), 되돌리기 기록 쌓기, 0600 쓰기, undo는 gate.policy_change가 한다. 설정 화면(gate ui)도
+  같은 함수를 쓴다. 이 모듈은 터미널에서 묻고(_Prompt) 결과를 글로 보여 주기만 한다.
+
+되돌리기 기록 (gate.policy_change)
   바꾸기 직전의 항목을 정책 파일 옆 기록 폴더(policy.yaml → policy-history/, 폴더 0700)에 000001.yaml처럼 번호를 늘려
   쌓는다(write_entries로 쓰므로 파일 0600). 정책 파일이 없었으면 빈 항목으로 남긴다(되돌리면 기본값). 최근 MAX_HISTORY개만 둔다.
   undo는 가장 최근 기록을 정책 파일에 쓰고 그 기록을 지운다. undo 자체는 기록하지 않는다(다시 실행하기는 없다).
@@ -37,10 +41,7 @@ require_tty
 
 import argparse
 import os
-import re
 import sys
-from collections.abc import Sequence
-from datetime import datetime
 from pathlib import Path
 from typing import TextIO
 
@@ -53,25 +54,30 @@ from gate.policy import (
     SETTING_NAMES,
     VISIBLE_NAMES,
     Entry,
-    PathRule,
     Policy,
-    PolicyError,
     build_policy,
-    default_settings,
     describe_setting,
-    loosened,
-    read_entries,
-    setting_keys,
-    validate_setting,
-    write_entries,
+)
+from gate.policy_change import (  # noqa: F401  (MAX_HISTORY·history_dir는 이 모듈 이름으로도 쓴다)
+    MAX_HISTORY,
+    POLICY_ENV,
+    Change,
+    ChangeError,
+    Note,
+    apply,
+    history,
+    history_dir,
+    now,
+    plan_add,
+    plan_remove,
+    plan_undo,
+    read_current,
+    setting_entry,
 )
 from gate.policy_text import InterpretError, PolicyInterpreter, interpret, make_interpreter
 
-POLICY_ENV = "GATE_POLICY"
-MAX_HISTORY = 20
 CHANGE_COMMANDS = ("add", "remove", "undo", "set")
 _YES = frozenset({"y", "yes", "예", "네", "ㅛ"})  # ㅛ: 한글 자판 상태에서 y를 누른 경우
-_HISTORY_NAME = re.compile(r"^(\d{6,})\.yaml$")
 _OTHER_KEYS = ("jev_backend", "jev_timeout_seconds", "max_inspect_bytes", "ner_backend", "ner_timeout_seconds")
 
 
@@ -152,12 +158,9 @@ def _policy_path(args: argparse.Namespace) -> Path:
 
 def _read(path: Path) -> tuple[Entry, ...]:
     try:
-        return read_entries(path)
-    except PolicyError as exc:
-        raise _Stop(f"정책 파일에 문제가 있어 읽을 수 없습니다: {exc}\n"
-                    f"  파일: {path}\n"
-                    "  게이트 데몬은 이 파일이 고쳐질 때까지 내용 읽기를 모두 차단합니다. "
-                    "`gate policy undo`로 이전 상태를 되살리거나, 파일을 지우면 기본값으로 돌아갑니다.") from exc
+        return read_current(path)
+    except ChangeError as exc:
+        raise _Stop(str(exc)) from exc
 
 
 class _Prompt:
@@ -179,34 +182,34 @@ class _Prompt:
         return line.strip().lower() in _YES
 
 
-def _now() -> str:
-    return datetime.now().astimezone().isoformat(timespec="seconds")
+_NOTE_TEXT: dict[Note, str] = {
+    "context_mock": "  주의: 지금 Jev는 Mock(키워드 규칙)이라 맥락 규칙을 판단에 쓰지 않습니다. 실제 Jev를 붙여야 효과가 있습니다.",
+    "ner_off": "  주의: 지금 NER이 꺼져 있어(ner_backend: none) 이 설정은 효과가 없습니다. "
+               "켜려면: gate policy set ner_backend server",
+    "no_change": "  (지금 정책과 같은 값이라 동작은 바뀌지 않습니다)",
+}
 
 
-def _commit(path: Path, before: Sequence[Entry], after: Sequence[Entry], io: _Prompt) -> Policy | None:
-    """after로 바꾼다. 느슨해지면 한 번 더 묻는다. 저장하기 전에 before를 기록에 쌓는다. 취소하면 None."""
+def _commit(change: Change, io: _Prompt) -> int:
+    """느슨해지면 한 번 더 묻고, 기록을 쌓은 뒤 쓴다(gate.policy_change.apply). 취소하면 1."""
+    if not _confirm_loosening(change, io):
+        return 1
+    _saved(change.path, _apply(change), io)
+    return 0
+
+
+def _apply(change: Change) -> Policy:
     try:
-        new_policy = build_policy(after)
-    except PolicyError as exc:
-        raise _Stop(f"정책을 만들 수 없습니다: {exc}") from exc
-    if not _confirm_loosening(build_policy(before), new_policy, io):
-        return None
-    snapshot = _push_history(path, before)
-    try:
-        policy = write_entries(path, after)
-    except BaseException:
-        snapshot.unlink(missing_ok=True)
-        raise
-    _saved(path, policy, io)
-    return policy
+        return apply(change)
+    except ChangeError as exc:
+        raise _Stop(str(exc)) from exc
 
 
-def _confirm_loosening(before: Policy, after: Policy, io: _Prompt) -> bool:
-    changes = loosened(before, after)
-    if not changes:
+def _confirm_loosening(change: Change, io: _Prompt) -> bool:
+    if not change.loosening:
         return True
     io.say("이 변경은 정책을 느슨하게 합니다(더 많이 보여 주게 됩니다):")
-    for line in changes:
+    for line in change.loosening:
         io.say(f"  - {line}")
     if io.confirm("정말 느슨하게 바꿀까요?"):
         return True
@@ -220,36 +223,11 @@ def _saved(path: Path, policy: Policy, io: _Prompt) -> None:
     io.say(f"되돌리려면 `gate policy undo`. 정책 버전 {policy.version}")
 
 
-def _write_failed(exc: OSError) -> _Stop:
-    return _Stop(f"정책 파일을 쓸 수 없습니다: {exc.strerror or type(exc).__name__}")
-
-
-# --- 되돌리기 기록 ---
-
-def history_dir(path: Path) -> Path:
-    return path.parent / f"{path.stem}-history"
-
-
-def _history(path: Path) -> list[Path]:
-    """기록 파일, 오래된 것 → 최근 것."""
-    folder = history_dir(path)
-    if not folder.is_dir():
-        return []
-    found = [(int(m.group(1)), p) for p in folder.iterdir() if (m := _HISTORY_NAME.match(p.name)) and p.is_file()]
-    return [p for _, p in sorted(found)]
-
-
-def _push_history(path: Path, entries: Sequence[Entry]) -> Path:
-    folder = history_dir(path)
-    folder.mkdir(mode=0o700, parents=True, exist_ok=True)
-    os.chmod(folder, 0o700)
-    existing = _history(path)
-    number = int(_HISTORY_NAME.match(existing[-1].name).group(1)) + 1 if existing else 1
-    snapshot = folder / f"{number:06d}.yaml"
-    write_entries(snapshot, entries)
-    for old in _history(path)[:-MAX_HISTORY]:
-        old.unlink(missing_ok=True)
-    return snapshot
+def _plan(make, *args) -> Change:
+    try:
+        return make(*args)
+    except ChangeError as exc:
+        raise _Stop(str(exc)) from exc
 
 
 # --- 명령 ---
@@ -265,111 +243,61 @@ def _add(path: Path, entries: tuple[Entry, ...], sentence: str, io: _Prompt,
     io.say(result.message)
     if result.entry is None:
         return 1
-    entry = Entry(result.entry.settings, result.entry.context, result.entry.path_rule, result.entry.said, _now())
-    after = (*entries, entry)
-    before_policy, after_policy = build_policy(entries), build_policy(after)
-    if entry.context is not None and after_policy.jev_backend == "mock":
-        io.say("  주의: 지금 Jev는 Mock(키워드 규칙)이라 맥락 규칙을 판단에 쓰지 않습니다. 실제 Jev를 붙여야 효과가 있습니다.")
-    if entry.settings and any(key.startswith("entities.") for key in entry.settings) \
-            and after_policy.ner_backend == "none":
-        io.say("  주의: 지금 NER이 꺼져 있어(ner_backend: none) 이 설정은 효과가 없습니다. "
-               "켜려면: gate policy set ner_backend server")
-    if after_policy.version == before_policy.version:
-        io.say("  (지금 정책과 같은 값이라 동작은 바뀌지 않습니다)")
+    entry = Entry(result.entry.settings, result.entry.context, result.entry.path_rule, result.entry.said, now())
+    change = _plan(plan_add, path, entries, entry)
+    for note in change.notes():
+        io.say(_NOTE_TEXT[note])
     if not io.confirm("이대로 저장할까요?"):
         io.say("저장하지 않았습니다.")
         return 1
-    try:
-        return 0 if _commit(path, entries, after, io) else 1
-    except OSError as exc:
-        raise _write_failed(exc) from exc
+    return _commit(change, io)
 
 
 def _remove(path: Path, entries: tuple[Entry, ...], number: str, io: _Prompt) -> int:
-    if not number.isdecimal() or not 1 <= int(number) <= len(entries):
-        where = f"1~{len(entries)}" if entries else "지정한 항목이 없음"
-        raise _Stop(f"없는 번호입니다: {number} ({where}). `gate policy show`로 번호를 확인하세요.")
-    index = int(number) - 1
-    removed = entries[index]
-    after = entries[:index] + entries[index + 1:]
+    change = _plan(plan_remove, path, entries, number)
+    removed = change.entry
     io.say(f"{number}번 항목을 지웁니다: {_entry_title(removed)} → {_describe_entry(removed)}")
-    try:
-        return 0 if _commit(path, entries, after, io) else 1
-    except OSError as exc:
-        raise _write_failed(exc) from exc
+    return _commit(change, io)
 
 
 def _undo(path: Path, io: _Prompt) -> int:
     """정책 파일이 잘못되어 있어도 되돌릴 수 있다. 그동안 데몬은 모두 차단하므로 되돌리는 것은 느슨해지는 변경으로 본다."""
-    history = _history(path)
-    if not history:
-        _read(path)  # 정책 파일이 잘못되었으면 그 안내가 먼저다
-        raise _Stop("되돌릴 기록이 없습니다.")
     try:
-        entries: tuple[Entry, ...] | None = read_entries(path)
-    except PolicyError as exc:
-        entries = None
-        io.say(f"지금 정책 파일에 문제가 있습니다: {exc}")
-        io.say("게이트 데몬은 지금 내용 읽기를 모두 차단하고 있습니다. 되돌리면 잘못된 파일은 기록의 내용으로 바뀝니다.")
-    snapshot = history[-1]
-    try:
-        previous = read_entries(snapshot)
-    except PolicyError as exc:
-        raise _Stop(f"되돌리기 기록을 읽을 수 없습니다: {exc}\n  기록 파일: {snapshot}\n"
-                    "  이 파일을 지우면 그 전 기록으로 되돌릴 수 있습니다.") from exc
-    if entries is None:
-        io.say(f"직전 기록으로 되돌립니다 (지정한 항목 {len(previous)}개).")
+        change = plan_undo(path)
+    except ChangeError as exc:
+        if exc.problem is not None:
+            _say_problem(exc.problem, io)
+        raise _Stop(str(exc)) from exc
+    if change.before is None:
+        _say_problem(change.problem, io)
+        io.say(f"직전 기록으로 되돌립니다 (지정한 항목 {len(change.after)}개).")
         if not io.confirm("되돌릴까요?"):
             io.say("취소했습니다. 정책은 바뀌지 않았습니다.")
             return 1
     else:
-        io.say(f"직전 변경을 되돌립니다 (지정한 항목 {len(entries)}개 → {len(previous)}개).")
-        if not _confirm_loosening(build_policy(entries), build_policy(previous), io):
+        io.say(f"직전 변경을 되돌립니다 (지정한 항목 {len(change.before)}개 → {len(change.after)}개).")
+        if not _confirm_loosening(change, io):
             return 1
-    try:
-        policy = write_entries(path, previous)
-    except OSError as exc:
-        raise _write_failed(exc) from exc
-    snapshot.unlink(missing_ok=True)
-    _saved(path, policy, io)
-    io.say(f"더 되돌릴 수 있는 변경: {len(history) - 1}개")
+    _saved(path, _apply(change), io)
+    io.say(f"더 되돌릴 수 있는 변경: {change.history_left}개")
     return 0
 
 
+def _say_problem(problem: str, io: _Prompt) -> None:
+    io.say(f"지금 정책 파일에 문제가 있습니다: {problem}")
+    io.say("게이트 데몬은 지금 내용 읽기를 모두 차단하고 있습니다. 되돌리면 잘못된 파일은 기록의 내용으로 바뀝니다.")
+
+
 def _set(path: Path, entries: tuple[Entry, ...], key: str, values: list[str], io: _Prompt) -> int:
-    if key == "path":
-        if len(values) != 2:
-            raise _Stop("경로 규칙은 `gate policy set path <패턴> <allow|ask_human|deny>` 모양으로 씁니다.")
-        try:
-            entry = Entry(path_rule=PathRule(values[0], values[1]), at=_now())
-        except PolicyError as exc:
-            raise _Stop(str(exc)) from exc
+    try:
+        entry = setting_entry(key, values)
+    except ChangeError as exc:
+        raise _Stop(str(exc)) from exc
+    if entry.path_rule is not None:
         io.say(f"지정합니다: {_describe_entry(entry)}")
     else:
-        if key not in setting_keys():
-            raise _Stop(f"알 수 없는 설정 키: {key}\n  쓸 수 있는 키: {', '.join(setting_keys())}, path")
-        if len(values) != 1:
-            raise _Stop(f"값은 하나만 씁니다: gate policy set {key} <값>")
-        value = _parse_value(key, values[0])
-        entry = Entry(settings={key: value}, at=_now())
         io.say(f"지정합니다: {describe_setting(key, entry.settings[key])}")
-    try:
-        return 0 if _commit(path, entries, (*entries, entry), io) else 1
-    except OSError as exc:
-        raise _write_failed(exc) from exc
-
-
-def _parse_value(key: str, raw: str) -> object:
-    """문자열 값을 그 설정의 기본값과 같은 형(float, int, str)으로 바꾼 뒤 validate_setting으로 검사한다."""
-    kind = type(default_settings()[key])
-    try:
-        value = kind(raw) if kind in (int, float) else raw
-    except ValueError as exc:
-        raise _Stop(f"{key}에는 {'정수' if kind is int else '숫자'}를 씁니다: {raw!r}") from exc
-    try:
-        return validate_setting(key, value)
-    except PolicyError as exc:
-        raise _Stop(str(exc)) from exc
+    return _commit(_plan(plan_add, path, entries, entry, "set"), io)
 
 
 # --- show ---
@@ -452,5 +380,5 @@ def _show(path: Path, entries: tuple[Entry, ...], out: TextIO) -> None:
         lines.append(f"    {name}: {value:g} {mark(key)}" if isinstance(value, float)
                      else f"    {name}: {value} {mark(key)}")
 
-    lines += ["", f"정책 버전 {policy.version} · 되돌릴 수 있는 변경 {len(_history(path))}개"]
+    lines += ["", f"정책 버전 {policy.version} · 되돌릴 수 있는 변경 {len(history(path))}개"]
     print("\n".join(lines), file=out)
