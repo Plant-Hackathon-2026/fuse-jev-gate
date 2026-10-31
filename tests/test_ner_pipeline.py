@@ -268,6 +268,58 @@ def test_non_utf8_bytes_are_kept_and_positions_match(source, tmp_path):
     assert verdict.data == b"\xff\xfe " + "[이름]".encode() + b" \x80\n"
 
 
+# --- IP·내부 주소 규칙 (3e) ---
+
+SERVERS = "DB는 db.internal.example.local(10.0.0.12)이고 담당자는 홍길동입니다.\n"
+
+
+def test_rules_run_even_when_ner_is_off(source, tmp_path):
+    (source / "서버.txt").write_text(SERVERS, encoding="utf-8")
+    inspector, jev, ner = make(source, tmp_path)
+    verdict = inspector.inspect(PEER, "/서버.txt")
+    j = verdict.judgment
+    assert (j.action, verdict.data.decode()) == ("mask", "DB는 [내부 주소]([IP])이고 담당자는 홍길동입니다.\n")
+    assert dict(j.findings) == {"host": 2} and "IP·내부 주소" in j.reason
+    assert ner.texts == []
+    assert jev.calls[0].text == "DB는 [내부 주소]([IP])이고 담당자는 홍길동입니다.\n"   # Jev는 보여 줄 내용을 본다
+    inspector, _, _ = make(source, tmp_path, jev=MockJevClient("fixed", **SENSITIVE))
+    assert inspector.inspect(PEER, "/서버.txt").judgment.action == "deny"  # NER이 꺼져 있으면 규칙으로 가렸어도 3b 흐름
+
+
+def test_rules_and_ner_are_merged_and_rules_win_over_ner(source, tmp_path):
+    (source / "서버.txt").write_text(SERVERS, encoding="utf-8")
+    ner = FakeNer(words={"홍길동": "NAME", "db.internal.example.local(10.0.0.12)": "MESSENGER"})
+    inspector, jev, _ = make(source, tmp_path, jev=MockJevClient("fixed", **SENSITIVE), ner=ner)
+    verdict = inspector.inspect(PEER, "/서버.txt")
+    j = verdict.judgment
+    assert (j.action, j.stage) == ("ask_human", "jev")                # NER이 켜져 있으면 ② 흐름
+    assert jev.calls[0].text == "DB는 [내부 주소]([IP])이고 담당자는 [이름]입니다.\n"
+    assert dict(j.findings) == {"host": 2, "name": 1}                 # 규칙 범위에 겹친 NER 연락처는 뺀다(괄호만 남음)
+    inspector, _, _ = make(source, tmp_path, ner=ner)
+    assert inspector.inspect(PEER, "/서버.txt").data.decode() == "DB는 [내부 주소]([IP])이고 담당자는 [이름]입니다.\n"
+
+
+def test_regex_wins_over_rules(source, tmp_path):
+    (source / "설정.txt").write_text("url: postgres://app:hunter2@db.internal:5432/app\n"
+                                     "admin@db.internal.example.local\n", encoding="utf-8")
+    inspector, _, _ = make(source, tmp_path)
+    verdict = inspector.inspect(PEER, "/설정.txt")
+    assert verdict.data.decode() == ("url: postgres://app:*******@[내부 주소]:5432/app\n"
+                                     "*****@**.********.*******.*****\n")
+    assert dict(verdict.judgment.findings) == {"secret": 1, "email": 1, "host": 1}
+
+
+def test_host_rule_follows_entities_host_action_without_ner(source, tmp_path):
+    (source / "서버.txt").write_text(SERVERS, encoding="utf-8")
+    inspector, jev, _ = make(source, tmp_path, settings={"entities.host.action": "deny"})
+    verdict = inspector.inspect(PEER, "/서버.txt")
+    assert (verdict.judgment.action, verdict.judgment.stage) == ("deny", "entity") and jev.calls == []
+    assert "IP·내부 주소" in verdict.judgment.reason
+    inspector, _, _ = make(source, tmp_path, settings={"entities.host.action": "allow"})
+    verdict = inspector.inspect(PEER, "/서버.txt")
+    assert (verdict.judgment.action, verdict.data.decode()) == ("allow", SERVERS)
+
+
 # --- 캐시 ---
 
 def test_ner_result_is_cached_by_content_and_model(source, tmp_path):
