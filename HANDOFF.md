@@ -17,10 +17,11 @@ _업데이트: 2026-10-31 · 작성 세션: Phase 3b. 판단 모델을 Jev 대�
   - 5절 Phase 3: "3b (완료)" 절에 구현·평가·교체 절차가 있다
   - 6절 한계, 7절 검증
 - **평가 문서: `eval/README.md`** "Laya 평가 결과 (Phase 3b)"
-- **평가 보고서(아티팩트, 비공개):** https://claude.ai/artifact/4WaSWgekRir4frkRCq1a2L
+- **평가 보고서(아티팩트, 버전 2):** https://claude.ai/artifact/4WaSWgekRir4frkRCq1a2L
   - 그림, 샘플별 표, 팀원 모델 분석, 대안 세 가지, 재학습 요청 사항이 있다.
   - 원본 HTML은 이전 세션 scratchpad에 있다. 고치려면 `Artifact read`로 다시 받는다.
-  - 팀원에게 보이려면 사용자가 Share 메뉴로 공유해야 한다.
+  - 사용자가 "링크가 있는 누구나"로 공유했다. 고치면 보는 사람에게 바로 반영된다.
+  - 페이지 수치는 문서 전체를 한 번에 물은 결과(오탐 7/12)다. 저장소 공식 결과(오탐 6/12)와의 차이를 설명하는 문단을 버전 2에 넣었다.
 - 점검 페이지: https://claude.ai/artifact/AbemNcUnx4Uhj9d2B5jBhW (버전 8). **3b는 아직 반영하지 않았다.**
 - 원래 명세: `fuse-jev-gate-spec.md`. 저장소: https://github.com/Plant-Hackathon-2026/fuse-jev-gate
 
