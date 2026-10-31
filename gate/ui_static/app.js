@@ -188,7 +188,8 @@
       return finish(result);
     }).catch(function (err) { fail(err); return false; }).then(function (ok) {
       busy = false;
-      return loadState().then(function () { return ok; });
+      // 정책 표와 함께 연결 상태(게이트 카드의 "정책 파일" 시각, NER 켜짐 등)도 다시 불러온다.
+      return Promise.all([loadState(), loadStatus()]).then(function () { return ok; });
     });
 
     function finish(result) {
@@ -360,8 +361,7 @@
   }
 
   function setNer(enable) {
-    change("ner", { enable: enable }, enable ? "NER을 켰어요. 게이트는 다음 요청부터 이름·주소도 가려요." : "NER을 껐어요.")
-      .then(function () { return loadStatus(); });
+    change("ner", { enable: enable }, enable ? "NER을 켰어요. 게이트는 다음 요청부터 이름·주소도 가려요." : "NER을 껐어요.");
   }
 
   // ---------- 문장 ----------
@@ -667,6 +667,10 @@
       searchTimer = setTimeout(loadAudit, 300);
     });
     window.addEventListener("hashchange", showView);
+    // 다른 창에 있다 돌아오면 연결 상태를 다시 확인한다(그사이 게이트·서버가 켜지거나 꺼졌을 수 있다).
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState === "visible" && SESSION && !busy) loadStatus();
+    });
     renderAuditCategory();
     if (!SESSION) { connectionLost(); return; }
     showView();
