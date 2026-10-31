@@ -6,8 +6,9 @@
 
 연산별 결과
   ls      {"entries": [{"name", "type"}]}
-  stat    {"stat": {"type", "size", "mode", "mtime_ns"}}          (크기는 원본 그대로. 가린 내용도 길이가 같다)
-  cat     {"data_b64", "decision": "allow" | "mask", "masked": {"종류": 건수}}
+  stat    {"stat": {"type", "size", "mode", "mtime_ns"}}          (크기는 원본 그대로. 정규식이 가린 부분은 길이가 같지만
+          NER이 `[이름]`처럼 가리면 cat 내용 길이가 달라진다(3c). 끝까지 읽으려면 size 없이 읽거나 빈 응답이 올 때까지 읽는다)
+  cat     {"data_b64", "decision": "allow" | "mask", "masked": {"종류": 건수}}   (종류는 번호 종류 또는 NER 묶음)
           차단(정책·Jev·사람 거부·승인 시간 초과)은 EACCES다. 사람 승인이 필요하면 데몬이 답을 기다린 뒤 응답한다.
   search  요청 {"path", "pattern", "ignore_case": false, "purpose", "max_results": 100}
           결과 {"matches": [{"path", "line", "text"}], "skipped": [{"path", "errno", "message"}],

@@ -33,6 +33,28 @@ numbers:
     action: mask
     visible: none
 
+# NER(이름·주소·소속 등)이 찾은 개체 묶음별 처리 (3c). ner_backend가 server일 때만 쓴다.
+#   action: allow(그대로 보여줌) | mask(가려서 보여줌, `[이름]`처럼 종류 이름으로) | ask_human | deny
+#   전화번호·이메일·비밀값을 NER이 찾으면 위 numbers 칸을 따른다(정규식이 같은 곳을 찾았으면 정규식이 우선).
+entities:
+  name:        {action: mask}   # 이름 (상담사·가족·교수 이름 포함)
+  address:     {action: mask}   # 주소
+  birth:       {action: mask}   # 생년월일
+  student_id:  {action: mask}   # 학번
+  org:         {action: mask}   # 소속: 학교·학과/부서·회사/기관·병원·모임·사업 이름
+  place:       {action: mask}   # 장소
+  date:        {action: mask}   # 날짜
+  event:       {action: mask}   # 사건
+  etc:         {action: mask}   # 기타 민감 정보
+  host:        {action: mask}   # IP 주소·내부 주소
+  plain:       {action: allow}  # 시간·연도·나이·직함·과목 (그것만으로는 사람을 좁히기 어려워 기본으로 보여 줌)
+
+# NER 서버(nerserve, README 참고). 끄면(none) 이름·주소 등은 가리지 않고 3b와 똑같이 동작한다.
+# 켜면(server) 가린 것이 있는 문서는 가린 결과를 Jev에 다시 물어, 안전하면 가린 채 보여 주고 아니면 사람에게 묻는다.
+# NER 서버가 없으면 모든 읽기가 차단된다.
+ner_backend: none            # none(끔) | server (데몬 환경변수 NER_BASE_URL 필요)
+ner_timeout_seconds: 10.0    # 이 시간 안에 답이 없으면 차단
+
 # Jev 답에 따른 처리 (명세 3.4). 그 사이 구간은 사람 승인.
 thresholds:
   allow_if_safe_confidence_gte: 0.95      # safe이고 확신도가 이 값 이상이면 허용

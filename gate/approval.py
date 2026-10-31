@@ -279,7 +279,7 @@ def dialog_message(request: ApprovalRequest, seconds: int) -> str:
         f"에이전트가 밝힌 목적(확인되지 않음): {clean_text(request.purpose) or '없음'}",
     ]
     if request.findings:
-        lines.append(f"가린 번호·비밀값: {kinds_text(request.findings)}")
+        lines.append(f"가린 것: {kinds_text(request.findings)}")
     lines += ["", "허용해도 번호·비밀값은 가린 채로 보여 줍니다."]
     if request.session_minutes > 0:
         lines.append(f"'이 폴더 허용'은 {clean_text(request.folder)} 바로 안의 파일을 "

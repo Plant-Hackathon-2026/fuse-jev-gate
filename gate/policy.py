@@ -24,6 +24,9 @@
 설정 키 (setting_keys(), 기본값은 config/policy.yaml에 설명과 함께 있다)
   numbers.<종류>.action   mask | ask_human | deny     정규식이 그 종류를 찾았을 때. 기본 mask (종류에는 비밀값 secret도 있다)
   numbers.<종류>.visible  종류별 공개 범위              gate.detectors.VISIBLE_CHOICES. 기본 none(전부 가림)
+  entities.<묶음>.action  allow | mask | ask_human | deny   NER이 그 묶음을 찾았을 때(3c). 기본 mask, plain(시간·연도·나이·직함·과목)은 allow
+                                                       묶음은 gate.ner_client.ENTITY_GROUPS. 전화·이메일·비밀값은 numbers 칸을 따른다
+  ner_backend, ner_timeout_seconds                     NER 백엔드(none | server, 기본 none = 끔), NER 응답 제한 시간(초)
   thresholds.allow_if_safe_confidence_gte              Jev가 safe이고 확신도가 이 값 이상이면 허용
   thresholds.deny_if_sensitive_confidence_gte          Jev가 safe가 아니고 확신도가 이 값 이상이면 차단 (그 사이는 사람 승인)
   jev_backend, jev_timeout_seconds, max_inspect_bytes  Jev 백엔드 이름, 타임아웃(초), Jev 한 번에 넘기는 최대 바이트
@@ -33,8 +36,11 @@
 판단 순서 (gate/pipeline.py가 차례로 부른다)
   1. path_action: 경로 규칙. deny·ask_human이면 그 결과, allow면 검사 없이 원본, 맞는 규칙이 없으면 None(검사 계속).
   2. number_action: 정규식이 찾은 종류별 동작 중 가장 엄격한 것. 찾은 게 없으면 None.
-  3. jev_action: Jev 답과 임계값 두 개(명세 3.4). Jev 오류(None)는 deny.
-  4. strictest(...)로 합친다. allow인데 찾은 번호가 있으면 가린 내용(mask)을 돌려준다.
+  3. slot_action: NER이 찾은 개체의 칸(묶음 또는 번호 종류)별 동작 중 가장 엄격한 것. NER이 꺼져 있거나 찾은 게 없으면 None.
+  4. jev_action: Jev 답과 임계값 두 개(명세 3.4). Jev 오류(None)는 deny.
+     NER이 켜져 있고 가린 것(정규식·NER)이 있으면 Jev는 가린 결과를 판단하고, safe면 가린 채 보여 주고 아니면 ask_human이다
+     (3c ②, gate.pipeline).
+  5. strictest(...)로 합친다. allow인데 가린 것이 있으면 가린 내용(mask)을 돌려준다.
 
 경로 규칙 매칭
   - 패턴은 가상 경로 기준 glob이다. `**`는 폴더 0개 이상, `*`·`?`·`[...]`는 한 단계 안에서만 맞는다.
@@ -64,6 +70,7 @@ import yaml
 
 from gate.detectors import KINDS, VISIBLE_CHOICES, Finding
 from gate.jev_client import JevDecision, available_backends
+from gate.ner_client import DEFAULT_ENTITY_ACTIONS, ENTITY_GROUPS, ENTITY_NAMES, NER_BACKENDS
 
 Action = Literal["allow", "mask", "ask_human", "deny"]  # 느슨한 것 → 엄격한 것
 ACTIONS: tuple[Action, ...] = get_args(Action)
@@ -81,6 +88,7 @@ _ENTRY_FIELDS = frozenset({"said", "at", *_ENTRY_KINDS})
 KIND_NAMES = {
     "rrn": "주민등록번호", "foreigner_rrn": "외국인등록번호", "card": "카드번호", "mobile": "휴대폰 번호",
     "phone": "일반 전화번호", "email": "이메일", "account": "계좌번호", "secret": "비밀값(비밀번호·키·토큰)",
+    **ENTITY_NAMES,  # NER 묶음(3c). 번호 종류와 이름이 겹치지 않는다
 }
 ACTION_NAMES = {"allow": "그대로 보여줌", "mask": "가려서 보여줌", "ask_human": "사람에게 물어봄", "deny": "거부"}
 SETTING_NAMES = {
@@ -89,6 +97,8 @@ SETTING_NAMES = {
     "jev_backend": "Jev 백엔드",
     "jev_timeout_seconds": "Jev 응답 제한 시간(초)",
     "max_inspect_bytes": "Jev에 한 번에 넘기는 최대 크기(바이트)",
+    "ner_backend": "NER(이름·주소·소속 가리기) 백엔드",
+    "ner_timeout_seconds": "NER 응답 제한 시간(초)",
     "approval.timeout_seconds": "사람 승인을 기다리는 시간(초)",
     "approval.session_minutes": "'이 폴더 허용'을 기억하는 시간(분, 0이면 기억하지 않음)",
 }
@@ -208,9 +218,15 @@ def _number_settings() -> dict[str, tuple[str, ...]]:
     return out
 
 
-_CHOICES: dict[str, tuple[str, ...]] = _number_settings()
+def _entity_settings() -> dict[str, tuple[str, ...]]:
+    """NER 묶음별 동작 선택지(3c). 엄격한 것 → 느슨한 것. allow(그대로 보여 줌)가 있다는 점이 번호와 다르다."""
+    return {f"entities.{group}.action": ("deny", "ask_human", "mask", "allow") for group in ENTITY_GROUPS}
+
+
+_CHOICES: dict[str, tuple[str, ...]] = {**_number_settings(), **_entity_settings(), "ner_backend": NER_BACKENDS}
 _DEFAULTS: dict[str, object] = {
-    **{key: ("mask" if key.endswith(".action") else "none") for key in _CHOICES},
+    **{key: ("mask" if key.endswith(".action") else "none") for key in _number_settings()},
+    **{f"entities.{group}.action": action for group, action in DEFAULT_ENTITY_ACTIONS.items()},
     "thresholds.allow_if_safe_confidence_gte": 0.95,
     "thresholds.deny_if_sensitive_confidence_gte": 0.95,
     "jev_backend": "mock",
@@ -218,11 +234,15 @@ _DEFAULTS: dict[str, object] = {
     "max_inspect_bytes": 200_000,
     "approval.timeout_seconds": 30.0,
     "approval.session_minutes": 60,
+    # NER 서버가 없으면 모든 읽기가 차단되므로 기본은 끔이다. 끄면 3b와 똑같이 동작한다(3c, 2026-10-31)
+    "ner_backend": "none",
+    "ner_timeout_seconds": 10.0,
 }
 _FLOAT_RANGES = {
     "thresholds.allow_if_safe_confidence_gte": (0.0, 1.0),
     "thresholds.deny_if_sensitive_confidence_gte": (0.0, 1.0),
     "jev_timeout_seconds": (0.1, 600.0),
+    "ner_timeout_seconds": (0.1, 600.0),
     "approval.timeout_seconds": (1.0, 600.0),
 }
 _INT_RANGES = {"max_inspect_bytes": (1_000, 16 * 1024 * 1024), "approval.session_minutes": (0, 24 * 60)}
@@ -290,6 +310,21 @@ class Policy:
 
     def number_rule(self, kind: str) -> NumberAction:
         return self.settings[f"numbers.{kind}.action"]
+
+    def entity_rule(self, group: str) -> Action:
+        return self.settings[f"entities.{group}.action"]
+
+    def slot_rule(self, slot: str) -> Action:
+        """NER 개체의 칸(gate.ner_client.policy_slot) 동작. 묶음이면 entities, 번호 종류면 numbers 칸이다."""
+        return self.entity_rule(slot) if slot in ENTITY_GROUPS else self.number_rule(slot)
+
+    @property
+    def ner_backend(self) -> str:
+        return self.settings["ner_backend"]
+
+    @property
+    def ner_timeout_seconds(self) -> float:
+        return self.settings["ner_timeout_seconds"]
 
     @property
     def allow_threshold(self) -> float:
@@ -494,6 +529,11 @@ def number_action(policy: Policy, findings: Iterable[Finding]) -> NumberAction |
     return strictest(*(policy.number_rule(f.kind) for f in findings))
 
 
+def slot_action(policy: Policy, slots: Iterable[str]) -> Action | None:
+    """NER 개체 칸별 동작 중 가장 엄격한 것. 칸이 없으면 None."""
+    return strictest(*(policy.slot_rule(slot) for slot in slots))
+
+
 def jev_action(policy: Policy, decision: JevDecision | None) -> Literal["allow", "ask_human", "deny"]:
     """명세 3.4: safe이고 확신도 ≥ allow 임계값이면 allow, safe가 아니고 확신도 ≥ deny 임계값이면 deny, 그 사이는 ask_human.
     Jev 오류(None)는 deny다."""
@@ -511,6 +551,9 @@ def _describe(key: str, value: object) -> str:
         _, kind, what = key.split(".")
         names = ACTION_NAMES if what == "action" else VISIBLE_NAMES
         return f"{KIND_NAMES[kind]}: {names.get(value, value)}"
+    if key.startswith("entities."):
+        _, group, _ = key.split(".")
+        return f"{ENTITY_NAMES[group]}(NER): {ACTION_NAMES.get(value, value)}"
     shown = f"{value:g}" if isinstance(value, float) else value
     return f"{SETTING_NAMES.get(key, key)}: {shown}"
 
