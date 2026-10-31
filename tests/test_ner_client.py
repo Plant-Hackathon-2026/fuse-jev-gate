@@ -350,6 +350,22 @@ def test_outside_drops_a_lone_josa_left_after_cutting():
     assert [text[e.start:e.end] for e in kept] == ["example.com으로"]
 
 
+@pytest.mark.parametrize("tail", ["으로도", "까지도", "에게서", "에서도", "로는"])
+def test_outside_drops_joined_josa_left_after_cutting(tail):
+    """조사가 이어 붙은 조각(`...@example.com으로도`의 `으로도`)도 버린다. 재측정 상담 pii_1에서 `***[이메일]`로 나왔다."""
+    text = f"메일은 gilsoon.hong@example.com{tail} 보내 드리겠습니다"
+    start, end = text.index("gilsoon"), text.index(tail) + len(tail)
+    assert outside([Entity("CONTACT", start, end, 0.9)], [(start, text.index(tail))], text) == []
+
+
+@pytest.mark.parametrize("tail", ["홍길동", "이도윤", "으로도요"])
+def test_outside_keeps_pieces_that_are_not_only_josa(tail):
+    """조사 한두 개로 나눠지지 않는 조각은 남긴다(이름, 끝말이 더 붙은 것)."""
+    text = f"hong@example.com{tail}"
+    kept = outside([Entity("CONTACT", 0, len(text), 0.9)], [(0, 16)], text)
+    assert [text[e.start:e.end] for e in kept] == [tail]
+
+
 # --- 정규식과 함께 바꾸기 (gate.detectors.mask replacements) ---
 
 def test_mask_with_replacements_keeps_regex_stars_and_uses_kind_names():

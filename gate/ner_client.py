@@ -183,8 +183,8 @@ def outside(entities: tuple[Entity, ...] | list[Entity], ranges: list[tuple[int,
 
     정규식이 우선이라서다(같은 길이 `*`와 공개 범위 설정이 그대로 적용된다). 규칙(IP·내부 주소)은 정규식 범위를,
     NER 개체는 정규식·규칙 범위를 뺀다(gate.pipeline). 겹치지 않는 개체는 그대로 둔다.
-    잘린 개체에서 조사 하나만 남은 조각(`hong@example.com으로`의 `으로`)도 버린다. 낱말 넓히기가 붙인 글자라
-    가릴 정보가 아니다.
+    잘린 개체에서 조사만 남은 조각(`hong@example.com으로`의 `으로`, 조사가 이어 붙은 `으로도`·`까지도`)도 버린다.
+    낱말 넓히기가 붙인 글자라 가릴 정보가 아니다.
     """
     ranges = sorted(ranges)
     out: list[Entity] = []
@@ -200,9 +200,14 @@ def outside(entities: tuple[Entity, ...] | list[Entity], ranges: list[tuple[int,
                 s += 1
             while t > s and text[t - 1].isspace():
                 t -= 1
-            if s < t and re.search(r"\w", text[s:t]) and not (cut and text[s:t] in _JOSA):
+            if s < t and re.search(r"\w", text[s:t]) and not (cut and _josa_only(text[s:t])):
                 out.append(Entity(e.label, s, t, e.score))
     return sorted(out, key=lambda x: x.start)
+
+
+def _josa_only(piece: str) -> bool:
+    """조사(JOSA) 하나나 둘로만 이뤄진 조각인가(`으로`, `에게서`, `으로도` = 으로 + 도, `까지도` = 까지 + 도)."""
+    return piece in _JOSA or any(piece[:i] in _JOSA and piece[i:] in _JOSA for i in range(1, len(piece)))
 
 
 def clean_text(text: str) -> str:
