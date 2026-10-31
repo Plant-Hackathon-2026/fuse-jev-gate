@@ -63,7 +63,10 @@ def _start(server):
 @pytest.fixture
 def gate(source, socket_dir):
     events = []
-    server = GateServer(socket_dir / "run" / "gate.sock", PlainStore(source), on_request=events.append)
+    # 이 파일은 소켓·정규식·Jev를 본다. NER은 명시적으로 끈다(기본은 켜짐, tests/test_ner_pipeline.py가 따로 본다).
+    store = PlainStore(source)
+    server = GateServer(socket_dir / "run" / "gate.sock", store, on_request=events.append,
+                        inspector=Inspector(store, ner_factory=lambda p: None))
     _start(server)
     yield server, GateClient(server.socket_path), events
     server.shutdown()
@@ -215,7 +218,7 @@ def judged(source, socket_dir, tmp_path):
     jev = MockJevClient("fixed", label="safe", confidence=0.99, by_path={"/readme.txt": ("sensitive", 0.97)})
     events = []
     store = PlainStore(source)
-    inspector = Inspector(store, PolicySource(policy_path), jev_factory=lambda policy: jev)
+    inspector = Inspector(store, PolicySource(policy_path), jev_factory=lambda policy: jev, ner_factory=lambda p: None)
     server = GateServer(socket_dir / "gate.sock", store, on_request=events.append, inspector=inspector)
     _start(server)
     yield GateClient(server.socket_path), jev, policy_path, events
@@ -316,7 +319,7 @@ def asking_gate(source, socket_dir, tmp_path):
     events, answers = [], []
     server = GateServer(socket_dir / "run" / "gate.sock", store, on_request=events.append,
                         inspector=Inspector(store, PolicySource(policy_path), jev_factory=lambda p: jev,
-                                            approvals=approvals))
+                                            ner_factory=lambda p: None, approvals=approvals))
     approval_server = ApprovalServer(socket_dir / "run" / "approve.sock", approvals,
                                      on_answer=lambda *a: answers.append(a))
     _start(server)

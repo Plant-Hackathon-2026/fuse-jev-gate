@@ -47,8 +47,11 @@ def test_token_changes_when_the_file_changes_in_between(policy_file):
 
 
 def test_notes(policy_file):
-    ner = pc.plan_add(policy_file, (), Entry(settings={"entities.name.action": "deny"}, said="이름 있는 파일은 거부"))
+    off = (Entry(settings={"ner_backend": "none"}),)
+    ner = pc.plan_add(policy_file, off, Entry(settings={"entities.name.action": "deny"}, said="이름 있는 파일은 거부"))
     assert ner.notes() == ("ner_off",)
+    on = pc.plan_add(policy_file, (), Entry(settings={"entities.name.action": "deny"}))
+    assert on.notes() == ()  # 기본은 NER 켜짐이라 안내하지 않는다
     context = pc.plan_add(policy_file, (), Entry(context="병원 기록은 보여주지 마", said="병원 기록은 보여주지 마"))
     assert context.notes() == ("context_mock",)
     same = pc.plan_add(policy_file, (), Entry(settings={"numbers.card.action": "mask"}))
@@ -133,3 +136,12 @@ def test_host_setting_has_no_ner_off_note(policy_file):
     assert name.notes() == ("ner_off",)
     assert pc.needs_ner("entities.name.action") and not pc.needs_ner("entities.host.action")
     assert not pc.needs_ner("entities.date.action") and not pc.needs_ner("numbers.card.action")
+
+
+def test_turning_ner_off_is_loosening_and_needs_confirm(policy_file):
+    change = pc.plan_add(policy_file, (), pc.setting_entry("ner_backend", ["none"]), "set")
+    assert change.needs_confirm
+    assert change.loosening == ("NER(이름·주소·소속 가리기) 백엔드: server → NER(이름·주소·소속 가리기) 백엔드: none",)
+    back_on = pc.plan_add(policy_file, (Entry(settings={"ner_backend": "none"}),),
+                          pc.setting_entry("ner_backend", ["server"]), "set")
+    assert not back_on.needs_confirm

@@ -39,6 +39,7 @@ from gate.audit import AuditLog
 from gate.client import ApprovalClient, GateClient
 from gate.daemon import ApprovalServer, GateServer, RequestEvent
 from gate.peer import Peer
+from gate.ner_client import DEFAULT_BASE_URL as DEFAULT_NER_URL
 from gate.pipeline import Inspector
 from gate.policy import PolicyError, PolicySource
 from gate.protocol import GateError
@@ -140,6 +141,9 @@ def _serve(socket_path: str, approve_socket: str, source: str, policy_path: str 
         policy = policy_source.current()
         where = policy_path or "지정 안 함"
         print(f"gate: 정책 {where} (버전 {policy.version}, 사용자 항목 {len(policy.entries)}개)", file=sys.stderr)
+        if policy.ner_backend != "none":  # 기본은 켜짐(3e). 서버가 없으면 모든 읽기가 막히므로 시작할 때 알린다
+            print(f"gate: NER 켜짐. NER 서버(NER_BASE_URL, 없으면 {DEFAULT_NER_URL})가 응답하지 않으면 내용 읽기를 "
+                  "모두 차단합니다. 끄려면: gate policy set ner_backend none", file=sys.stderr)
     except PolicyError as exc:
         print(f"gate: 정책 파일 오류. 고칠 때까지 내용 읽기를 모두 차단합니다: {exc}", file=sys.stderr)
     try:

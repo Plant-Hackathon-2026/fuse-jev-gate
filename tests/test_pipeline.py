@@ -42,11 +42,13 @@ def source(tmp_path):
 
 
 def make(source, tmp_path, jev=None, entries=None, **kwargs):
+    """이 파일은 경로 규칙·정규식·Jev를 본다. NER은 명시적으로 끈다(기본은 켜짐, tests/test_ner_pipeline.py가 따로 본다)."""
     policy_path = tmp_path / "policy.yaml"
     if entries is not None:
         write_entries(policy_path, entries)
     jev = jev or MockJevClient("fixed", label="safe", confidence=0.99)
-    inspector = Inspector(PlainStore(source), PolicySource(policy_path), jev_factory=lambda policy: jev, **kwargs)
+    inspector = Inspector(PlainStore(source), PolicySource(policy_path), jev_factory=lambda policy: jev,
+                          ner_factory=lambda policy: None, **kwargs)
     return inspector, jev, policy_path
 
 
@@ -155,7 +157,7 @@ def test_jev_that_cannot_be_built_denies(source, tmp_path):
     def factory(policy):
         return make_client("없는-백엔드")
 
-    inspector = Inspector(PlainStore(source), PolicySource(None), jev_factory=factory)
+    inspector = Inspector(PlainStore(source), PolicySource(None), jev_factory=factory, ner_factory=lambda p: None)
     verdict = inspector.inspect(PEER, "/회의.txt")
     assert verdict.judgment.action == "deny"
     assert "없는-백엔드" in verdict.judgment.reason
@@ -172,7 +174,7 @@ def test_broken_policy_file_denies_until_fixed(source, tmp_path):
 
 
 def test_default_backend_without_policy_file_is_keyword_mock(source):
-    inspector = Inspector(PlainStore(source))
+    inspector = Inspector(PlainStore(source), ner_factory=lambda p: None)  # Jev 기본값만 본다(NER 기본값은 test_ner_pipeline)
     assert inspector.inspect(PEER, "/회의.txt").judgment.action == "allow"
     assert inspector.inspect(PEER, "/연락처.txt").judgment.action in ("mask", "ask_human", "deny")
 

@@ -264,7 +264,8 @@
       }
       if (status.ner.state === "down") {
         box.appendChild(banner([h("strong", { text: "NER 서버가 응답하지 않아요. " }),
-          "안전을 위해 지금 모든 파일 읽기를 막고 있어요. 서버를 다시 띄우거나 아래 연결 상태에서 NER을 꺼 주세요."], recheck()));
+          "NER은 기본으로 켜져 있어서, 안전을 위해 지금 모든 파일 읽기를 막고 있어요. "
+          + "서버를 먼저 띄우거나 아래 연결 상태에서 NER을 꺼 주세요."], recheck()));
       }
     }
   }

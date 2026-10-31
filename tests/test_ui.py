@@ -647,10 +647,15 @@ def test_ui_changes_write_the_same_files_as_gate_policy(make_ui, tmp_path, fixed
     assert snapshot(u.policy)["history-dir-mode"] == 0o700
 
 
+NER_OFF = Entry(settings={"ner_backend": "none"})  # 기본은 켜짐이라 켜기를 시험할 때는 먼저 끈 파일에서 시작한다
+
+
 def test_ner_toggle_writes_the_same_as_gate_policy_set(make_ui, tmp_path, health, fixed_now):
     ner = health()
     cli_policy = tmp_path / "cli" / "policy.yaml"
     u = make_ui(tmp_path / "ui" / "policy.yaml", ner_url=ner.url)
+    write_entries(cli_policy, [NER_OFF])
+    write_entries(u.policy, [NER_OFF])
     session = u.launch()
     assert gate_policy(cli_policy, "set", "ner_backend", "server")[0] == 0
     assert u.post("ner", {"enable": True}, session)[1]["status"] == "saved"
@@ -672,10 +677,11 @@ def test_ner_enable_is_refused_when_health_fails(make_ui, health, kind):
         server = health(health={"status": "loading"}) if kind == "loading" else health(status=500)
         url = server.url
     u = make_ui(ner_url=url)
+    write_entries(u.policy, [NER_OFF])
     session = u.launch()
     status, data = u.post("ner", {"enable": True}, session)
     assert (status, data["error"]) == (409, "ner-down")
-    assert not u.policy.exists()
+    assert read_entries(u.policy) == (NER_OFF,)
     _, st = u.get("status", session)
     assert st["ner"]["responding"] is False and st["ner"]["state"] == "unused"
 
@@ -690,6 +696,7 @@ def test_ner_enable_refuses_non_ip_address(make_ui, health):
 def test_ner_enable_then_server_down_shows_down_and_disable_needs_no_health(make_ui, health):
     server = health()
     u = make_ui(ner_url=server.url)
+    write_entries(u.policy, [NER_OFF])
     session = u.launch()
     assert u.post("ner", {"enable": True}, session)[1]["status"] == "saved"
     _, st = u.get("status", session)
@@ -700,6 +707,18 @@ def test_ner_enable_then_server_down_shows_down_and_disable_needs_no_health(make
     _, first = u.post("ner", {"enable": False}, session)
     _, done = u.post("ner", {"enable": False, "confirm": first["confirm"]}, session)
     assert done["status"] == "saved" and build_policy(read_entries(u.policy)).ner_backend == "none"
+
+
+def test_default_policy_has_ner_on_and_shows_down_without_server(make_ui):
+    """기본은 NER 켜짐이다(3e). 서버가 없으면 상태가 '응답 없음'이라 화면이 모든 읽기가 막힌다고 알린다."""
+    u = make_ui()
+    session = u.launch()
+    _, data = u.get("state", session)
+    assert data["ner_backend"] == "server" and not u.policy.exists()
+    _, st = u.get("status", session)
+    assert st["ner"]["enabled"] is True and st["ner"]["state"] == "down"
+    _, first = u.post("ner", {"enable": False}, session)  # 끄기는 서버 없이도 되고 느슨해지는 바꿈이라 확인받는다
+    assert first["status"] == "confirm" and first["loosening"]
 
 
 def test_ner_enable_value_must_be_bool(make_ui):
@@ -873,12 +892,13 @@ def test_state_marks_my_values_and_overridden_entries(make_ui):
     u = make_ui()
     write_entries(u.policy, [Entry(settings={"numbers.card.action": "deny"}, said="카드번호 있는 파일은 거부"),
                              Entry(settings={"numbers.card.action": "ask_human"}),
-                             Entry(settings={"entities.name.action": "deny"})])
+                             Entry(settings={"entities.name.action": "deny"}),
+                             Entry(settings={"entities.host.action": "deny"}), NER_OFF])
     _, data = u.get("state", u.launch())
     card = next(row for row in data["numbers"] if row["kind"] == "card")
     assert card["action"] == {"key": "numbers.card.action", "value": "ask_human", "default": "mask",
                               "choices": ["deny", "ask_human", "mask"], "mine": True}
-    assert [e["no_effect"] for e in data["entries"]] == ["뒤에 정한 것이 덮어씀", "", "NER을 켜야 효과 있음"]
+    assert [e["no_effect"] for e in data["entries"]] == ["뒤에 정한 것이 덮어씀", "", "NER을 켜야 효과 있음", "", ""]
     assert data["entries"][0]["fingerprint"] == fingerprint(read_entries(u.policy)[0])
     name = next(row for row in data["entities"] if row["group"] == "name")
     assert name["value"] == "deny" and name["mine"] and name["choices"] == ["deny", "ask_human", "mask", "allow"]

@@ -482,7 +482,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--purpose", default=DEFAULT_PURPOSE, help="Jev 질문에 넣을 요청 목적")
     parser.add_argument("--details", action="store_true", help="샘플별 결과도 출력")
     parser.add_argument("--ner", choices=NER_BACKENDS, default="none",
-                        help="server면 실제 게이트 흐름(NER 포함)도 돌리고 누출을 센다. NER_BASE_URL 필요")
+                        help="server면 실제 게이트 흐름(NER 포함)도 돌리고 누출을 센다. NER_BASE_URL(없으면 127.0.0.1:8001)")
     parser.add_argument("--ner-timeout", type=float, default=30.0, help="NER 호출 타임아웃(초)")
     parser.add_argument("--must-hide", type=Path, default=DEFAULT_MUST_HIDE, help="가려져야 할 글자 CSV")
     parser.add_argument("--show", action="store_true", help="--ner와 함께: 샘플마다 게이트가 돌려준 내용도 출력")

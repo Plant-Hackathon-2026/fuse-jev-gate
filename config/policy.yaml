@@ -49,10 +49,11 @@ entities:
   host:        {action: mask}   # IP 주소·내부 주소 (규칙으로 찾음, NER을 꺼도 적용)
   plain:       {action: allow}  # 나이 (그것만으로는 사람을 좁히기 어려워 기본으로 보여 줌)
 
-# NER 서버(nerserve, README 참고). 끄면(none) 이름·주소 등은 가리지 않고 3b와 똑같이 동작한다.
-# 켜면(server) 가린 것이 있는 문서는 가린 결과를 Jev에 다시 물어, 안전하면 가린 채 보여 주고 아니면 사람에게 묻는다.
-# NER 서버가 없으면 모든 읽기가 차단된다.
-ner_backend: none            # none(끔) | server (데몬 환경변수 NER_BASE_URL 필요)
+# NER 서버(nerserve, README 참고). 기본은 켬(server, 2026-11-01)이라 게이트 데몬보다 NER 서버를 먼저 띄운다.
+# 켜면 가린 것이 있는 문서는 가린 결과를 Jev에 다시 물어, 안전하면 가린 채 보여 주고 아니면 사람에게 묻는다.
+# NER 서버가 응답하지 않으면 모든 내용 읽기가 차단된다. 끄면(none, `gate policy set ner_backend none`) 이름·주소 등은
+# 가리지 않고 IP·내부 주소(규칙) 말고는 3b와 똑같이 동작한다.
+ner_backend: server          # server(켬, 데몬 환경변수 NER_BASE_URL, 없으면 http://127.0.0.1:8001) | none(끔)
 ner_timeout_seconds: 10.0    # 이 시간 안에 답이 없으면 차단
 
 # Jev 답에 따른 처리 (명세 3.4). 그 사이 구간은 사람 승인.

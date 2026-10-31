@@ -30,7 +30,8 @@
                                                        host(IP·내부 주소)는 규칙이 찾아 NER을 꺼도 적용된다
   (뺀 키) entities.date.action, entities.event.action  2026-11-01 NER 교체로 찾지 않는 묶음. 예전 정책 파일에 있으면 읽되
                                                        효과가 없다(정책 설정에 넣지 않음). 새로 지정할 수는 없다(validate_setting이 거부)
-  ner_backend, ner_timeout_seconds                     NER 백엔드(none | server, 기본 none = 끔), NER 응답 제한 시간(초)
+  ner_backend, ner_timeout_seconds                     NER 백엔드(server | none, 기본 server = 켬), NER 응답 제한 시간(초).
+                                                       NER 서버가 없으면 모든 내용 읽기가 차단된다(끄려면 none)
   thresholds.allow_if_safe_confidence_gte              Jev가 safe이고 확신도가 이 값 이상이면 허용
   thresholds.deny_if_sensitive_confidence_gte          Jev가 safe가 아니고 확신도가 이 값 이상이면 차단 (그 사이는 사람 승인)
   jev_backend, jev_timeout_seconds, max_inspect_bytes  Jev 백엔드 이름, 타임아웃(초), Jev 한 번에 넘기는 최대 바이트
@@ -249,8 +250,9 @@ _DEFAULTS: dict[str, object] = {
     "max_inspect_bytes": 200_000,
     "approval.timeout_seconds": 30.0,
     "approval.session_minutes": 60,
-    # NER 서버가 없으면 모든 읽기가 차단되므로 기본은 끔이다. 끄면 3b와 똑같이 동작한다(3c, 2026-10-31)
-    "ner_backend": "none",
+    # 기본은 켬이다(3e, 2026-11-01 사용자 결정). NER 서버(NER_BASE_URL, 없으면 127.0.0.1:8001)가 없으면 모든 내용 읽기가
+    # 차단된다(fail-closed). 끄면(none) 규칙(IP·내부 주소) 말고는 3b와 똑같이 동작한다
+    "ner_backend": "server",
     "ner_timeout_seconds": 10.0,
 }
 _FLOAT_RANGES = {

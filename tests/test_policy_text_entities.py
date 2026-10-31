@@ -281,9 +281,16 @@ def policy_file(tmp_path, monkeypatch):
 
 
 def test_add_entity_sentence_warns_when_ner_is_off(policy_file):
+    from gate.policy import write_entries
+    write_entries(policy_file, [Entry(settings={"ner_backend": "none"})])
     code, out = gate_policy_add(policy_file, "이름 있는 파일은 거부", "y\n")
     assert code == 0 and "NER이 꺼져 있어" in out and out.count("[y/N]") == 1
-    assert dict(read_entries(policy_file)[0].settings) == {"entities.name.action": "deny"}
+    assert dict(read_entries(policy_file)[-1].settings) == {"entities.name.action": "deny"}
+
+
+def test_add_entity_sentence_no_warning_by_default(policy_file):
+    code, out = gate_policy_add(policy_file, "이름 있는 파일은 거부", "y\n")  # 기본은 NER 켜짐
+    assert code == 0 and "NER이 꺼져 있어" not in out
 
 
 def test_add_entity_sentence_no_warning_when_ner_is_on(policy_file):

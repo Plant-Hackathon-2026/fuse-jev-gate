@@ -1,17 +1,19 @@
-"""gate.pipeline + NER (3c): 정규식 → NER → Jev → 합치기. NER·Jev는 가짜다. 모든 값은 가짜 예시다.
+"""gate.pipeline + NER (3c, 3e): 정규식 → 규칙 → NER → Jev → 합치기. NER·Jev는 가짜다. 모든 값은 가짜 예시다.
 
 사용자 결정(2026-10-31, ②): NER은 항상 가린다. 가린 것(정규식·NER)이 있으면 Jev는 가린 결과(보여 줄 내용)를 판단해
 안전이면 가린 채 보여 주고, 아니면 사람에게 묻는다. 가린 것이 없으면 지금처럼 Jev 결과(허용·승인·차단)를 따른다.
-NER이 꺼져 있으면(기본) 3b와 똑같다.
+NER을 끄면(ner_backend: none) 규칙(IP·내부 주소) 말고는 3b와 똑같다. 기본은 켜짐이다(3e, 2026-11-01).
 """
+
+import socket
 
 import pytest
 
 from gate.jev_client import JevError, MockJevClient
-from gate.ner_client import Entity, NerError, NerResult
+from gate.ner_client import DEFAULT_BASE_URL, Entity, NerError, NerResult, ServerNerClient
 from gate.peer import Peer
-from gate.pipeline import Inspector, search
-from gate.policy import Entry, PolicySource, write_entries
+from gate.pipeline import Inspector, default_ner_factory, search
+from gate.policy import DEFAULT_POLICY, Entry, PolicySource, build_policy, write_entries
 from gate.store import PlainStore
 
 PEER = Peer(pid=4321, uid=501, exe="/usr/local/bin/claude")
@@ -64,12 +66,10 @@ def source(tmp_path):
 
 
 def make(source, tmp_path, *, jev=None, ner=None, settings=None):
+    """ner를 주면 ner_backend: server, 주지 않으면 정책 항목으로 NER을 명시적으로 끈다(기본은 켜짐)."""
     policy_path = tmp_path / "policy.yaml"
-    entries = [Entry(settings={"ner_backend": "server", **(settings or {})})] if ner is not None else []
-    if settings and ner is None:
-        entries = [Entry(settings=settings)]
-    if entries:
-        write_entries(policy_path, entries)
+    backend = "server" if ner is not None else "none"
+    write_entries(policy_path, [Entry(settings={"ner_backend": backend, **(settings or {})})])
     jev = jev or MockJevClient("fixed", label="safe", confidence=0.99)
     ner = ner if ner is not None else FakeNer()
     inspector = Inspector(PlainStore(source), PolicySource(policy_path), jev_factory=lambda policy: jev,
@@ -80,9 +80,39 @@ def make(source, tmp_path, *, jev=None, ner=None, settings=None):
 SENSITIVE = dict(label="sensitive", confidence=0.99)
 
 
+# --- 기본은 NER 켜짐 (3e) ---
+
+def closed_port_url() -> str:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    return f"http://127.0.0.1:{port}"
+
+
+def test_default_policy_has_ner_on_and_blocks_every_read_without_server(source, tmp_path, monkeypatch):
+    """정책 파일이 없으면 NER 켜짐(ner_backend: server)이다. NER 서버가 응답하지 않으면 모든 내용 읽기를 막는다."""
+    assert DEFAULT_POLICY.ner_backend == "server"
+    monkeypatch.setenv("NER_BASE_URL", closed_port_url())
+    jev = MockJevClient("fixed", label="safe", confidence=0.99)
+    inspector = Inspector(PlainStore(source), PolicySource(tmp_path / "없음.yaml"), jev_factory=lambda p: jev)
+    for path in ("/회의.txt", "/자소서.txt", "/이름만.txt"):
+        verdict = inspector.inspect(PEER, path)
+        j = verdict.judgment
+        assert (j.action, j.stage, verdict.data) == ("deny", "entity", None), path
+        assert "NER 판단에 실패해 차단했습니다" in j.reason and "연결하지 못했습니다" in j.reason
+    assert jev.calls == []
+
+
+def test_default_ner_client_uses_this_computer_port_8001(monkeypatch):
+    monkeypatch.delenv("NER_BASE_URL", raising=False)
+    client = default_ner_factory(DEFAULT_POLICY)
+    assert isinstance(client, ServerNerClient) and client._base == DEFAULT_BASE_URL == "http://127.0.0.1:8001"
+    assert default_ner_factory(build_policy([Entry(settings={"ner_backend": "none"})])) is None
+
+
 # --- NER을 끄면 3b와 같다 ---
 
-def test_ner_off_by_default_keeps_names_and_jev_still_denies(source, tmp_path):
+def test_ner_off_keeps_names_and_jev_still_denies(source, tmp_path):
     inspector, _, ner = make(source, tmp_path)
     verdict = inspector.inspect(PEER, "/자소서.txt")
     assert verdict.judgment.action == "mask"
