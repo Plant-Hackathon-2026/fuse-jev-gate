@@ -5,13 +5,18 @@ interpret()가 아래 질문을 차례로 던지고 답을 모아 정책 항목(
 저장은 사용자 확인을 받은 뒤 gate/policy_cli.py가 한다.
 
 질문 구성 (질문 키: 선택지)
-  1. type: number | path | context | unknown     문장 종류
-       number → 2.   context → 5.   path → 경로 규칙 안내(저장하지 않음).   unknown → 다시 말해 달라고 한다.
-  2. kind: KINDS                                   어떤 번호인가 (rrn, foreigner_rrn, card, mobile, phone, email, account)
+  1. type: number | entity | path | context | unknown     문장 종류
+       number → 2.   entity → 6.   context → 5.   path → 경로 규칙 안내(저장하지 않음).   unknown → 다시 말해 달라고 한다.
+  2. kind: KINDS                                   어떤 번호인가 (rrn, foreigner_rrn, card, mobile, phone, email, account, secret)
   3. target: action | visible                      그 번호의 처리 방식을 바꾸나, 가릴 때 공개 범위를 바꾸나
   4. action: deny | ask_human | mask               (target이 action일 때)
      visible: 그 종류의 공개 범위                    (target이 visible일 때. gate.detectors.VISIBLE_CHOICES)
        → Entry(settings={"numbers.<kind>.<target>": 답}, said=문장)
+  6. entity: ENTITY_GROUPS                         NER이 찾는 어떤 정보인가 (name, address, …, plain. gate.ner_client) (3d)
+  7. entity_action: deny | ask_human | mask | allow  그 정보를 어떻게 처리하나
+       → Entry(settings={"entities.<묶음>.action": 답}, said=문장)
+       전화번호·이메일·비밀값은 NER이 찾아도 numbers 칸을 따르므로 number 쪽 문장이다.
+       plain 묶음(시간·연도·나이·직함·과목)은 함께 바뀐다고 알린다. allow는 기본보다 느슨해서 저장 전에 한 번 더 확인한다(gate.policy.loosened).
   5. direction: stricter | looser                  맥락 문장이 더 막는 쪽인가, 더 보여 주는 쪽인가
        stricter → Entry(context=문장, said=문장). 문장은 해석하지 않고 그대로 Jev 질문의 "사용자 정책" 칸에 들어간다.
        looser   → 저장하지 않는다(unsupported). Jev 질문은 사용자 정책을 "보여주면 안 되는 내용"으로만 쓰고,
@@ -23,10 +28,14 @@ interpret()가 아래 질문을 차례로 던지고 답을 모아 정책 항목(
   - path: 경로 패턴은 선택지로 고를 수 없어 `gate policy set path <패턴> <동작>`을 안내한다.
   - unsupported: 느슨하게 하는 맥락 문장.
 
-실제 해석 백엔드는 아직 없다. make_interpreter(이름)으로 고르고 지금은 mock만 있다(jev_client.make_client와 같은 구조).
+해석기는 make_interpreter(이름)으로 고른다(jev_client.make_client와 같은 구조).
+  - mock: 키워드 규칙. 기본값이다.
+  - laya: 로컬 laya-serve에 질문마다 선택형(choice) 질문을 zero-shot으로 묻는다(3d 실험). 평가는 eval/run_policy_text.py.
 """
 
 import math
+import os
+import re
 import threading
 import time
 import unicodedata
@@ -35,6 +44,8 @@ from dataclasses import dataclass
 from typing import Literal, Protocol
 
 from gate.detectors import KINDS
+from gate.jev_client import LAYA_DEFAULT_MODEL, JevError, laya_endpoint, laya_opener, laya_post
+from gate.ner_client import ENTITY_GROUPS
 from gate.policy import ACTION_NAMES, KIND_NAMES, VISIBLE_NAMES, Entry, PolicyError, describe_setting, setting_choices
 
 CONFIDENCE_THRESHOLD = 0.7
@@ -43,9 +54,10 @@ MAX_SENTENCE_CHARS = 500  # jev_client가 사용자 정책 한 줄을 500자에�
 
 Outcome = Literal["setting", "context", "path", "unsupported", "unclear", "error"]
 
-TYPE_OPTIONS = ("number", "path", "context", "unknown")
+TYPE_OPTIONS = ("number", "entity", "path", "context", "unknown")
 TARGET_OPTIONS = ("action", "visible")
 DIRECTION_OPTIONS = ("stricter", "looser")
+ENTITY_ACTION_OPTIONS = ("deny", "ask_human", "mask", "allow")  # gate.policy의 entities.<묶음>.action 선택지와 같다
 
 # 질문 키 → 질문 첫 줄. 첫 줄은 키마다 고정이라 question_key()로 어느 질문인지 알 수 있다.
 QUESTION_TITLES: dict[str, str] = {
@@ -55,16 +67,20 @@ QUESTION_TITLES: dict[str, str] = {
     "action": "이 번호가 있는 파일을 어떻게 처리하라는 것인가요?",
     "visible": "이 번호를 가릴 때 어디까지 보여 주라는 것인가요?",
     "direction": "이 문장은 더 막는 쪽인가요, 더 보여 주는 쪽인가요?",
+    "entity": "이 문장은 문서 속 어떤 정보에 대한 것인가요?",
+    "entity_action": "이 정보를 어떻게 처리하라는 것인가요?",
 }
 _TITLE_TO_KEY = {title: key for key, title in QUESTION_TITLES.items()}
 _UNSURE = {
     "type": "어떤 종류의 정책인지", "kind": "어떤 번호인지", "target": "무엇을 바꾸라는 것인지",
     "action": "어떻게 처리하라는 것인지", "visible": "어디까지 보여 주라는 것인지", "direction": "막는 쪽인지 보여 주는 쪽인지",
+    "entity": "어떤 정보인지", "entity_action": "어떻게 처리하라는 것인지",
 }
 
 _OPTION_GUIDES: dict[str, dict[str, str]] = {
     "type": {
-        "number": "주민등록번호·카드번호·전화번호·이메일·계좌번호처럼 형식이 정해진 번호를 어떻게 처리할지",
+        "number": "주민등록번호·카드번호·전화번호·이메일·계좌번호·비밀번호처럼 형식이 정해진 번호나 비밀값을 어떻게 처리할지",
+        "entity": "사람 이름·주소·생년월일·학번·소속(학교·회사·병원)·장소처럼 문서에 나오는 특정 정보를 가릴지 보여줄지",
         "path": "특정 폴더나 파일 이름(경로)에 대한 규칙",
         "context": "문서의 내용이나 주제(예: 병원 기록, 가족 이야기)를 보여줄지에 대한 규칙",
         "unknown": "정책 문장이 아니거나 알 수 없음",
@@ -80,12 +96,33 @@ _OPTION_GUIDES: dict[str, dict[str, str]] = {
         "stricter": "보여주지 말라거나 가리라거나 물어보라는 쪽",
         "looser": "보여줘도 된다거나 허용하라는 쪽",
     },
+    # NER 묶음(gate.ner_client.ENTITY_GROUPS). ENTITY_NAMES보다 풀어 쓴다. 해석기가 고를 때 읽는 설명이다.
+    "entity": {
+        "name": "사람 이름(본인·가족·지인·상담사·교수 등)",
+        "address": "집 주소나 사는 곳",
+        "birth": "생년월일이나 생일",
+        "student_id": "학번",
+        "org": "학교·학과·부서·회사·기관·병원·동아리·프로젝트 같은 소속 이름",
+        "place": "장소나 지역·지명",
+        "date": "날짜",
+        "event": "사건이나 행사 이름",
+        "etc": "그 밖의 민감한 개인 정보",
+        "host": "IP 주소나 내부 서버 주소",
+        "plain": "시간·연도·나이·직함·과목(다섯 가지가 한 묶음)",
+    },
+    "entity_action": {
+        "deny": "이 정보가 있는 파일은 읽기를 거부",
+        "ask_human": "이 정보가 있는 파일은 사람에게 물어본 뒤 보여줌",
+        "mask": "이 정보를 가려서 보여줌",
+        "allow": "이 정보를 가리지 않고 그대로 보여줌",
+    },
 }
 
 _EXAMPLES = (
     "주민번호는 생년월일까지만 보여줘",
     "카드번호 있는 파일은 거부",
     "이메일은 물어보고 보여줘",
+    "이름은 가려줘",
     "병원 기록은 보여주지 마",
 )
 _ACTION_NOTES = {
@@ -93,6 +130,13 @@ _ACTION_NOTES = {
     "ask_human": "이 번호가 있는 파일은 사람에게 물어본 뒤 보여줍니다(허용해도 번호는 가린 채로 보여줍니다).",
     "mask": "번호를 가린 뒤 보여줍니다.",
 }
+_ENTITY_ACTION_NOTES = {
+    "deny": "NER이 이 정보를 찾은 파일은 읽기를 거부합니다.",
+    "ask_human": "NER이 이 정보를 찾은 파일은 사람에게 물어본 뒤 보여줍니다(허용해도 이 정보는 가린 채로 보여줍니다).",
+    "mask": "NER이 찾은 부분을 [이름]처럼 종류 이름으로 바꿔 보여줍니다.",
+    "allow": "NER이 찾아도 가리지 않습니다. 다만 판단 모델(Jev)이 문서를 민감하다고 보면 사람에게 묻거나 막을 수 있습니다.",
+}
+_PLAIN_NOTE = "  이 묶음에는 시간·연도·나이·직함·과목이 함께 들어 있어서 다섯 가지가 같이 바뀝니다."
 
 
 class InterpretError(Exception):
@@ -231,6 +275,16 @@ def interpret(
                 "  파일을 보여 줄지 Jev가 판단할 때 이 문장을 그대로 함께 봅니다."
             )
             return Interpretation("context", text, message, entry, tuple(steps))
+        if kind_of_sentence == "entity":
+            group = ask("entity", ENTITY_GROUPS)
+            key = f"entities.{group}.action"
+            value = ask("entity_action", setting_choices(key), f"정보 종류: {group} ({_OPTION_GUIDES['entity'][group]})")
+            entry = Entry(settings={key: value}, said=text)
+            lines = ["이렇게 이해했어요:", f"  {describe_setting(key, value)}", f"  {_ENTITY_ACTION_NOTES[value]}"]
+            if group == "plain":
+                lines.append(_PLAIN_NOTE)
+            lines.append(f"  (설정 {key} = {value})")
+            return Interpretation("setting", text, "\n".join(lines), entry, tuple(steps))
 
         kind = ask("kind", KINDS)
         detail = f"번호 종류: {kind} ({KIND_NAMES[kind]})"
@@ -275,32 +329,88 @@ _KIND_CUES: dict[str, tuple[str, ...]] = {
     "mobile": ("휴대폰", "핸드폰", "휴대전화", "휴대 전화", "모바일"),
     "phone": ("일반 전화", "유선 전화", "집 전화", "집전화", "사무실 전화", "전화번호", "전화 번호"),
     "card": ("카드번호", "카드 번호", "신용카드", "체크카드", "카드"),
-    "email": ("이메일", "메일 주소", "메일주소", "전자우편", "e-mail", "email"),
+    "email": ("이메일 주소", "이메일", "메일 주소", "메일주소", "전자우편", "e-mail", "email"),
     "account": ("계좌번호", "계좌 번호", "계좌", "통장"),
 }
-_PATH_CUES = ("폴더", "디렉터리", "디렉토리", "경로", "확장자", "파일 이름", "파일이름", "파일명", "/", "*")
+_PATH_CUES = ("폴더", "디렉터리", "디렉토리", "경로", "확장자", "파일 이름", "파일이름", "파일명", "이름에", "/", "*")
+_FILE_NAME = re.compile(r"[0-9a-z가-힣_\-]+\.[a-z0-9]{2,5}(?![a-z0-9])")  # "주소록.xlsx"처럼 확장자가 붙은 파일 이름
+# 한 묶음으로 정할 수 없는 넓은 말. 맥락 규칙으로 저장하지 않고 다시 말해 달라고 한다("개인정보는 다 가려줘").
+_BROAD_CUES = ("개인정보", "개인 정보", "연락처", "신상", "인적 사항", "인적사항", "민감 정보", "민감한 정보")
+# NER 묶음 단서(3d). 표 순서대로 찾고 지우므로 "학교 이름"(org)·"ip 주소"(host)·"과목 이름"(plain)이 먼저 걸려
+# 맨 뒤 name의 "이름"이나 address의 "주소"로 다시 잡히지 않는다. "병원"·"회사"·"사건"처럼 주제로도 쓰는 맨 낱말은 넣지 않는다
+# ("병원 기록은 보여주지 마"는 맥락 규칙이다). 그래서 "~ 이름"·"~명"처럼 정보 종류임이 드러나는 말만 넣는다.
+_ENTITY_CUES: dict[str, tuple[str, ...]] = {
+    "host": ("아이피 주소", "아이피주소", "아이피", "내부 주소", "내부주소", "서버 주소", "서버주소", "호스트 이름", "호스트명", "호스트",
+             "내부 서버", "사내 주소"),  # 영문 "ip"는 _keyword_choice가 낱말일 때만 "아이피"로 바꾼다("zip"에 걸리지 않게)
+    "org": ("학교 이름", "학교이름", "학교명", "다니는 학교", "회사 이름", "회사이름", "회사명", "다니는 회사", "직장 이름", "직장명",
+            "병원 이름", "병원이름", "병원명", "기관 이름", "기관명", "단체 이름", "단체명", "동아리 이름", "동아리명", "모임 이름",
+            "프로젝트 이름", "프로젝트명", "사업 이름", "사업명", "학과 이름", "학과명", "부서 이름", "부서명", "학과", "부서",
+            "소속"),
+    "student_id": ("학생 번호", "학생번호", "학번"),
+    "birth": ("생년월일", "생일", "출생일", "태어난 날"),
+    "address": ("집 주소", "주소", "사는 곳", "사는곳", "거주지", "도로명", "번지"),
+    "place": ("장소 이름", "장소", "지명", "지역 이름", "지역명", "지역", "동네", "도시 이름", "도시명", "나라 이름"),
+    "date": ("날짜", "일자", "며칠", "몇 월"),
+    "event": ("사건 이름", "사건명", "행사 이름", "행사명", "대회 이름", "대회명"),
+    "etc": ("기타 민감", "기타 개인", "기타 정보", "그 밖의 민감", "그 밖의 개인", "그밖의 민감"),
+    "plain": ("과목 이름", "과목명", "수업 이름", "강의 이름", "강의명", "과목", "나이", "연령", "몇 살", "몇살", "연도", "년도",
+              "시각", "시간", "직함", "직급", "직책"),
+    "name": ("사람 이름", "실명", "성명", "성함", "이름", "인명"),
+}
+# entity_action 단서(3d). 단계 순서대로 찾고 지운다. 같은 말이 여러 동작에 걸리지 않게 하려는 순서다.
+#   0. 이중 부정·의무("가리지 않으면 안", "가려야")는 mask다. 뒤의 "가리지 않"에 allow로 잡히지 않게 맨 먼저 지운다.
+#   1. "가리지 마"류(allow): 뒤의 "가리"에 mask로 잡히지 않게 먼저 지운다.
+#   2. "물어보고 보여"·"보여주기 전에"·"허락 없이 보여주지 마"(ask_human), 3. "거부"류(deny): 뒤의 "보여"에 allow로
+#      잡히지 않게 먼저 지운다.
+#   4. "보여주지 마"류: 파일 단위 말("있는 파일", "있으면")이 있으면 deny, 없으면 mask("이름은 보여주지 마" = 이름을 가림).
+#   5. "가려서 보여"·"바꿔서 보여"·"가려"류(mask), 6. 남은 "보여줘"류(allow).
+# 서로 다른 동작이 둘 이상 걸리면 확신도 0.5다("나이는 가리고 연도는 보여줘").
+# 묶음에는 공개 범위가 없으므로 "까지"류(_PARTIAL_CUES)가 있으면 확신도 0.5다("주소는 시·도까지만 보여줘").
+_ENTITY_ACTION_STEPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("mask", ("가리지 않으면 안", "숨기지 않으면 안", "가려야", "숨겨야", "가려 둬야")),
+    ("allow", ("가리지 마", "가리지마", "가리지 말", "가리지 않", "안 가려", "안가려", "안 가리", "숨기지 마", "숨기지 말", "숨기지 않",
+               "감추지 마", "감추지 말", "감추지 않", "지우지 마", "지우지 말", "안 숨겨", "가릴 필요 없", "숨길 필요 없",
+               "감출 필요 없")),
+    ("ask_human", ("허락 없이 보여주지 마", "허락 없이는 보여주지 마", "허락 없이", "보여주기 전에", "보여 주기 전에", "물어보고 보여",
+                   "물어보", "물어봐", "물어 보", "확인받고 보여", "확인받", "확인 받", "허락", "승인")),
+    ("deny", ("거부", "차단", "막아", "막기", "막을", "열지 마", "열지마", "열지 못", "읽지 마", "읽지마", "읽지 못", "못 읽", "못 열",
+              "금지")),
+    ("hide", ("보여주지 마", "보여 주지 마", "보여주지마", "보여주지 말", "보여주면 안", "보여 주면 안", "안 보이게", "안보이게",
+              "보이지 않게", "보이지 말", "못 보게", "못보게")),
+    ("mask", ("가려서 보여", "가린 채 보여", "가린 채로 보여", "가리고 보여", "숨겨서 보여", "지우고 보여", "지워서 보여", "빼고 보여",
+              "바꿔서 보여", "바꿔 보여", "바꿔서", "가려", "가리", "가린", "가렸", "숨겨", "숨기", "숨겼", "감춰", "감추", "감췄", "지워",
+              "지우", "지웠", "마스킹",
+              "익명", "빼줘", "빼 줘")),
+    ("allow", ("그대로", "보여줘도", "보여 줘도", "봐도", "보여도", "괜찮", "허용", "공개", "보여줘", "보여 줘", "보여주", "보이게")),
+)
+_FILE_LEVEL_CUES = ("있는 파일", "있는 문서", "들어간 파일", "들어간 문서", "나오는 파일", "나오는 문서", "포함된 파일", "포함된 문서",
+                    "적힌 파일", "적힌 문서", "있으면", "들어 있으면", "들어있으면", "나오면", "적혀 있으면")
+_PARTIAL_CUES = ("까지", "성만", "앞글자만", "첫 글자만")
 _ACTION_CUES: dict[str, tuple[str, ...]] = {
-    "mask": ("가려서 보여", "가려서 보이", "가린 채", "가리고 보여", "마스킹"),
+    "mask": ("가려서 보여", "가려서 보이", "가린 채", "가리고 보여", "마스킹", "가려"),  # "이메일 주소는 가려줘"
     "ask_human": ("물어보", "물어봐", "물어 보", "확인받", "확인 받", "허락", "승인"),
     "deny": ("거부", "차단", "막아", "막기", "막을", "열지 마", "읽지 마", "금지"),
 }
 _VISIBLE_CUES: dict[str, tuple[str, ...]] = {
     "birth_gender": ("생년월일과 성별", "생년월일이랑 성별", "생년월일하고 성별", "성별", "앞 7자리", "앞7자리", "앞 일곱"),
-    "birth": ("생년월일", "생일", "앞 6자리", "앞6자리", "앞 여섯"),
+    "birth": ("생년월일", "생일", "앞 6자리", "앞6자리", "앞 여섯", "앞자리"),  # 주민번호 "앞자리" = 하이픈 앞 6자리
     "none": ("전부 가려", "다 가려", "모두 가려", "전부 가리", "다 가리", "모두 가리", "전부 숨겨", "다 숨겨",
              "하나도 보여주지"),
     "prefix": ("앞자리", "앞 자리", "앞 번호", "앞번호", "앞 3자리", "앞3자리"),
     "area": ("지역번호", "지역 번호"),
     "tld": ("최상위 도메인", "도메인", ".com"),
-    "last4": ("끝 4자리", "끝4자리", "끝자리", "끝 자리", "뒤 4자리", "뒤4자리", "뒷자리", "뒷 4자리", "마지막 4자리"),
+    "last4": ("끝 4자리", "끝4자리", "끝 네 자리", "끝 네자리", "끝자리", "끝 자리", "뒤 4자리", "뒤4자리", "뒷자리", "뒷 4자리",
+              "마지막 4자리", "마지막 네 자리"),
 }
 _TARGET_CUES: dict[str, tuple[str, ...]] = {
-    "visible": (*(cue for cues in _VISIBLE_CUES.values() for cue in cues), "까지"),
+    # "생년월일까지만 보여주고 나머지는 가려줘"의 "나머지는 가려"는 공개 범위 말이다(action의 "가려"보다 먼저 지운다)
+    "visible": (*(cue for cues in _VISIBLE_CUES.values() for cue in cues), "까지", "나머지는 가려", "나머지는 가리", "나머지 가려"),
     "action": tuple(cue for cues in _ACTION_CUES.values() for cue in cues),
 }
 _DIRECTION_CUES: dict[str, tuple[str, ...]] = {
     "stricter": ("보여주지 마", "보여주지마", "보여 주지 마", "보여주면 안", "보이지 않게", "안 보이게", "숨겨", "가려",
-                 "가리", "막아", "거부", "차단", "금지", "빼고", "제외", "물어보", "물어봐", "확인받", "확인 받"),
+                 "가리", "막아", "거부", "차단", "금지", "빼고", "제외", "물어보", "물어봐", "확인받", "확인 받", "읽지 마",
+                 "읽지 못", "못 읽", "열지 마", "열지 못"),
     "looser": ("보여줘도", "보여 줘도", "봐도 돼", "봐도 된", "보여도 돼", "보여도 된", "허용", "괜찮", "그냥 보여",
                "다 보여", "전부 보여", "풀어"),
 }
@@ -320,8 +430,9 @@ class MockPolicyInterpreter:
 
     - keyword: 단순 키워드 규칙(시연용). 선택지마다 정해 둔 말이 문장에 있는지 본다. 하나만 맞으면 확신도 0.9,
       여럿이 맞으면 첫 것을 0.5로, 아무것도 맞지 않으면 첫 선택지를 0.2로 답한다(임계값 0.7 미만이라 다시 묻게 된다).
-      type 질문은 번호 단서와 경로 단서가 함께 있으면 0.5, 둘 다 없고 막거나 푸는 말이 있으면 context 0.8,
-      아무 단서도 없으면 unknown이다. 확신도는 임의로 정한 상수다.
+      type 질문은 번호·묶음·경로 단서 중 둘 이상이 함께 있으면 0.5, 셋 다 없고 막거나 푸는 말이 있으면 context 0.8,
+      아무 단서도 없으면 unknown이다(_type_choice). entity_action은 단계별 단서(_ENTITY_ACTION_STEPS)로 고른다.
+      확신도는 임의로 정한 상수다.
     - fixed: answers={질문 키: (답, 확신도)}로 질문별 답을 정해 둔다. 테스트용. 정하지 않은 질문은 InterpretError.
     - error를 주면 choose가 항상 그 예외를 던진다. delay는 지연을 흉내 낸다. 둘 다 실패 경로 시험용이다.
     - calls에 받은 질문(문장, 질문, 선택지, 질문 키)을 남긴다.
@@ -371,17 +482,17 @@ class MockPolicyInterpreter:
         return _keyword_choice(key, sentence.casefold(), options)
 
 
-def _pick(text: str, cues: Mapping[str, Sequence[str]], options: Sequence[str]) -> Choice:
-    found: list[str] = []
-    rest = text
-    for option, words in cues.items():
-        if option not in options:
-            continue
-        hits = [w for w in words if w in rest]
-        if hits:
-            found.append(option)
-            for w in hits:
-                rest = rest.replace(w, " ")
+def _consume(text: str, words: Sequence[str], *, once: bool = False) -> tuple[str, bool]:
+    """text에서 words를 긴 것부터 지운다(once면 낱말마다 처음 한 번만). 하나라도 있었는지 함께 돌려준다."""
+    hit = False
+    for word in sorted(words, key=len, reverse=True):
+        if word in text:
+            text = text.replace(word, " ", 1 if once else -1)
+            hit = True
+    return text, hit
+
+
+def _found(found: Sequence[str], options: Sequence[str]) -> Choice:
     if len(found) == 1:
         return Choice(found[0], _SURE)
     if found:
@@ -389,21 +500,80 @@ def _pick(text: str, cues: Mapping[str, Sequence[str]], options: Sequence[str]) 
     return Choice(options[0], _UNMATCHED)
 
 
+def _pick(text: str, cues: Mapping[str, Sequence[str]], options: Sequence[str]) -> Choice:
+    found: list[str] = []
+    rest = text
+    for option, words in cues.items():
+        if option not in options:
+            continue
+        rest, hit = _consume(rest, words)
+        if hit:
+            found.append(option)
+    return _found(found, options)
+
+
+_ALL_KIND_CUES = tuple(c for cues in _KIND_CUES.values() for c in cues)
+_ALL_VISIBLE_CUES = (*(c for cues in _VISIBLE_CUES.values() for c in cues), "까지")
+_ALL_ENTITY_CUES = tuple(c for cues in _ENTITY_CUES.values() for c in cues)
+
+
+def _type_choice(text: str) -> Choice:
+    """번호 → 경로 → 묶음 단서 순서로 찾고 지운다. 둘 이상 걸리면 0.5(다시 묻게 됨), 하나면 0.9.
+
+    - "이메일 주소"는 번호 단서가 먼저 지워서 묶음(주소)으로 다시 잡히지 않는다. "파일 이름"도 경로 단서가 먼저 지운다.
+    - 번호 단서가 있으면 공개 범위 말("생년월일", "지역번호", "까지")도 처음 한 번만 지운다. "주민번호는 생년월일까지만 보여줘"의
+      "생년월일"은 번호를 어디까지 보여 줄지이지 묶음(birth)이 아니다. "…까지만 보여주고 생년월일은 가려줘"처럼 한 번 더 나오면
+      묶음으로 남아 둘이 섞인 문장(0.5)이 된다.
+    - 남은 글에 "번호"가 있으면 번호 문장이다("번호는 다 거부"). "학번"·"학생 번호"는 묶음 단서가 먼저 지운다.
+    - 확장자가 붙은 파일 이름("주소록.xlsx")은 경로 단서다. "개인정보"·"연락처" 같은 넓은 말(_BROAD_CUES)이 남으면 0.5다.
+    """
+    rest, number = _consume(text, _ALL_KIND_CUES)
+    if number:
+        rest, _ = _consume(rest, _ALL_VISIBLE_CUES, once=True)
+    path = bool(_FILE_NAME.search(rest))
+    rest = _FILE_NAME.sub(" ", rest)
+    rest, path_word = _consume(rest, _PATH_CUES)
+    path = path or path_word
+    rest, entity = _consume(rest, _ALL_ENTITY_CUES)
+    rest, broad = _consume(rest, _BROAD_CUES)
+    number = number or "번호" in rest
+    hits = [name for name, hit in (("number", number), ("entity", entity), ("path", path)) if hit]
+    if broad:
+        return Choice(hits[0] if hits else "entity", _AMBIGUOUS)
+    if hits:
+        return Choice(hits[0], _SURE if len(hits) == 1 else _AMBIGUOUS)
+    if any(c in text for cues in _DIRECTION_CUES.values() for c in cues):
+        return Choice("context", _CONTEXT_GUESS)
+    return Choice("unknown", _SURE)
+
+
+def _entity_action_choice(text: str, options: Sequence[str]) -> Choice:
+    found: list[str] = []
+    rest = text
+    for option, words in _ENTITY_ACTION_STEPS:
+        rest, hit = _consume(rest, words)
+        if not hit:
+            continue
+        if option == "hide":
+            option = "deny" if any(c in text for c in _FILE_LEVEL_CUES) else "mask"
+        if option in options and option not in found:
+            found.append(option)
+    if any(c in text for c in _PARTIAL_CUES):  # 묶음에는 공개 범위가 없다
+        return Choice(found[0] if found else options[0], _AMBIGUOUS)
+    return _found(found, options)
+
+
+_IP_WORD = re.compile(r"(?<![a-z])ip(?![a-z])")
+
+
 def _keyword_choice(key: str, text: str, options: tuple[str, ...]) -> Choice:
+    text = _IP_WORD.sub("아이피", text)
     if key == "type":
-        number = "번호" in text or any(c in text for cues in _KIND_CUES.values() for c in cues)
-        path = any(c in text for c in _PATH_CUES)
-        if number and path:
-            return Choice("number", _AMBIGUOUS)
-        if number:
-            return Choice("number", _SURE)
-        if path:
-            return Choice("path", _SURE)
-        if any(c in text for cues in _DIRECTION_CUES.values() for c in cues):
-            return Choice("context", _CONTEXT_GUESS)
-        return Choice("unknown", _SURE)
+        return _type_choice(text)
+    if key == "entity_action":
+        return _entity_action_choice(text, options)
     table = {"kind": _KIND_CUES, "target": _TARGET_CUES, "action": _ACTION_CUES, "visible": _VISIBLE_CUES,
-             "direction": _DIRECTION_CUES}[key]
+             "direction": _DIRECTION_CUES, "entity": _ENTITY_CUES}[key]
     return _pick(text, table, options)
 
 
@@ -449,12 +619,101 @@ class FailClosedInterpreter:
         return value
 
 
+# --- Laya (3d 실험) ---
+
+LAYA_POLICY_PREFIX = "다음은 사용자가 AI 에이전트의 파일 읽기 정책으로 쓴 한국어 문장이다."
+_LAYA_QID = "answer"
+
+
+def split_question(question: str, options: Sequence[str]) -> tuple[str, dict[str, str]]:
+    """build_question이 만든 질문을 (지시문, {선택지: 설명})으로 나눈다. 선택지가 options와 다르면 InterpretError."""
+    lines = question.split("\n")
+    if "선택지:" not in lines:
+        raise InterpretError("질문에 선택지 목록이 없습니다")
+    cut = lines.index("선택지:")
+    instructions = "\n".join(lines[:cut]).strip()
+    criteria: dict[str, str] = {}
+    for line in lines[cut + 1:]:
+        if line.startswith("- "):
+            option, sep, guide = line[2:].partition(": ")
+            if sep:
+                criteria[option] = guide
+    if not instructions or set(criteria) != set(options):
+        raise InterpretError("질문의 선택지가 options와 다릅니다")
+    return instructions, {option: criteria[option] for option in options}
+
+
+class LayaPolicyInterpreter:
+    """로컬 laya-serve에 선택형(choice) 질문을 묻는 해석기 (3d 실험).
+
+    **체크포인트가 이 질문들을 배우지 않았다(zero-shot).** 기본 해석기로 쓰기 전에 eval/run_policy_text.py로 평가한다.
+    - 설정은 인자 또는 환경변수. 판단 모델과 같은 laya-serve를 쓴다: JEV_BASE_URL(필수, 이 컴퓨터 주소만),
+      POLICY_LAYA_MODEL(선택, 없으면 JEV_MODEL, 그것도 없으면 gate-laya), JEV_API_KEY(선택).
+    - 질문 하나를 {"type": "choice", "instructions": 앞말 + 질문 첫 줄(+ 세부), "criteria": {선택지: 설명}}으로 보낸다.
+    - 확신도는 고른 선택지의 확률(probabilities[choice])이다. laya의 confidence(정규화 엔트로피)는 쓰지 않는다.
+    - 연결 실패, HTTP 오류, 형식이 다른 응답, 선택지 밖의 답은 InterpretError(저장하지 않음)다.
+    """
+
+    def __init__(
+        self,
+        *,
+        base_url: str | None = None,
+        model: str | None = None,
+        api_key: str | None = None,
+        timeout: float = DEFAULT_TIMEOUT_SECONDS,
+        env: Mapping[str, str] | None = None,
+    ) -> None:
+        env = os.environ if env is None else env
+        raw_url = base_url if base_url is not None else env.get("JEV_BASE_URL", "")
+        if not raw_url.strip():
+            raise InterpretError("laya 해석기는 JEV_BASE_URL(laya-serve 주소, 예: http://127.0.0.1:8000)이 필요합니다")
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) \
+                or timeout <= 0:
+            raise InterpretError("해석기 타임아웃은 0보다 큰 숫자(초)여야 합니다")
+        try:
+            self._endpoint = laya_endpoint(raw_url)
+        except JevError as exc:
+            raise InterpretError(str(exc)) from None
+        chosen = model if model is not None else (env.get("POLICY_LAYA_MODEL") or env.get("JEV_MODEL") or "")
+        self.model = chosen.strip() or LAYA_DEFAULT_MODEL
+        self._api_key = api_key if api_key is not None else (env.get("JEV_API_KEY") or None)
+        self.timeout = float(timeout)
+        self._opener = laya_opener()
+
+    def __repr__(self) -> str:
+        return f"LayaPolicyInterpreter(model={self.model!r})"
+
+    def choose(self, sentence: str, question: str, options: Sequence[str]) -> Choice:
+        options = tuple(options)
+        instructions, criteria = split_question(question, options)
+        body = {"model": self.model, "states": [sentence], "questions": {_LAYA_QID: {
+            "type": "choice", "instructions": f"{LAYA_POLICY_PREFIX}\n{instructions}", "criteria": criteria}}}
+        try:
+            data = laya_post(self._opener, self._endpoint, body, api_key=self._api_key, timeout=self.timeout)
+        except JevError as exc:
+            raise InterpretError(str(exc)) from None
+        results = data.get("results") if isinstance(data, dict) else None
+        item = results[0] if isinstance(results, list) and len(results) == 1 else None
+        answers = item.get("answers") if isinstance(item, dict) else None
+        answer = answers.get(_LAYA_QID) if isinstance(answers, dict) else None
+        if not isinstance(answer, dict):
+            raise InterpretError("Laya 응답 형식이 올바르지 않습니다: answers")
+        choice, probabilities = answer.get("choice"), answer.get("probabilities")
+        if choice not in options:
+            raise InterpretError("해석기가 선택지 밖의 답을 했습니다")
+        p = probabilities.get(choice) if isinstance(probabilities, dict) else None
+        if isinstance(p, bool) or not isinstance(p, (int, float)) or not math.isfinite(p) or not 0.0 <= p <= 1.0:
+            raise InterpretError("Laya 응답 형식이 올바르지 않습니다: probabilities")
+        return Choice(choice, float(p))
+
+
 # 해석기 이름 → 생성 함수.
 _BACKENDS: dict[str, Callable[..., PolicyInterpreter]] = {
+    "laya": LayaPolicyInterpreter,
     "mock": MockPolicyInterpreter,
-    # TODO(Phase 3b): 실제 Jev 백엔드를 정하면 PolicyInterpreter 구현을 추가해 등록한다. 요청·응답 형식은 그 백엔드의
-    #   공식 문서를 확인해서 구현하고 추측하지 않는다. 답을 선택지 하나 + 확신도로 옮기지 못하면 InterpretError를 던진다.
 }
+# 네트워크로 묻는 해석기는 같은 타임아웃을 자체 연결에도 건다. FailClosedInterpreter의 타임아웃은 기다림만 끊는다.
+_NETWORK_BACKENDS = frozenset({"laya"})
 
 
 def available_interpreters() -> tuple[str, ...]:
@@ -467,7 +726,7 @@ def make_interpreter(name: str = "mock", *, timeout: float = DEFAULT_TIMEOUT_SEC
     if factory is None:
         raise InterpretError(f"알 수 없는 해석기: {name!r} (사용 가능: {', '.join(available_interpreters())})")
     try:
-        inner = factory(**options)
+        inner = factory(timeout=timeout, **options) if name in _NETWORK_BACKENDS else factory(**options)
     except InterpretError:
         raise
     except Exception as exc:

@@ -270,6 +270,10 @@ def _add(path: Path, entries: tuple[Entry, ...], sentence: str, io: _Prompt,
     before_policy, after_policy = build_policy(entries), build_policy(after)
     if entry.context is not None and after_policy.jev_backend == "mock":
         io.say("  주의: 지금 Jev는 Mock(키워드 규칙)이라 맥락 규칙을 판단에 쓰지 않습니다. 실제 Jev를 붙여야 효과가 있습니다.")
+    if entry.settings and any(key.startswith("entities.") for key in entry.settings) \
+            and after_policy.ner_backend == "none":
+        io.say("  주의: 지금 NER이 꺼져 있어(ner_backend: none) 이 설정은 효과가 없습니다. "
+               "켜려면: gate policy set ner_backend server")
     if after_policy.version == before_policy.version:
         io.say("  (지금 정책과 같은 값이라 동작은 바뀌지 않습니다)")
     if not io.confirm("이대로 저장할까요?"):
