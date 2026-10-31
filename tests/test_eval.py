@@ -64,6 +64,7 @@ def test_compute_stats(fixed_results):
     assert (s.safe_total, s.false_positives) == (3, 2)
     assert (s.unsafe_total, s.false_negatives) == (4, 1)
     assert s.accuracy == pytest.approx(3 / 7)
+    assert s.safe_correct == 4  # 오류는 safe가 아님(차단)으로 센다: highly_sensitive 오류는 맞힌 쪽
     assert s.false_positive_rate == pytest.approx(2 / 3)
     assert s.false_negative_rate == pytest.approx(1 / 4)
 
@@ -115,6 +116,7 @@ def test_format_report_shows_errors_and_notice(fixed_results):
     text = format_report(summarize(fixed_results), client_name="mock", notice=MOCK_NOTICE)
     assert "대변하지 않는다" in text
     assert "2건" in text
+    assert "안전 여부 정확도" in text and "4/7 (57.1%)" in text
     for heading in ("[전체]", "[혼동행렬]", "[문서 종류별]", "[게이트 결과]", "가림"):
         assert heading in text
 
