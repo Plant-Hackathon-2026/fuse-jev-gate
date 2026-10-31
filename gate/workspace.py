@@ -8,12 +8,14 @@
   | 대상                                          | Read | Edit | 이유                                        |
   |-----------------------------------------------|------|------|---------------------------------------------|
   | 원본 폴더                                      | deny | deny | 게이트를 거치지 않는 읽기                     |
+  | 추가 폴더(mounts.yaml의 모든 항목, Phase 9)       | deny | deny | 게이트를 거치지 않는 읽기. 보호만 남은 것·지금 없는 폴더도 |
   | 정책 파일, 정책 기록 폴더                        | deny | deny | 정책 바꾸기·undo로 바꿔 넣기                  |
+  | 폴더 목록·작업 폴더 등록(mounts.yaml·workspaces.yaml) | deny | deny | 목록을 바꿔 다른 폴더를 열게 하기          |
   | 감사 로그 폴더(audit.key 포함)                   | deny | deny | 키가 새면 파일 해시로 원문을 맞혀 볼 수 있다   |
   | 소켓 폴더                                      |  -   | deny | 소켓 바꿔치기. 연결은 allowUnixSockets로 정한다 |
   | `.claude/`·`.mcp.json`(깊이 무관), `~/.claude/`, `~/.claude.json` | - | deny | 훅·MCP 서버·스킬 훅은 샌드박스 밖에서 돈다 |
-  - Read·Edit deny 규칙은 샌드박스 denyRead·denyWrite에도 합쳐진다. 원본·정책·기록·감사 로그 폴더는 denyRead에 한 번 더
-    적는다(권한 규칙 표기를 잘못 써도 샌드박스에는 남게).
+  - Read·Edit deny 규칙은 샌드박스 denyRead·denyWrite에도 합쳐진다. 원본·추가 폴더·정책·목록·등록·기록·감사 로그 폴더는
+    denyRead에 한 번 더 적는다(권한 규칙 표기를 잘못 써도 샌드박스에는 남게). 파일은 패턴 하나, 폴더는 폴더 자체 + `/**`.
   - 샌드박스: 켬, 시작 못 하면 Claude Code도 시작하지 않음, 샌드박스 밖 재실행 금지, excludedCommands 없음.
     Unix 소켓은 게이트 소켓만 연다(승인 소켓은 막힘). 이 목록은 macOS에서만 쓰인다. Linux는 전부 열기·전부 막기뿐이다.
   - disableBypassPermissionsMode: bypass 모드에서는 Edit 도구의 보호 경로 검사가 꺼진다.
@@ -22,11 +24,18 @@
 경로
   - 권한 규칙의 절대 경로는 `//`로 시작한다(`/path`는 작업 폴더 기준). 샌드박스 경로는 `/`로 시작하는 보통 절대 경로다.
   - 모든 경로는 실제 경로(resolve)로 적는다. `*`, `?`, `[`, `]`가 든 경로는 규칙에서 패턴으로 읽히므로 받지 않는다.
+    맥에서는 디스크에 적힌 표기(대소문자·NFC/NFD)로 바꿔 적는다(gate.mounts.disk_path). 규칙은 글자로 맞추기 때문이다.
   - 작업 폴더는 막는 경로를 담거나 그 안에 있으면 안 된다. 작업 폴더는 에이전트가 쓸 수 있어서, 안쪽 폴더 이름을 바꾸는
-    식으로 경로 기준 차단을 피할 수 있다.
+    식으로 경로 기준 차단을 피할 수 있다. 겹침은 대소문자·NFC를 무시하고 본다(맥 기본 디스크).
   - 프로젝트 설정은 세션을 띄운 폴더의 `.claude/`에서만 읽는다. 작업 폴더의 하위 폴더에서 띄우면 보호되지 않는다.
 
 이미 있는 파일은 내용이 같으면 그대로 두고, 다르면 --force 없이는 덮어쓰지 않는다.
+
+추가 폴더(Phase 9, plans/mount-ui-plan.md 4.3)
+  - 정책 파일 옆 mounts.yaml(있으면)의 모든 항목을 막는다(with_listed_mounts). 목록 파일이 잘못되어 있으면 무엇을 막을지
+    모르므로 만들지 않는다. 정책 파일 자체가 심볼릭 링크면 받지 않는다(목록·기록 파일을 찾는 폴더와 막는 폴더가 달라진다).
+  - 만든 작업 폴더를 정책 파일 옆 workspaces.yaml에 등록한다(같은 경로면 갱신). 설정을 만든 경로와 설정 파일의 SHA-256을
+    적는다. 폴더를 추가·보호 해제하면 gate.mount_change가 이 기록으로 설정을 다시 쓴다.
 """
 
 import argparse
@@ -34,9 +43,25 @@ import json
 import os
 import shutil
 import sys
-from dataclasses import dataclass
+from collections.abc import Iterable
+from dataclasses import dataclass, replace
 from pathlib import Path
 
+from gate.mounts import (
+    MOUNTS_FILE_NAME,
+    WORKSPACES_FILE_NAME,
+    MountsFileError,
+    WorkspaceRecord,
+    disk_path,
+    now_iso,
+    path_key,
+    path_problem,
+    read_mounts,
+    read_workspaces,
+    relation,
+    sha256_text,
+    write_workspaces,
+)
 from gate.policy_cli import history_dir
 
 PATTERN_CHARS = set("*?[]")
@@ -56,6 +81,7 @@ class GatePaths:
     policy: Path
     audit: Path      # 감사 로그 파일. 그 폴더(audit.key 포함) 전체를 막는다
     gate_bin: Path
+    mounts: tuple[Path, ...] = ()  # 추가 폴더(mounts.yaml의 모든 항목. 보호만 남은 것·지금 없는 폴더도)
 
     @property
     def policy_history(self) -> Path:
@@ -69,20 +95,58 @@ class GatePaths:
     def run_dir(self) -> Path:
         return self.socket.parent
 
+    @property
+    def mounts_file(self) -> Path:
+        return self.policy.parent / MOUNTS_FILE_NAME
+
+    @property
+    def workspaces_file(self) -> Path:
+        return self.policy.parent / WORKSPACES_FILE_NAME
+
+    def protected_files(self) -> tuple[Path, ...]:
+        """막는 경로 중 파일(규칙을 패턴 하나로 적는다)."""
+        return (self.policy, self.mounts_file, self.workspaces_file)
+
     def protected(self) -> list[Path]:
         """읽기·쓰기를 모두 막는 경로."""
-        return [self.source, self.policy, self.policy_history, self.audit_dir]
+        return list(_unique([self.source, *self.mounts, self.policy, self.mounts_file, self.workspaces_file,
+                             self.policy_history, self.audit_dir]))
+
+
+def _unique(paths: Iterable[Path]) -> tuple[Path, ...]:
+    return tuple(dict.fromkeys(paths))
+
+
+def _check_pattern(p: Path) -> None:
+    if PATTERN_CHARS & set(str(p)):
+        raise WorkspaceError(f"경로에 *, ?, [, ] 가 있으면 규칙에서 패턴으로 읽혀 지원하지 않습니다: {p}")
 
 
 def resolve_paths(source: str | os.PathLike, socket: str | os.PathLike, policy: str | os.PathLike,
-                  audit: str | os.PathLike, gate_bin: str | os.PathLike) -> GatePaths:
-    paths = GatePaths(*(Path(p).expanduser().resolve() for p in (source, socket, policy, audit, gate_bin)))
-    for p in (paths.source, paths.socket, paths.policy, paths.audit, paths.gate_bin):
-        if PATTERN_CHARS & set(str(p)):
-            raise WorkspaceError(f"경로에 *, ?, [, ] 가 있으면 규칙에서 패턴으로 읽혀 지원하지 않습니다: {p}")
+                  audit: str | os.PathLike, gate_bin: str | os.PathLike,
+                  mounts: Iterable[str | os.PathLike] = ()) -> GatePaths:
+    """모든 경로를 resolve한다. 원본 폴더는 있어야 하고, 추가 폴더(mounts)는 없어도 된다(외장 디스크를 뺀 때 등)."""
+    if Path(policy).expanduser().is_symlink():
+        raise WorkspaceError(f"정책 파일이 심볼릭 링크면 지원하지 않습니다(폴더 목록·기록 파일 위치가 어긋납니다): {policy}")
+    base = [disk_path(p) for p in (source, socket, policy, audit, gate_bin)]
+    paths = GatePaths(*base, mounts=_unique(disk_path(p) for p in mounts))
+    for p in (*base, *paths.mounts):
+        _check_pattern(p)
     if not paths.source.is_dir():
         raise WorkspaceError(f"원본 폴더가 없습니다: {paths.source}")
     return paths
+
+
+def with_listed_mounts(paths: GatePaths) -> GatePaths:
+    """정책 파일 옆 mounts.yaml(있으면)의 모든 항목을 더한 GatePaths. 목록 파일이 잘못되었으면 WorkspaceError."""
+    try:
+        entries = read_mounts(paths.mounts_file)
+    except MountsFileError as exc:
+        raise WorkspaceError(f"폴더 목록 파일 {paths.mounts_file}에 문제가 있어 무엇을 막을지 알 수 없습니다: {exc}") from exc
+    listed = [disk_path(e.path) for e in entries]
+    for p in listed:
+        _check_pattern(p)
+    return replace(paths, mounts=_unique([*paths.mounts, *listed]))
 
 
 def _rule_path(path: Path) -> str:
@@ -90,11 +154,13 @@ def _rule_path(path: Path) -> str:
 
 
 def protection_settings(paths: GatePaths) -> dict:
-    """원본·정책·기록·감사 로그를 막는 설정(권한 규칙 + 샌드박스 + env). 설치 명령(gate.claude_setup)도 이것을 쓴다."""
+    """원본·추가 폴더·정책·목록·등록·기록·감사 로그를 막는 설정(권한 규칙 + 샌드박스 + env).
+    설치 명령(gate.claude_setup)도 이것을 쓴다."""
     deny = []
+    files = paths.protected_files()
     for p in paths.protected():
         # 폴더는 폴더 자체(목록 보기)와 그 안을 둘 다 적는다
-        patterns = [_rule_path(p)] if p == paths.policy else [_rule_path(p), _rule_path(p) + "/**"]
+        patterns = [_rule_path(p)] if p in files else [_rule_path(p), _rule_path(p) + "/**"]
         deny += [f"{tool}({pattern})" for tool in ("Read", "Edit") for pattern in patterns]
     deny.append(f"Edit({_rule_path(paths.run_dir)}/**)")
     return {
@@ -118,6 +184,11 @@ def agent_settings(paths: GatePaths) -> dict:
     return settings
 
 
+def settings_text(paths: GatePaths) -> str:
+    """작업 폴더 .claude/settings.json에 쓰는 글. init과 gate.mount_change가 같은 글을 만든다."""
+    return json.dumps(agent_settings(paths), ensure_ascii=False, indent=2) + "\n"
+
+
 def agent_guide(paths: GatePaths) -> str:
     """작업 폴더의 CLAUDE.md 내용."""
     gate = paths.gate_bin
@@ -137,7 +208,8 @@ def agent_guide(paths: GatePaths) -> str:
 
 
 def _overlaps(a: Path, b: Path) -> bool:
-    return a == b or a.is_relative_to(b) or b.is_relative_to(a)
+    """같음·안에 있음·감쌈. 대소문자·NFC를 무시한다(맥 기본 디스크)."""
+    return relation(a, b) is not None
 
 
 def check_workspace(workspace: Path, paths: GatePaths) -> None:
@@ -159,13 +231,43 @@ def _write(path: Path, text: str, force: bool) -> str:
 
 
 def init_workspace(workspace: str | os.PathLike, paths: GatePaths, *, force: bool = False) -> dict[Path, str]:
-    """설정 파일과 안내 파일을 만든다. {파일: "씀" | "그대로"}."""
-    root = Path(workspace).expanduser().resolve()
+    """설정 파일과 안내 파일을 만들고 작업 폴더를 등록한다. {파일: "씀" | "그대로"}.
+
+    정책 파일 옆 mounts.yaml의 모든 항목도 막는다. 목록·등록 파일이 잘못되어 있으면 아무것도 쓰지 않고 WorkspaceError.
+    """
+    root = disk_path(workspace)
+    paths = with_listed_mounts(paths)
     check_workspace(root, paths)
+    for p in (root, paths.source, paths.socket, paths.policy, paths.audit, paths.gate_bin):
+        problem = path_problem(str(p))
+        if problem is not None:  # 등록 파일에 적을 수 없는 경로면 아무것도 쓰기 전에 멈춘다
+            raise WorkspaceError(f"작업 폴더 등록에 쓸 수 없는 경로입니다({problem}): {p!r}")
+    try:
+        records = read_workspaces(paths.workspaces_file)
+    except MountsFileError as exc:
+        raise WorkspaceError(f"작업 폴더 등록 파일 {paths.workspaces_file}에 문제가 있어 등록할 수 없습니다: {exc}") from exc
     (root / ".claude").mkdir(parents=True, exist_ok=True)
-    settings = json.dumps(agent_settings(paths), ensure_ascii=False, indent=2) + "\n"
+    settings = settings_text(paths)
     files = {root / ".claude" / "settings.json": settings, root / "CLAUDE.md": agent_guide(paths)}
-    return {path: _write(path, text, force) for path, text in files.items()}
+    written = {path: _write(path, text, force) for path, text in files.items()}
+    register_workspace(root, paths, settings, records)
+    return written
+
+
+def register_workspace(root: Path, paths: GatePaths, settings: str,
+                       records: tuple[WorkspaceRecord, ...] | None = None) -> WorkspaceRecord:
+    """workspaces.yaml에 작업 폴더를 적는다(같은 경로면 그 자리에서 갱신). settings는 방금 쓴 설정 파일 내용."""
+    if records is None:
+        records = read_workspaces(paths.workspaces_file)
+    record = WorkspaceRecord(path=str(root), source=str(paths.source), socket=str(paths.socket),
+                             policy=str(paths.policy), audit=str(paths.audit), gate_bin=str(paths.gate_bin),
+                             settings_sha256=sha256_text(settings), registered_at=now_iso())
+    key = path_key(root)
+    updated = [record if path_key(r.path) == key else r for r in records]
+    if record not in updated:
+        updated.append(record)
+    write_workspaces(paths.workspaces_file, updated)
+    return record
 
 
 def _default_gate_bin() -> str | None:
@@ -177,7 +279,7 @@ def _default_gate_bin() -> str | None:
 def register(sub: argparse._SubParsersAction) -> None:
     ws = sub.add_parser("workspace", help="에이전트 작업 폴더 설정 (Claude Code 권한 규칙 + 샌드박스)")
     ws_sub = ws.add_subparsers(dest="workspace_command", required=True)
-    init = ws_sub.add_parser("init", help="작업 폴더에 .claude/settings.json과 CLAUDE.md를 만든다")
+    init = ws_sub.add_parser("init", help="작업 폴더에 .claude/settings.json과 CLAUDE.md를 만들고 등록한다")
     init.add_argument("folder", help="에이전트 작업 폴더 (없으면 만든다)")
     init.add_argument("--source", required=True, help="원본 폴더")
     init.add_argument("--policy", default=os.environ.get("GATE_POLICY"), help="정책 파일 (기본: $GATE_POLICY)")
@@ -199,11 +301,12 @@ def run(args: argparse.Namespace) -> int:
     try:
         paths = resolve_paths(args.source, args.socket, args.policy, args.audit, gate_bin)
         written = init_workspace(args.folder, paths, force=args.force)
-    except (WorkspaceError, OSError) as exc:
+    except (WorkspaceError, MountsFileError, OSError) as exc:
         print(f"gate: {exc}", file=sys.stderr)
         return 1
     for path, state in written.items():
         print(f"{path}: {state}")
+    print(f"{paths.workspaces_file}: 작업 폴더를 등록했습니다 (폴더를 연결하거나 보호를 풀면 이 작업 폴더 설정을 다시 씁니다)")
     folder = next(iter(written)).parent.parent
     print(f"이 폴더에서 Claude Code를 띄우세요: cd {folder} && claude\n"
           "하위 폴더에서 띄우면 이 설정이 적용되지 않습니다. 세션 안에서 /sandbox로 샌드박스가 켜졌는지 볼 수 있습니다.")

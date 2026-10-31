@@ -1,6 +1,12 @@
 """gate 명령: 게이트 데몬 실행(serve), 조회(ls, stat, cat, search), 사용자 정책(policy), 사람 승인(approve, deny),
 에이전트 작업 폴더 설정(workspace init), 설치 때 Claude Code 사용자 설정에 원본 보호 합치기(setup), 감사 로그 보기(audit),
-설정 화면(ui).
+설정 화면(ui), 원본 폴더 연결 보기·추가·빼기(mount).
+
+원본 폴더 여러 개(Phase 9)
+  - serve는 정책 파일(--policy·GATE_POLICY)이 있으면 그 옆 mounts.yaml의 연결된 폴더를 `/<이름>/`으로 함께 보여 준다
+    (gate.mounts.MountedStore). 기본 폴더(--source)는 `/`다. 목록 파일은 요청마다 바뀌었는지 보고 다시 읽는다.
+    정책 파일 없이 띄우면 기본 폴더만 쓴다.
+  - mount는 소켓을 쓰지 않고 목록 파일과 작업 폴더 설정을 직접 쓴다(gate.mount_cli → gate.mount_change).
 
 소켓 경로는 --socket 또는 GATE_SOCKET, 정책 파일은 --policy 또는 GATE_POLICY로 지정한다.
 정책 파일이 없으면 기본 정책으로 동작하고, 데몬은 요청마다 정책 파일이 바뀌었는지 보고 다시 읽는다.
@@ -34,7 +40,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TextIO
 
-from gate import audit_cli, claude_setup, policy_cli, ui, workspace
+from gate import audit_cli, claude_setup, mount_cli, policy_cli, ui, workspace
 from gate.approval import Approvals, DialogChannel, Pending, clean_text, kinds_text
 from gate.audit import AuditLog
 from gate.client import ApprovalClient, GateClient
@@ -45,6 +51,7 @@ from gate.ner_client import DEFAULT_BASE_URL as DEFAULT_NER_URL
 from gate.pipeline import Inspector
 from gate.policy import PolicyError, PolicySource
 from gate.protocol import GateError
+from gate.mounts import MountedStore, MountsSource
 from gate.store import PlainStore
 
 ANSWER_NAMES = {"once": "이번만 허용", "session": "이 폴더 허용", "deny": "거부"}
@@ -107,9 +114,20 @@ def approve_socket_path(gate_socket: str | None, explicit: str | None) -> str | 
     return str(Path(gate_socket).with_name("approve.sock")) if gate_socket else None
 
 
+def _make_store(source: str, policy_path: str | None, socket_path: str | None,
+                audit_path: str | None) -> tuple[PlainStore | MountedStore, MountsSource | None]:
+    """정책 파일이 있으면 그 옆 폴더 목록(mounts.yaml)을 함께 보여 주는 MountedStore, 없으면 기본 폴더만."""
+    base = PlainStore(source)
+    if not policy_path:
+        return base, None
+    mounts = MountsSource(policy_path, source=base.root, socket=socket_path, audit=audit_path, warn=_err)
+    return MountedStore(base, mounts), mounts
+
+
 def _serve(socket_path: str, approve_socket: str, source: str, policy_path: str | None, dialog: bool,
            audit_path: str | None = None) -> int:
-    store = PlainStore(source)
+    store, mounts = _make_store(source, policy_path, socket_path, audit_path)
+    base_root = store.root
     try:
         audit = AuditLog(audit_path) if audit_path else None
     except (OSError, ValueError) as exc:
@@ -134,7 +152,8 @@ def _serve(socket_path: str, approve_socket: str, source: str, policy_path: str 
         raise
     threading.Thread(target=approval_server.serve_forever, daemon=True).start()
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
-    print(f"gate: {socket_path} 에서 대기 중 (원본: {server.store.root})", file=sys.stderr)
+    print(f"gate: {socket_path} 에서 대기 중 (원본: {base_root})", file=sys.stderr)
+    _announce_mounts(base_root, mounts)
     print(f"gate: 사람 승인: {'맥 대화상자 + ' if channels else ''}터미널(gate approve, 승인 소켓 {approve_socket})",
           file=sys.stderr)
     audit_note = f"{audit_path} (파일 해시 키 {audit.key_path})" if audit else "남기지 않음 (--audit 또는 GATE_AUDIT로 지정)"
@@ -159,6 +178,20 @@ def _serve(socket_path: str, approve_socket: str, source: str, policy_path: str 
         if audit is not None:
             audit.close()
     return 0
+
+
+def _announce_mounts(base_root: Path, mounts: MountsSource | None) -> None:
+    """시작할 때 원본 폴더 구성을 알린다. 목록 파일 오류·뺀 항목 경고는 MountsSource가 먼저 stderr에 쓴다."""
+    if mounts is None:
+        _err(f"원본: 기본 {base_root}만 씁니다 (정책 파일을 지정하지 않아 추가 폴더 목록을 읽지 않습니다)")
+        return
+    state = mounts.current()
+    if state.error is not None:
+        _err(f"원본: 기본 {base_root} (폴더 목록 {mounts.mounts_file}이 잘못되어 추가 폴더를 보여 주지 않습니다)")
+        return
+    names = "".join(f", /{m.name}" for m in state.mounts)
+    _err(f"원본: 기본 {base_root} + 추가 {len(state.mounts)}개{' (' + names[2:] + ')' if names else ''}"
+         f" · 폴더 목록 {mounts.mounts_file} (바뀌면 다시 띄우지 않아도 다음 요청부터 씁니다)")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -204,10 +237,13 @@ def main(argv: list[str] | None = None) -> int:
     claude_setup.register(sub)
     audit_cli.register(sub)
     ui.register(sub)
+    mount_cli.register(sub)
 
     args = parser.parse_args(argv)
     if args.command == "policy":
         return policy_cli.run(args)
+    if args.command == "mount":
+        return mount_cli.run(args)
     if args.command == "workspace":
         return workspace.run(args)
     if args.command == "setup":
