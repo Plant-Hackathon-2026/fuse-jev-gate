@@ -48,7 +48,7 @@ from urllib.parse import parse_qs, urlsplit
 from gate.policy_change import POLICY_ENV
 from gate.ui_api import AUDIT_LIMIT, UiApp, UiConfig, UiError
 
-# 제품 이름은 여기 한 곳에만 둔다(머리글·창 제목·터미널 안내). 사용자 결정(2026-11-01): "게이트 · PLANT".
+# 제품 이름은 여기 한 곳에만 둔다(머리글·창 제목·터미널 안내). 사용자 결정(2026-10-31): "게이트 · PLANT".
 PRODUCT_NAME = "게이트"
 PRODUCT_TAG = "PLANT"
 
