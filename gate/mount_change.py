@@ -31,8 +31,7 @@
   - 쓰다가 실패하면 add·unprotect 모두 이미 쓴 것(작업 폴더 설정, 등록 파일, 목록 파일)을 원래대로 돌리고 MountError.
   - confirm_token은 op·name·path·workspaces·loosening·reconnect로 만든다. file_count는 넣지 않는다(확인하는 사이 파일이
     하나 늘었다고 다시 묻지 않게. apply는 파일을 다시 세지 않는다).
-  - added_by는 MountChange 필드가 아니라서 plan_add가 숨은 속성(_added_by)으로 붙인다. MountChange를 직접 만들거나
-    dataclasses.replace로 복사하면 사라지고, 그때 apply는 terminal로 적는다.
+  - added_by는 MountChange.added_by에 담는다(add만, 나머지는 None). apply는 이 값으로 다시 계산한다.
   - 알림(notes): 다시 쓴 작업 폴더가 있으면 restart_session. add이고 전역 설치 기록이 있으면 rerun_setup(unprotect는
     `gate setup`을 다시 해도 규칙이 빠지지 않아 붙이지 않는다). add·unprotect인데 등록된 작업 폴더 중 설정 파일이 있는
     것(ok·stale)이 없으면 no_workspace.
@@ -183,6 +182,7 @@ class MountChange:
     workspaces: tuple[str, ...]  # 다시 쓸 작업 폴더(remove는 비어 있음)
     loosening: bool              # 에이전트에게 더 보여 주는 바꿈(add·unprotect). 한 번 더 확인받는다
     reconnect: bool = False      # add인데 "보호만 남음" 항목을 다시 연결하는 것
+    added_by: AddedBy | None = None  # add만: 목록에 남길 추가한 곳(ui | terminal). 확인 값에는 넣지 않는다
 
     @property
     def confirm_token(self) -> str:
@@ -479,8 +479,7 @@ def _plan_add(ctx: MountContext, folder: str | Path, added_by: AddedBy, *, count
     _refuse_edited(workspaces, "add")
     change = MountChange("add", name, path, *_counted(path, count),
                          tuple(w.record.path for w in workspaces if w.state == "stale"),
-                         loosening=True, reconnect=existing is not None)
-    object.__setattr__(change, "_added_by", added_by)
+                         loosening=True, reconnect=existing is not None, added_by=added_by)
     return _Plan(change, entries, after, records, workspaces)
 
 
@@ -570,7 +569,7 @@ def _reason(exc: BaseException) -> str:
 
 def _replan(ctx: MountContext, change: MountChange) -> _Plan:
     if change.op == "add":
-        return _plan_add(ctx, change.path, getattr(change, "_added_by", "terminal"), count=False)
+        return _plan_add(ctx, change.path, change.added_by or "terminal", count=False)
     if change.op == "remove":
         return _plan_remove(ctx, change.name, count=False)
     if change.op == "unprotect":

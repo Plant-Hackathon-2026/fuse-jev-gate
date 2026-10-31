@@ -72,3 +72,13 @@ def mounted(module: str, mountpoint: Path, *extra_args: str) -> Iterator[subproc
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
+
+
+@pytest.fixture(autouse=True)
+def _no_real_global_setup(tmp_path_factory, monkeypatch):
+    """폴더 관리(gate.mount_change)가 전역 설치 기록을 찾을 때 실제 ~/.claude를 보지 않게 한다(테스트마다 빈 임시 폴더).
+    전역 설치 기록이 있는 경우를 보는 테스트는 이것을 다시 바꿔 끼운다."""
+    from gate import mount_change
+
+    settings = tmp_path_factory.mktemp("claude-config") / "settings.json"
+    monkeypatch.setattr(mount_change, "global_settings_file", lambda: settings)

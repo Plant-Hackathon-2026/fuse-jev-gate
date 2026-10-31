@@ -640,7 +640,7 @@ def test_status_survives_list_failure(make_ui, error):
 
 
 def test_status_with_default_mount_functions_does_not_break(tmp_path):
-    """끼우지 않으면 gate.mount_change를 쓴다. 9-1 몸체가 아직 없어도(NotImplementedError) 상태는 그대로 준다."""
+    """끼우지 않으면 gate.mount_change를 쓴다. 정책 폴더가 없어도 상태는 그대로 준다."""
     app = UiApp(UiConfig(tmp_path / "gate-data" / "policy.yaml", ner_url=closed_port_url(), health_timeout=0.5))
     from gate import mount_change
     assert app.mount_ops is mount_change and isinstance(app.picker, MacFolderPicker)
@@ -690,3 +690,78 @@ def test_screen_script_has_mount_flows_and_plan_texts():
 def test_screen_text_uses_polite_tone():
     for name in ("index.html", "app.js"):
         assert "니다" not in static_text(name), name
+
+
+# --- 실제 폴더 관리 함수(gate.mount_change)와 함께 (9-1 ∥ 9-2를 합친 뒤 메인이 더함) ---
+
+def test_real_mount_functions_through_ui(tmp_path, monkeypatch):
+    """가짜 없이: 폴더 선택 → 확인 → 연결 → 목록 → 빼기(보호만 남음) → 보호도 풀기. 작업 폴더 설정과 게이트가 같이 바뀐다."""
+    from gate.mounts import MountedStore, MountsSource
+    from gate.protocol import GateError
+    from gate.store import PlainStore
+    from gate.workspace import init_workspace, resolve_paths
+
+    root = tmp_path.resolve()
+    home = root / "home"
+    (home / ".claude").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    data = root / "gate-data"
+    (data / "source" / "상담").mkdir(parents=True)
+    paths = resolve_paths(data / "source", data / "run" / "gate.sock", data / "policy.yaml",
+                          data / "audit" / "audit.jsonl", root / "bin" / "gate")
+    workspace = data / "agent-workspace"
+    init_workspace(workspace, paths)
+    settings = workspace / ".claude" / "settings.json"
+    book = root / "docs" / "가계부"
+    book.mkdir(parents=True)
+    (book / "메모.txt").write_text("메모\n", encoding="utf-8")
+
+    app = UiApp(UiConfig(data / "policy.yaml", data / "audit" / "audit.jsonl", data / "run" / "gate.sock",
+                         closed_port_url(), closed_port_url(), health_timeout=0.5),
+                picker=FakePicker(str(book)))
+    store = MountedStore(PlainStore(data / "source"),
+                         MountsSource(data / "policy.yaml", source=data / "source", socket=data / "run" / "gate.sock",
+                                      audit=data / "audit" / "audit.jsonl", warn=lambda _: None))
+
+    def deny_rules() -> list[str]:
+        return json.loads(settings.read_text(encoding="utf-8"))["permissions"]["deny"]
+
+    view = app.mounts()
+    assert [f["kind"] for f in view["folders"]] == ["base"] and view["error"] is None
+
+    picked = app.pick_folder()
+    assert picked["status"] == "confirm" and picked["preview"]["name"] == "가계부"
+    assert picked["preview"]["file_count"] == 1 and picked["preview"]["loosening"] is True
+    assert f"Read(/{book})" not in deny_rules()  # 확인 전에는 아무것도 쓰지 않는다
+    with pytest.raises(GateError):
+        store.read("/가계부/메모.txt")
+
+    saved = app.add_mount(picked["pick"], picked["confirm"])
+    assert saved["status"] == "saved" and saved["vpath"] == "/가계부"
+    assert saved["rewritten_count"] == 1 and {n["code"] for n in saved["notes"]} == {"restart_session"}
+    assert f"Read(/{book})" in deny_rules() and f"Read(/{book}/**)" in deny_rules()
+    assert store.read("/가계부/메모.txt") == "메모\n".encode()
+    rows = app.mounts()["folders"]
+    assert [(r["kind"], r["name"], r["connected"], r["added_by"]) for r in rows] == \
+        [("base", None, True, None), ("mount", "가계부", True, "ui")]
+    assert app.status()["gate"]["folders"]["count"] == 2
+    with pytest.raises(ui_api.UiError) as reused:
+        app.add_mount(picked["pick"], picked["confirm"])  # 선택 번호는 한 번만
+    assert reused.value.code == "pick-expired"
+
+    asked = app.remove_mount("가계부")
+    assert asked["status"] == "confirm"
+    removed = app.remove_mount("가계부", asked["confirm"])
+    assert removed["status"] == "saved" and removed["rewritten_count"] == 0
+    assert f"Read(/{book})" in deny_rules()  # 보호는 남는다
+    with pytest.raises(GateError):
+        store.read("/가계부/메모.txt")
+    assert [r["connected"] for r in app.mounts()["folders"]] == [True, False]
+
+    asked = app.unprotect_mount("가계부")
+    assert asked["status"] == "confirm" and asked["preview"]["loosening"] is True
+    freed = app.unprotect_mount("가계부", asked["confirm"])
+    assert freed["status"] == "saved" and freed["rewritten_count"] == 1
+    assert f"Read(/{book})" not in deny_rules()
+    assert [r["kind"] for r in app.mounts()["folders"]] == ["base"]

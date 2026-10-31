@@ -28,8 +28,6 @@ def data(tmp_path):
     return root.resolve(), paths
 
 
-@pytest.mark.xfail(strict=True, reason="Phase 9-1에서 mounts.yaml·workspaces.yaml 막기가 더해졌다. sandbox/는 9-1이 "
-                   "건드리지 않아 예시를 아직 다시 만들지 않았다. 다시 만들면(생성기 결과로 덮으면) 이 표시를 지운다")
 def test_example_template_matches_generator():
     """sandbox/agent-settings.json은 생성기 결과의 예시다. 둘이 어긋나지 않게 한다."""
     template = Path(__file__).parent.parent / "sandbox" / "agent-settings.json"
