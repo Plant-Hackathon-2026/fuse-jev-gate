@@ -149,7 +149,7 @@ _업데이트: 2026-10-31 · 작성 세션: Phase 3b. 판단 모델을 Jev 대�
 - **테스트(Linux):** `docker build -f sandbox/gate.Dockerfile -t fuse-jev-gate:phase3b . && docker run --rm --device /dev/fuse --cap-add SYS_ADMIN fuse-jev-gate:phase3b pytest -q` — **976 통과**
 - **데몬을 laya로 띄우기:** 위 `JEV_*` 환경변수를 주고 `gate serve`를 띄운 뒤, 내 터미널에서 `gate policy set jev_backend laya`
 - **인프라·런타임 상태**
-  - 사용자 데몬(PID 63433, 대화상자 켬, 감사 로그 켬)은 이전 세션부터 떠 있다. **Mock 백엔드 그대로**다(`gate-data/policy.yaml` 없음). 이번 세션은 건드리지 않았다.
+  - **게이트 데몬은 꺼져 있다.** 사용자 데몬(PID 63433, Mock 백엔드)은 `/restart`를 막아서 사용자 요청으로 세션 끝에 종료했다. 필요하면 "실행 · 검증"의 명령(이전 HANDOFF와 같다: `hackathon/`에서 `GATE_SOCKET=$PWD/gate-data/run/gate.sock GATE_POLICY=$PWD/gate-data/policy.yaml GATE_AUDIT=$PWD/gate-data/audit/audit.jsonl fuse-jev-gate/.venv/bin/gate serve --source gate-data/source`)으로 다시 띄운다. `gate-data/policy.yaml`은 없다(기본 정책, Mock).
   - **laya-serve는 꺼 두었다**(사용자 요청). NER과 Laya를 함께 평가할 때 위 명령으로 다시 띄운다. 시험용 데몬(scratchpad)도 꺼 두었다.
   - Docker Desktop이 켜져 있다.
 
