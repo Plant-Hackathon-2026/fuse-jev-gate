@@ -122,6 +122,26 @@ def test_stricter_cue_wins_over_embedded_looser_cue():
     assert interpret("가족 이야기는 그냥 보여주지 마", keyword()).outcome == "context"
 
 
+@pytest.mark.parametrize("sentence, make", [
+    ("카드번호 있는 파일은 거부", keyword),
+    ("이메일은 물어보고 보여줘", keyword),
+    ("이메일 주소는 가려줘", keyword),
+    ("이름 있는 파일은 물어보고 보여줘", keyword),
+    ("이름은 가려줘", keyword),
+    ("이름은 그대로 보여줘", keyword),
+    ("병원 기록은 보여주지 마", keyword),
+    ("공개 폴더는 그냥 보여줘", keyword),
+    ("병원 기록은 보여줘도 돼", keyword),
+    ("날짜는 가려줘", keyword),
+    ("아무거나", keyword),
+    ("아무 문장", lambda: fixed(type=("number", 0.9))),                     # 해석기 오류(괄호 안 이유 포함)
+    ("아무 문장", lambda: MockPolicyInterpreter(error=RuntimeError("x"))),
+])
+def test_messages_use_one_polite_tone(sentence, make):
+    """문장 해석 안내는 설정 화면과 같은 말투(~해요)로 쓴다. 괄호 안 이유도 섞이지 않는다."""
+    assert "니다" not in interpret(sentence, make()).message
+
+
 # --- 확신도 ---
 
 NUMBER_ANSWERS = dict(type=("number", 0.9), kind=("rrn", 0.9), target=("visible", 0.9), visible=("birth", 0.9))

@@ -746,7 +746,7 @@ def test_remove_refuses_stale_list(make_ui):
 def test_undo_without_history(make_ui):
     u = make_ui()
     status, data = u.post("undo", {}, u.launch())
-    assert (status, data["error"]) == (409, "cannot-undo") and "되돌릴 기록이 없습니다" in data["message"]
+    assert (status, data["error"]) == (409, "cannot-undo") and "되돌릴 기록이 없어요" in data["message"]
 
 
 def test_invalid_policy_file_state_and_undo(make_ui, fixed_now):

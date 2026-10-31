@@ -152,7 +152,7 @@ def test_add_accepts_unquoted_words(policy_file):
 @pytest.mark.parametrize("answers", ["n\n", "\n", "아니\n", ""])  # 거부, 빈 답(기본 N), 다른 말, EOF
 def test_add_declined_or_eof_does_not_save(policy_file, answers):
     code, out = gate_policy(policy_file, "add", "카드번호 있는 파일은 거부", answers=answers)
-    assert code == 1 and "저장하지 않았습니다" in out
+    assert code == 1 and "저장하지 않았어요" in out
     assert not policy_file.exists()
 
 
@@ -174,7 +174,7 @@ def test_add_loosening_declined_keeps_file(policy_file, answers):
     write_entries(policy_file, [Entry(settings={"numbers.card.action": "deny"})])
     before = policy_file.read_bytes()
     code, out = gate_policy(policy_file, "add", "주민번호는 생년월일까지만 보여줘", answers=answers)
-    assert code == 1 and "바뀌지 않았습니다" in out
+    assert code == 1 and "바뀌지 않았어요" in out
     assert policy_file.read_bytes() == before
     assert not history_dir(policy_file).exists()
 
@@ -326,12 +326,12 @@ def test_undo_multiple_times_then_nothing_left(policy_file):
     assert build_policy(read_entries(policy_file)).version == DEFAULT_POLICY.version  # 파일이 없던 상태 = 기본값
 
     code, out = gate_policy(policy_file, "undo")
-    assert code == 1 and "되돌릴 기록이 없습니다" in out
+    assert code == 1 and "되돌릴 기록이 없어요" in out
 
 
 def test_undo_without_any_history(policy_file):
     code, out = gate_policy(policy_file, "undo")
-    assert code == 1 and "되돌릴 기록이 없습니다" in out
+    assert code == 1 and "되돌릴 기록이 없어요" in out
 
 
 def test_undo_of_stricter_change_is_loosening_and_asks(policy_file):
@@ -417,7 +417,7 @@ def test_invalid_policy_file_is_reported(policy_file, content, argv):
     policy_file.write_text(content, encoding="utf-8")
     code, out = gate_policy(policy_file, *argv, answers="y\ny\n")
     assert code == 1
-    assert "정책 파일에 문제가 있어 읽을 수 없습니다" in out and "Traceback" not in out
+    assert "정책 파일에 문제가 있어 읽을 수 없어요" in out and "Traceback" not in out
     assert policy_file.read_text(encoding="utf-8") == content
 
 
@@ -426,7 +426,7 @@ def test_undo_recovers_from_invalid_policy_file(policy_file):
     gate_policy(policy_file, "set", "numbers.email.action", "deny")
     policy_file.write_text("version: 1\nentries: [\n", encoding="utf-8")
     code, out = gate_policy(policy_file, "undo", answers="n\n")
-    assert code == 1 and "문제가 있습니다" in out and out.count(PROMPT) == 1
+    assert code == 1 and "문제가 있어요" in out and out.count(PROMPT) == 1
     code, out = gate_policy(policy_file, "undo", answers="y\n")
     assert code == 0
     [entry] = read_entries(policy_file)
@@ -473,10 +473,29 @@ def test_old_retired_entries_are_shown_and_removable(policy_file):
     assert read_entries(policy_file) == ()
 
 
+def test_change_flow_uses_one_polite_tone(policy_file):
+    """gate policy의 안내는 설정 화면과 같은 말투(~해요)로 쓴다."""
+    outputs = [
+        gate_policy(policy_file, "show")[1],
+        gate_policy(policy_file, "add", "카드번호 있는 파일은 거부", answers="y\n")[1],
+        gate_policy(policy_file, "add", "병원 기록은 보여주지 마", answers="n\n")[1],
+        gate_policy(policy_file, "add", "주민번호는 생년월일까지만 보여줘", answers="y\nn\n")[1],
+        gate_policy(policy_file, "set", "numbers.card.action", "deny")[1],          # 같은 값(바뀌지 않음)
+        gate_policy(policy_file, "set", "numbers.email.action", "deny")[1],
+        gate_policy(policy_file, "set", "entities.date.action", "mask")[1],
+        gate_policy(policy_file, "remove", "9")[1],
+        gate_policy(policy_file, "remove", "2", answers="y\n")[1],
+        gate_policy(policy_file, "undo", answers="y\n")[1],
+        gate_policy(policy_file, "show")[1],
+    ]
+    for out in outputs:
+        assert "니다" not in out, out
+
+
 @pytest.mark.parametrize("key", ["entities.date.action", "entities.event.action"])
 def test_set_refuses_retired_keys(policy_file, key):
     code, out = gate_policy(policy_file, "set", key, "mask")
-    assert code == 1 and "지정할 수 없습니다" in out and "따로 찾지 않습니다" in out
+    assert code == 1 and "지정할 수 없어요" in out and "따로 찾지 않아요" in out
     assert not policy_file.exists()
 
 

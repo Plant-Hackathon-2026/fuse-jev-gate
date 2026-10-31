@@ -81,10 +81,10 @@ def read_current(path: Path) -> tuple[Entry, ...]:
     try:
         return read_entries(path)
     except PolicyError as exc:
-        raise ChangeError(f"정책 파일에 문제가 있어 읽을 수 없습니다: {exc}\n"
+        raise ChangeError(f"정책 파일에 문제가 있어 읽을 수 없어요: {exc}\n"
                           f"  파일: {path}\n"
-                          "  게이트 데몬은 이 파일이 고쳐질 때까지 내용 읽기를 모두 차단합니다. "
-                          "`gate policy undo`로 이전 상태를 되살리거나, 파일을 지우면 기본값으로 돌아갑니다.") from exc
+                          "  게이트 데몬은 이 파일이 고쳐질 때까지 내용 읽기를 모두 차단해요. "
+                          "`gate policy undo`로 이전 상태를 되살리거나, 파일을 지우면 기본값으로 돌아가요.") from exc
 
 
 # --- 되돌리기 기록 ---
@@ -177,7 +177,7 @@ def _build(entries: Sequence[Entry]) -> Policy:
     try:
         return build_policy(entries)
     except PolicyError as exc:
-        raise ChangeError(f"정책을 만들 수 없습니다: {exc}") from exc
+        raise ChangeError(f"정책을 만들 수 없어요: {exc}") from exc
 
 
 def plan_add(path: Path, entries: Sequence[Entry], entry: Entry, action: ChangeAction = "add") -> Change:
@@ -197,7 +197,7 @@ def setting_entry(key: str, values: Sequence[str]) -> Entry:
     """`gate policy set <키> <값>`·`set path <패턴> <동작>`의 항목. 숫자 설정은 기본값과 같은 형으로 바꾼 뒤 검사한다."""
     if key == "path":
         if len(values) != 2:
-            raise ChangeError("경로 규칙은 `gate policy set path <패턴> <allow|ask_human|deny>` 모양으로 씁니다.")
+            raise ChangeError("경로 규칙은 `gate policy set path <패턴> <allow|ask_human|deny>` 모양으로 써요.")
         try:
             return Entry(path_rule=PathRule(values[0], values[1]), at=now())
         except PolicyError as exc:
@@ -207,15 +207,15 @@ def setting_entry(key: str, values: Sequence[str]) -> Entry:
     if key not in setting_keys():
         raise ChangeError(f"알 수 없는 설정 키: {key}\n  쓸 수 있는 키: {', '.join(setting_keys())}, path")
     if len(values) != 1:
-        raise ChangeError(f"값은 하나만 씁니다: gate policy set {key} <값>")
+        raise ChangeError(f"값은 하나만 써요: gate policy set {key} <값>")
     return Entry(settings={key: parse_value(key, values[0])}, at=now())
 
 
 def retired_message(key: str) -> str:
     """뺀 키를 지정하려 할 때의 안내."""
     name = RETIRED_ENTITY_NAMES[key.split(".")[1]]
-    return (f"{key}는 지정할 수 없습니다. 지금은 {name}을(를) 따로 찾지 않습니다(이름·주소를 찾는 NER 모델을 바꾸면서 뺐습니다).\n"
-            "  예전 정책 파일에 있는 항목은 그대로 읽히지만 효과가 없습니다(`gate policy remove <번호>`로 지울 수 있습니다).")
+    return (f"{key}는 지정할 수 없어요. 지금은 {name}을(를) 따로 찾지 않아요(이름·주소를 찾는 NER 모델을 바꾸면서 뺐어요).\n"
+            "  예전 정책 파일에 있는 항목은 그대로 읽히지만 효과가 없어요(`gate policy remove <번호>`로 지울 수 있어요).")
 
 
 def parse_value(key: str, raw: str) -> object:
@@ -224,7 +224,7 @@ def parse_value(key: str, raw: str) -> object:
     try:
         value = kind(raw) if kind in (int, float) else raw
     except ValueError as exc:
-        raise ChangeError(f"{key}에는 {'정수' if kind is int else '숫자'}를 씁니다: {raw!r}") from exc
+        raise ChangeError(f"{key}에는 {'정수' if kind is int else '숫자'}를 써요: {raw!r}") from exc
     try:
         return validate_setting(key, value)
     except PolicyError as exc:
@@ -236,7 +236,7 @@ def plan_remove(path: Path, entries: Sequence[Entry], number: str) -> Change:
     entries = tuple(entries)
     if not number.isdecimal() or not 1 <= int(number) <= len(entries):
         where = f"1~{len(entries)}" if entries else "지정한 항목이 없음"
-        raise ChangeError(f"없는 번호입니다: {number} ({where}). `gate policy show`로 번호를 확인하세요.")
+        raise ChangeError(f"없는 번호예요: {number} ({where}). `gate policy show`로 번호를 확인하세요.")
     index = int(number) - 1
     after = entries[:index] + entries[index + 1:]
     before_policy, after_policy = build_policy(entries), _build(after)
@@ -249,7 +249,7 @@ def plan_undo(path: Path) -> Change:
     found = history(path)
     if not found:
         read_current(path)  # 정책 파일이 잘못되었으면 그 안내가 먼저다
-        raise ChangeError("되돌릴 기록이 없습니다.")
+        raise ChangeError("되돌릴 기록이 없어요.")
     problem = None
     try:
         before: tuple[Entry, ...] | None = read_entries(path)
@@ -259,8 +259,8 @@ def plan_undo(path: Path) -> Change:
     try:
         previous = read_entries(snapshot)
     except PolicyError as exc:
-        raise ChangeError(f"되돌리기 기록을 읽을 수 없습니다: {exc}\n  기록 파일: {snapshot}\n"
-                          "  이 파일을 지우면 그 전 기록으로 되돌릴 수 있습니다.", problem=problem) from exc
+        raise ChangeError(f"되돌리기 기록을 읽을 수 없어요: {exc}\n  기록 파일: {snapshot}\n"
+                          "  이 파일을 지우면 그 전 기록으로 되돌릴 수 있어요.", problem=problem) from exc
     after_policy = _build(previous)
     if before is None:
         return Change("undo", path, None, previous, None, after_policy, (), None, snapshot, len(found) - 1, problem)
@@ -284,4 +284,4 @@ def apply(change: Change) -> Policy:
             snapshot.unlink(missing_ok=True)
             raise
     except OSError as exc:
-        raise ChangeError(f"정책 파일을 쓸 수 없습니다: {exc.strerror or type(exc).__name__}") from exc
+        raise ChangeError(f"정책 파일을 쓸 수 없어요: {exc.strerror or type(exc).__name__}") from exc

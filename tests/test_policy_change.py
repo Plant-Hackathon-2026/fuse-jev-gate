@@ -69,7 +69,7 @@ def test_remove_and_undo_plans(policy_file):
     assert undo.history_left == 0 and not undo.needs_confirm  # 지운 것을 되살리면 엄격해진다
     pc.apply(undo)
     assert read_entries(policy_file) == (Entry(settings={"numbers.card.action": "deny"}),)
-    with pytest.raises(pc.ChangeError, match="되돌릴 기록이 없습니다"):
+    with pytest.raises(pc.ChangeError, match="되돌릴 기록이 없어요"):
         pc.plan_undo(policy_file)
 
 
@@ -87,7 +87,7 @@ def test_cli_shows_file_problem_before_broken_snapshot_error(policy_file):
     pc.history(policy_file)[-1].write_text("version: 9\n", encoding="utf-8")
     code, out = gate_policy(policy_file, "undo", answers="y\n")
     assert code == 1
-    assert out.index("지금 정책 파일에 문제가 있습니다") < out.index("되돌리기 기록을 읽을 수 없습니다")
+    assert out.index("지금 정책 파일에 문제가 있어요") < out.index("되돌리기 기록을 읽을 수 없어요")
 
 
 def test_write_failure_is_change_error_and_leaves_no_history(policy_file, monkeypatch):
@@ -100,7 +100,7 @@ def test_write_failure_is_change_error_and_leaves_no_history(policy_file, monkey
 
     original = pc.write_entries
     monkeypatch.setattr(pc, "write_entries", broken)
-    with pytest.raises(pc.ChangeError, match="정책 파일을 쓸 수 없습니다"):
+    with pytest.raises(pc.ChangeError, match="정책 파일을 쓸 수 없어요"):
         pc.apply(change)
     assert pc.history(policy_file) == []
 
@@ -109,9 +109,9 @@ def test_write_failure_is_change_error_and_leaves_no_history(policy_file, monkey
 
 @pytest.mark.parametrize("key", ["entities.date.action", "entities.event.action"])
 def test_retired_keys_cannot_be_added(policy_file, key):
-    with pytest.raises(pc.ChangeError, match="지정할 수 없습니다"):
+    with pytest.raises(pc.ChangeError, match="지정할 수 없어요"):
         pc.setting_entry(key, ["mask"])
-    with pytest.raises(pc.ChangeError, match="따로 찾지 않습니다"):
+    with pytest.raises(pc.ChangeError, match="따로 찾지 않아요"):
         pc.plan_add(policy_file, (), Entry(settings={key: "mask"}))   # 코드가 만든 항목도 새로 더하지 않는다
     assert not policy_file.exists()
     assert "2026" not in pc.retired_message(key)   # 터미널 안내에도 내부 날짜는 넣지 않는다
