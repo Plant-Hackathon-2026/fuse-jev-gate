@@ -50,6 +50,9 @@
 | 작업 폴더 세션의 MCP 도구 | **막지 않고 알려진 한계로 적는다** | 사용자 결정(2026-10-31). MCP 서버는 샌드박스 밖에서 돈다. 그래서 화면 제어나 브라우저 자동화 같은 로컬 MCP가 실리면 원본을 `file://`로 열 수 있다. 지금 `claude -p` 세션에 실린 것은 claude.ai 원격 커넥터(Docs, Google Drive, Supabase, Vercel)뿐이다 |
 | 세션 간 메시지 도구 | **막지 않고 기록만 한다**(`SendMessage`, `SendToProject`, `SendToProjectContext`, `ListAgents`) | 사용자 결정(2026-10-31). 전역 설정이 걸린 세션끼리는 받는 쪽도 원본을 못 읽어서 우회가 되지 않는다. 위험은 받는 세션의 보호가 약할 때뿐이다(샌드박스를 끈 저장소, 로컬 MCP, 전역 설정이 없는 세션). 받는 세션은 메시지를 지시가 아닌 정보로 다루지만 단단한 경계는 아니다. 추론이고 실제로 보내 보지는 않았다. 클라우드로 가는 `RemoteTrigger`·`CronCreate`는 로컬 파일을 못 읽고, MCP처럼 게이트가 보여 준 내용을 밖으로 보내는 통로다 |
 | 작업 폴더 설정 형식 | 공식 문서로 확인했다(2026-10-31, Claude Code 2.1.314). 5절 Phase 6 "설정 형식 확인" | 설계 당시 적은 키 이름은 맞았다. 경로 표기와 적용 범위가 생각과 달라 보완했다 |
+| README (Phase 7) | **한국어 하나**(`README.md`). 기본 항목(설치·데몬·`gate setup`·정책·작업 폴더·한계)에 구조·판단 흐름 그림, 빠른 시작 데모, 우회 시험 하네스, 감사 로그 형식을 더한다 | 사용자 결정(2026-10-31). 한국어 민감정보가 주제이고 계획 문서도 한국어다. 빠른 시작의 출력은 실제로 돌려 본 결과를 쓴다 |
+| 감사 로그 조회 (Phase 7) | **`gate audit`을 만든다.** 최근 N건, 막힌 요청, 결정·경로·시각으로 거르기, 같은 내용의 파일(`content_hmac`)로 찾기, JSONL 출력. 읽기만 한다 | 사용자 결정(2026-10-31). 일반 사용자는 JSONL을 직접 읽기 어렵다. 키 파일은 읽기만 하는 `gate.audit.load_key`로 연다(없으면 만들지 않는다) |
+| Phase 7 올리는 방식 | **브랜치 + PR** (`feat/phase7-audit-readme`). 머지는 사용자가 한다 | 사용자 결정(2026-10-31). 팀 조직 저장소라 가리개처럼 GitHub Flow를 따른다. `main`에는 브랜치 보호가 없다 |
 
 ### 2.1 로컬 Jev 후보 (참고용, 조사 보류)
 
@@ -113,6 +116,8 @@ fuse-jev-gate/
 │   ├── policy.py       # 기본값, 정책 파일, 판단 규칙  (Phase 4)
 │   ├── policy_text.py, policy_cli.py   # 정책 문장 해석기(Mock)와 gate policy  (Phase 4)
 │   ├── detectors.py, jev_client.py, cache.py, approval.py, audit.py   # 명세 그대로
+│   ├── audit_cli.py    # gate audit: 감사 로그 보기  (Phase 7)
+│   ├── workspace.py, claude_setup.py   # gate workspace init, gate setup  (Phase 6)
 │   └── emptyfs.py      # Phase 0 FUSE 확인용 (보관)
 ├── config/policy.yaml
 ├── samples/  eval/  tests/
@@ -392,9 +397,28 @@ fuse-jev-gate/
   - **R17(WebFetch `file://`)은 우리 설정이 막은 것이 아니다.** default 모드에서는 사람에게 묻고(헤드리스라 invalid), auto 모드에서는 분류기가 거부했다. WebFetch가 로컬 파일을 읽는지는 확인하지 못했다.
   - 원본 폴더가 있는지(`stat`)는 샌드박스 안에서도 보인다. R15에서 두 번째 데몬이 원본 폴더 확인을 통과하고 소켓 `bind`에서 멈췄다. 목록과 내용은 막힌다.
 
-### Phase 7: 감사 로그 + 정리 (명세 그대로)
+### Phase 7: 감사 로그 + 정리 (완료, 2026-10-31)
 - JSONL 감사 로그(시각, PID·프로세스명, 가상 경로, 파일 해시, 탐지 건수, Jev 라벨·확신도, 최종 결정, 소요 시간). 원문과 탐지값은 기록하지 않는다. **Phase 5에서 병렬로 만들고 연결까지 마쳤다(`gate/audit.py`, `gate serve --audit`).** 파일 해시는 HMAC으로 정했다(2절 표). 남은 것: 로그 조회 명령(필요하면).
 - README: 설치·실행·정책 설정, Claude Code 작업 폴더 설정 방법, 알려진 한계.
+- 결정은 2절 표("README (Phase 7)"부터 "Phase 7 올리는 방식"까지).
+
+**결과**
+- **`gate audit`**(`gate/audit_cli.py`, `tests/test_audit_cli.py` 28개). 사용법과 규칙은 모듈 docstring에 있다.
+  - 거르기: `-n`(기본 20, 0이면 전부), `--blocked`(deny·ask_human, 그리고 판단 전에 거부된 EACCES), `--decision`(여러 번), `--path`(부분 일치, 대소문자·NFC/NFD 무시), `--since`(30m·2h·1d 또는 ISO 시각), `--file`(내용이 같은 파일의 `content_hmac`), `--json`(고른 줄 그대로). 조건은 모두 함께 적용한다.
+  - 표: 시각(이 컴퓨터 시간대), 연산, 결정(한국어), 경로 — 이유·가린 종류·Jev·승인·요청 프로그램. 마지막 줄에 결정별 건수를 요약한다. 한글 결정 이름도 열이 맞게 화면 폭으로 채운다.
+  - 읽기만 한다. 로그·키를 만들거나 바꾸지 않는다(테스트로 크기·수정 시각·권한이 그대로인지 본다). `--file`에 키가 없으면 실패하고 키를 만들지 않는다.
+  - 깨진 줄은 건너뛰고 stderr에 줄 번호를 알린다(`read_records`는 그대로 엄격하다). 경로·이유·프로그램 이름은 `clean_text`로 제어 문자를 지운다(`--json`은 그대로).
+  - `gate/audit.py`: `load_key`(읽기만)를 나누고, `load_or_create_key`가 이를 쓴다.
+  - 통합 테스트(`test_human_approval_end_to_end`)에 실제 `gate audit --blocked --file` 프로세스 확인을 더했다.
+- **README.md**(한국어): 구조·판단 순서, 설치·데이터 배치, 빠른 시작(샘플로 허용·차단·경로 규칙·검색·사람 승인 후 가림·`gate audit`), Claude Code 연결(`gate workspace init`, `gate setup`, 막는 것 표), 정책, 사람 승인, 감사 로그 형식, 하네스, 테스트, 알려진 한계, 폴더 구조.
+  - 빠른 시작 출력은 scratchpad에 따로 띄운 데몬(Mock keyword, 기본 정책)으로 실제로 돌려 확인했다. 정책 문장 예시 4개도 해석기가 알아듣는지 확인했다.
+- **정리**: `eval/README.md`의 옛 옵션(`--threshold`)과 "정책 결과 미리보기"를 Phase 4 이후 동작(`--policy`, 실제 정책 엔진)으로 고쳤다. `pyproject.toml`에 설명과 README를 넣었다.
+- 검증: 맥 909 통과·1 skip, Linux 컨테이너 910 통과(`fuse-jev-gate:phase7`).
+
+**거짓 안전 (Phase 7)**
+- 에이전트 세션에서 `gate audit`이 막히는지는 하네스로 따로 돌리지 않았다. 감사 로그 폴더는 샌드박스 `denyRead`와 권한 규칙이 경로로 막고, 같은 폴더의 키를 Bash로 읽는 W5가 OS 샌드박스에 막혔다(6-3 결과). 그래서 같은 경로를 읽는 `gate audit`도 막힐 것으로 본다(추론).
+- `gate audit --file`은 키를 가진 사람이 쓰는 기능이다. 키가 새면 파일 해시는 SHA-256과 같아진다(Phase 5와 같음).
+- 빠른 시작의 판단 결과는 Mock keyword의 결과다. 실제 Jev에서는 달라진다.
 
 ## 6. 알려진 한계
 
@@ -432,6 +456,8 @@ uv run python -m eval.run_eval --client mock [--policy 정책파일] [--details]
   - 파일별 테스트 수: detectors 221, policy 121, policy_cli 87, policy_text 79, jev_client 57, pipeline 57, daemon 47, audit 40, approval 30, eval 25, paths 15, integration 8, cache 7, empty_mount 1.
   - 사람 승인 테스트는 시간 초과를 실제로 기다려서 전체가 약 20초 걸린다.
 - **Phase 6 기준(2026-10-31): 맥 881 통과·1 skip, Linux 컨테이너 882 통과.** 늘어난 파일은 bypass 55, claude_setup 17, workspace 15다.
+- **Phase 7 기준(2026-10-31): 맥 909 통과·1 skip, Linux 컨테이너 910 통과.** 늘어난 파일은 audit_cli 28이다.
+- 감사 로그 보기: `gate audit [--blocked] [--decision …] [--path …] [--since …] [--file …] [--json]` (`GATE_AUDIT`)
 - 우회 시험 하네스(실제 `claude -p`, 비용이 든다. 데몬이 떠 있어야 한다):
   ```bash
   uv run python -m sandbox.bypass --out 보고서.md [--raw 원문폴더]                       # 작업 폴더 설정 (default)
