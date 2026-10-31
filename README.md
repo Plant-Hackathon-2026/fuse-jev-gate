@@ -416,6 +416,7 @@ uv run python -m eval.run_eval --client mock [--policy 정책파일] [--details]
 uv run python -m eval.run_eval --client laya [--details]   # 실제 Laya (laya-serve와 JEV_* 환경변수 필요)
 uv run python -m eval.run_eval --client laya --ner server --details   # 게이트 흐름(NER 포함)과 누출 (nerserve 필요, NER_BASE_URL 기본 127.0.0.1:8001)
 uv run python -m eval.run_policy_text --interpreter mock [--details]   # 정책 문장 해석기 평가 (문장 120개)
+uv run python -m eval.run_e2e [--keep] [--only mask,approve]   # 실제 모델 e2e: 데몬·CLI·사람 승인·정책·감사 로그·설정 화면을 한 번에 (laya-serve·nerserve 둘 다 필요, JEV_*·NER_BASE_URL. 데이터는 /tmp 임시 폴더에 만들고 지움. API 비용 없음, 약 15초)
 ```
 
 평가 방법과 지표는 [`eval/README.md`](eval/README.md)에 있습니다. Mock 점수는 실제 성능이 아닙니다.
