@@ -470,6 +470,59 @@ def test_describe_setting_is_korean():
     assert set(SETTING_NAMES) == {k for k in setting_keys() if not k.startswith(("numbers.", "entities."))}
 
 
+# --- 3e: 묶음 정리 (2026-11-01 NER 교체) ---
+
+OLD_POLICY = """version: 1
+entries:
+- said: 날짜는 거부
+  set: {entities.date.action: deny}
+- set: {entities.event.action: allow, entities.name.action: ask_human}
+"""
+
+
+def test_entity_groups_are_nine_and_retired_keys_are_not_settings():
+    groups = [k.split(".")[1] for k in setting_keys() if k.startswith("entities.")]
+    assert groups == ["name", "address", "birth", "student_id", "org", "place", "etc", "host", "plain"]
+    assert DEFAULT_POLICY.entity_rule("plain") == "allow" and DEFAULT_POLICY.entity_rule("host") == "mask"
+    assert "entities.date.action" not in DEFAULT_POLICY.settings
+    assert "entities.event.action" not in DEFAULT_POLICY.settings
+
+
+def test_old_policy_file_with_retired_keys_is_read_and_has_no_effect(tmp_path):
+    """예전 키가 든 정책 파일도 읽힌다(그렇지 않으면 데몬이 모든 읽기를 막는다). 효과는 없다."""
+    path = tmp_path / "policy.yaml"
+    path.write_text(OLD_POLICY, encoding="utf-8")
+    entries = read_entries(path)
+    assert dict(entries[0].settings) == {"entities.date.action": "deny"}   # 항목에는 남는다(보여 주고 지울 수 있게)
+    policy = PolicySource(path).current()                                   # PolicyError가 아니다
+    assert policy.entity_rule("name") == "ask_human"
+    assert "entities.date.action" not in policy.settings and "entities.event.action" not in policy.settings
+    assert policy.version == build_policy([setting(entities__name__action="ask_human")]).version
+    write_entries(tmp_path / "copy.yaml", entries)                          # 다른 항목과 함께 다시 쓸 수 있다
+    assert read_entries(tmp_path / "copy.yaml") == entries
+
+
+@pytest.mark.parametrize("key", ["entities.date.action", "entities.event.action"])
+def test_retired_keys_are_refused_for_new_settings(key):
+    with pytest.raises(PolicyError, match="지정할 수 없습니다"):
+        validate_setting(key, "mask")
+    assert key not in setting_keys() and setting_choices(key) is None
+
+
+def test_retired_key_with_bad_value_still_breaks_the_file(tmp_path):
+    path = tmp_path / "policy.yaml"
+    path.write_text("version: 1\nentries:\n- set: {entities.date.action: hide}\n", encoding="utf-8")
+    with pytest.raises(PolicyError, match="entities.date.action"):
+        read_entries(path)
+
+
+def test_describe_retired_setting_says_not_found_now():
+    assert describe_setting("entities.date.action", "deny") == "날짜(NER): 거부 (지금은 찾지 않음)"
+    assert describe_setting("entities.event.action", "allow") == "사건(NER): 그대로 보여줌 (지금은 찾지 않음)"
+    assert describe_setting("entities.plain.action", "allow") == "나이(NER): 그대로 보여줌"
+    assert describe_setting("entities.student_id.action", "mask") == "식별번호(학번·사번·여권번호 등)(NER): 가려서 보여줌"
+
+
 # --- Phase 4 보완: 비밀값과 자격 증명 파일 ---
 
 def test_secret_kind_has_settings():

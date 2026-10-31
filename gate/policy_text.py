@@ -12,11 +12,12 @@ interpret()가 아래 질문을 차례로 던지고 답을 모아 정책 항목(
   4. action: deny | ask_human | mask               (target이 action일 때)
      visible: 그 종류의 공개 범위                    (target이 visible일 때. gate.detectors.VISIBLE_CHOICES)
        → Entry(settings={"numbers.<kind>.<target>": 답}, said=문장)
-  6. entity: ENTITY_GROUPS                         NER이 찾는 어떤 정보인가 (name, address, …, plain. gate.ner_client) (3d)
+  6. entity: ENTITY_OPTIONS                        NER·규칙이 찾는 어떤 정보인가 (ENTITY_GROUPS 9개 + unsupported) (3d, 3e)
+       unsupported → 저장하지 않는다. 날짜·사건·시간·연도·직함·과목은 2026-11-01 NER 교체로 찾지 않는다.
   7. entity_action: deny | ask_human | mask | allow  그 정보를 어떻게 처리하나
        → Entry(settings={"entities.<묶음>.action": 답}, said=문장)
        전화번호·이메일·비밀값은 NER이 찾아도 numbers 칸을 따르므로 number 쪽 문장이다.
-       plain 묶음(시간·연도·나이·직함·과목)은 함께 바뀐다고 알린다. allow는 기본보다 느슨해서 저장 전에 한 번 더 확인한다(gate.policy.loosened).
+       plain 묶음은 나이 하나다. allow는 기본보다 느슨해서 저장 전에 한 번 더 확인한다(gate.policy.loosened).
   5. direction: stricter | looser                  맥락 문장이 더 막는 쪽인가, 더 보여 주는 쪽인가
        stricter → Entry(context=문장, said=문장). 문장은 해석하지 않고 그대로 Jev 질문의 "사용자 정책" 칸에 들어간다.
        looser   → 저장하지 않는다(unsupported). Jev 질문은 사용자 정책을 "보여주면 안 되는 내용"으로만 쓰고,
@@ -26,7 +27,7 @@ interpret()가 아래 질문을 차례로 던지고 답을 모아 정책 항목(
   - unclear: 답 하나라도 확신도가 threshold(기본 0.7) 미만이거나 type이 unknown. 다시 말해 달라고 한다. 추측해서 저장하지 않는다.
   - error: 해석기 오류. 예외, 타임아웃, 선택지 밖의 답, Choice가 아닌 응답.
   - path: 경로 패턴은 선택지로 고를 수 없어 `gate policy set path <패턴> <동작>`을 안내한다.
-  - unsupported: 느슨하게 하는 맥락 문장.
+  - unsupported: 느슨하게 하는 맥락 문장, 지금 찾지 않는 정보(날짜·사건·시간·연도·직함·과목)에 대한 문장.
 
 해석기는 make_interpreter(이름)으로 고른다(jev_client.make_client와 같은 구조).
   - mock: 키워드 규칙. 기본값이다.
@@ -58,6 +59,7 @@ TYPE_OPTIONS = ("number", "entity", "path", "context", "unknown")
 TARGET_OPTIONS = ("action", "visible")
 DIRECTION_OPTIONS = ("stricter", "looser")
 ENTITY_ACTION_OPTIONS = ("deny", "ask_human", "mask", "allow")  # gate.policy의 entities.<묶음>.action 선택지와 같다
+ENTITY_OPTIONS = (*ENTITY_GROUPS, "unsupported")  # unsupported: 지금 찾지 않는 정보(저장하지 않음)
 
 # 질문 키 → 질문 첫 줄. 첫 줄은 키마다 고정이라 question_key()로 어느 질문인지 알 수 있다.
 QUESTION_TITLES: dict[str, str] = {
@@ -80,7 +82,8 @@ _UNSURE = {
 _OPTION_GUIDES: dict[str, dict[str, str]] = {
     "type": {
         "number": "주민등록번호·카드번호·전화번호·이메일·계좌번호·비밀번호처럼 형식이 정해진 번호나 비밀값을 어떻게 처리할지",
-        "entity": "사람 이름·주소·생년월일·학번·소속(학교·회사·병원)·장소처럼 문서에 나오는 특정 정보를 가릴지 보여줄지",
+        "entity": "사람 이름·주소·생년월일·식별번호(학번·사번 등)·소속(학교·회사·병원)·장소·나이·IP 주소처럼 "
+                  "문서에 나오는 특정 정보를 가릴지 보여줄지",
         "path": "특정 폴더나 파일 이름(경로)에 대한 규칙",
         "context": "문서의 내용이나 주제(예: 병원 기록, 가족 이야기)를 보여줄지에 대한 규칙",
         "unknown": "정책 문장이 아니거나 알 수 없음",
@@ -96,19 +99,18 @@ _OPTION_GUIDES: dict[str, dict[str, str]] = {
         "stricter": "보여주지 말라거나 가리라거나 물어보라는 쪽",
         "looser": "보여줘도 된다거나 허용하라는 쪽",
     },
-    # NER 묶음(gate.ner_client.ENTITY_GROUPS). ENTITY_NAMES보다 풀어 쓴다. 해석기가 고를 때 읽는 설명이다.
+    # NER 묶음(gate.ner_client.ENTITY_GROUPS)과 unsupported. ENTITY_NAMES보다 풀어 쓴다. 해석기가 고를 때 읽는 설명이다.
     "entity": {
         "name": "사람 이름(본인·가족·지인·상담사·교수 등)",
         "address": "집 주소나 사는 곳",
         "birth": "생년월일이나 생일",
-        "student_id": "학번",
+        "student_id": "학번·사번·여권번호·면허번호·회원번호 같은 식별번호",
         "org": "학교·학과·부서·회사·기관·병원·동아리·프로젝트 같은 소속 이름",
         "place": "장소나 지역·지명",
-        "date": "날짜",
-        "event": "사건이나 행사 이름",
-        "etc": "그 밖의 민감한 개인 정보",
+        "etc": "메신저·SNS 아이디 같은 그 밖의 연락처",
         "host": "IP 주소나 내부 서버 주소",
-        "plain": "시간·연도·나이·직함·과목(다섯 가지가 한 묶음)",
+        "plain": "나이",
+        "unsupported": "날짜·사건·시간·연도·직함·과목처럼 지금은 따로 찾지 않는 정보",
     },
     "entity_action": {
         "deny": "이 정보가 있는 파일은 읽기를 거부",
@@ -131,12 +133,17 @@ _ACTION_NOTES = {
     "mask": "번호를 가린 뒤 보여줍니다.",
 }
 _ENTITY_ACTION_NOTES = {
-    "deny": "NER이 이 정보를 찾은 파일은 읽기를 거부합니다.",
-    "ask_human": "NER이 이 정보를 찾은 파일은 사람에게 물어본 뒤 보여줍니다(허용해도 이 정보는 가린 채로 보여줍니다).",
-    "mask": "NER이 찾은 부분을 [이름]처럼 종류 이름으로 바꿔 보여줍니다.",
-    "allow": "NER이 찾아도 가리지 않습니다. 다만 판단 모델(Jev)이 문서를 민감하다고 보면 사람에게 묻거나 막을 수 있습니다.",
+    "deny": "NER(IP·내부 주소는 규칙)이 이 정보를 찾은 파일은 읽기를 거부합니다.",
+    "ask_human": "NER(IP·내부 주소는 규칙)이 이 정보를 찾은 파일은 사람에게 물어본 뒤 보여줍니다"
+                 "(허용해도 이 정보는 가린 채로 보여줍니다).",
+    "mask": "NER(IP·내부 주소는 규칙)이 찾은 부분을 [이름]처럼 종류 이름으로 바꿔 보여줍니다.",
+    "allow": "NER(IP·내부 주소는 규칙)이 찾아도 가리지 않습니다. 다만 판단 모델(Jev)이 문서를 민감하다고 보면 "
+             "사람에게 묻거나 막을 수 있습니다.",
 }
-_PLAIN_NOTE = "  이 묶음에는 시간·연도·나이·직함·과목이 함께 들어 있어서 다섯 가지가 같이 바뀝니다."
+UNSUPPORTED_ENTITY_MESSAGE = (
+    "지금은 날짜·사건·시간·연도·직함·과목을 따로 찾지 않아요. 저장하지 않았습니다.\n"
+    "(2026-11-01 NER 교체로 찾지 않습니다. 나이·생년월일은 \"나이는 가려줘\"처럼 정할 수 있어요.)"
+)
 
 
 class InterpretError(Exception):
@@ -276,14 +283,14 @@ def interpret(
             )
             return Interpretation("context", text, message, entry, tuple(steps))
         if kind_of_sentence == "entity":
-            group = ask("entity", ENTITY_GROUPS)
+            group = ask("entity", ENTITY_OPTIONS)
+            if group == "unsupported":
+                return Interpretation("unsupported", text, UNSUPPORTED_ENTITY_MESSAGE, None, tuple(steps))
             key = f"entities.{group}.action"
             value = ask("entity_action", setting_choices(key), f"정보 종류: {group} ({_OPTION_GUIDES['entity'][group]})")
             entry = Entry(settings={key: value}, said=text)
-            lines = ["이렇게 이해했어요:", f"  {describe_setting(key, value)}", f"  {_ENTITY_ACTION_NOTES[value]}"]
-            if group == "plain":
-                lines.append(_PLAIN_NOTE)
-            lines.append(f"  (설정 {key} = {value})")
+            lines = ["이렇게 이해했어요:", f"  {describe_setting(key, value)}", f"  {_ENTITY_ACTION_NOTES[value]}",
+                     f"  (설정 {key} = {value})"]
             return Interpretation("setting", text, "\n".join(lines), entry, tuple(steps))
 
         kind = ask("kind", KINDS)
@@ -336,9 +343,11 @@ _PATH_CUES = ("폴더", "디렉터리", "디렉토리", "경로", "확장자", "
 _FILE_NAME = re.compile(r"[0-9a-z가-힣_\-]+\.[a-z0-9]{2,5}(?![a-z0-9])")  # "주소록.xlsx"처럼 확장자가 붙은 파일 이름
 # 한 묶음으로 정할 수 없는 넓은 말. 맥락 규칙으로 저장하지 않고 다시 말해 달라고 한다("개인정보는 다 가려줘").
 _BROAD_CUES = ("개인정보", "개인 정보", "연락처", "신상", "인적 사항", "인적사항", "민감 정보", "민감한 정보")
-# NER 묶음 단서(3d). 표 순서대로 찾고 지우므로 "학교 이름"(org)·"ip 주소"(host)·"과목 이름"(plain)이 먼저 걸려
+# NER 묶음 단서(3d, 3e). 표 순서대로 찾고 지우므로 "학교 이름"(org)·"ip 주소"(host)·"과목 이름"(unsupported)이 먼저 걸려
 # 맨 뒤 name의 "이름"이나 address의 "주소"로 다시 잡히지 않는다. "병원"·"회사"·"사건"처럼 주제로도 쓰는 맨 낱말은 넣지 않는다
 # ("병원 기록은 보여주지 마"는 맥락 규칙이다). 그래서 "~ 이름"·"~명"처럼 정보 종류임이 드러나는 말만 넣는다.
+# unsupported는 2026-11-01 NER 교체로 찾지 않는 정보(예전 date·event 묶음과 plain의 나이 아닌 것)다. 묶음 문장으로 알아보되
+# 저장하지 않는다. birth의 "출생 연도"는 unsupported의 "연도"보다 먼저 지운다(생년은 생년월일로 찾는다).
 _ENTITY_CUES: dict[str, tuple[str, ...]] = {
     "host": ("아이피 주소", "아이피주소", "아이피", "내부 주소", "내부주소", "서버 주소", "서버주소", "호스트 이름", "호스트명", "호스트",
              "내부 서버", "사내 주소"),  # 영문 "ip"는 _keyword_choice가 낱말일 때만 "아이피"로 바꾼다("zip"에 걸리지 않게)
@@ -346,15 +355,19 @@ _ENTITY_CUES: dict[str, tuple[str, ...]] = {
             "병원 이름", "병원이름", "병원명", "기관 이름", "기관명", "단체 이름", "단체명", "동아리 이름", "동아리명", "모임 이름",
             "프로젝트 이름", "프로젝트명", "사업 이름", "사업명", "학과 이름", "학과명", "부서 이름", "부서명", "학과", "부서",
             "소속"),
-    "student_id": ("학생 번호", "학생번호", "학번"),
-    "birth": ("생년월일", "생일", "출생일", "태어난 날"),
+    "student_id": ("학생 번호", "학생번호", "학번", "식별번호", "식별 번호", "사번", "사원 번호", "사원번호", "직원 번호",
+                   "직원번호", "여권번호", "여권 번호", "면허번호", "면허 번호", "차량번호", "차량 번호", "회원번호",
+                   "회원 번호"),
+    "birth": ("생년월일", "생일", "출생일", "태어난 날", "출생 연도", "출생연도", "출생년도", "태어난 해"),
     "address": ("집 주소", "주소", "사는 곳", "사는곳", "거주지", "도로명", "번지"),
     "place": ("장소 이름", "장소", "지명", "지역 이름", "지역명", "지역", "동네", "도시 이름", "도시명", "나라 이름"),
-    "date": ("날짜", "일자", "며칠", "몇 월"),
-    "event": ("사건 이름", "사건명", "행사 이름", "행사명", "대회 이름", "대회명"),
-    "etc": ("기타 민감", "기타 개인", "기타 정보", "그 밖의 민감", "그 밖의 개인", "그밖의 민감"),
-    "plain": ("과목 이름", "과목명", "수업 이름", "강의 이름", "강의명", "과목", "나이", "연령", "몇 살", "몇살", "연도", "년도",
-              "시각", "시간", "직함", "직급", "직책"),
+    "unsupported": ("날짜", "일자", "며칠", "몇 월",
+                    "사건 이름", "사건명", "행사 이름", "행사명", "대회 이름", "대회명",
+                    "과목 이름", "과목명", "수업 이름", "강의 이름", "강의명", "과목", "연도", "년도", "시각", "시간",
+                    "직함", "직급", "직책"),
+    "etc": ("기타 민감", "기타 개인", "기타 정보", "그 밖의 민감", "그 밖의 개인", "그밖의 민감", "메신저 아이디",
+            "메신저 id", "sns 아이디", "sns id", "카톡 아이디", "카카오톡 아이디", "카톡 id"),
+    "plain": ("나이", "연령", "몇 살", "몇살"),
     "name": ("사람 이름", "실명", "성명", "성함", "이름", "인명"),
 }
 # entity_action 단서(3d). 단계 순서대로 찾고 지운다. 같은 말이 여러 동작에 걸리지 않게 하려는 순서다.

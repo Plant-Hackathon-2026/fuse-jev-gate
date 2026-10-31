@@ -1,4 +1,4 @@
-"""gate.policy_text 3d: 정책 문장으로 NER 묶음(entities.<묶음>.action) 바꾸기, Laya 해석기(가짜 laya-serve).
+"""gate.policy_text 3d·3e: 정책 문장으로 NER 묶음(entities.<묶음>.action) 바꾸기, Laya 해석기(가짜 laya-serve).
 
 키워드 Mock의 결과는 실제 해석 성능을 대변하지 않는다. 표현 다양성은 eval/policy_sentences.csv로 따로 잰다.
 """
@@ -14,6 +14,7 @@ from gate.ner_client import ENTITY_GROUPS
 from gate.policy import DEFAULT_POLICY, Entry, build_policy, describe_setting, loosened, read_entries, setting_choices
 from gate.policy_text import (
     ENTITY_ACTION_OPTIONS,
+    ENTITY_OPTIONS,
     LAYA_POLICY_PREFIX,
     QUESTION_TITLES,
     TYPE_OPTIONS,
@@ -51,10 +52,13 @@ def test_entity_is_a_sentence_type_and_actions_match_policy_choices():
 
 
 def test_entity_questions_list_every_group_and_action():
-    question = build_question("entity", ENTITY_GROUPS)
+    assert ENTITY_OPTIONS == (*ENTITY_GROUPS, "unsupported")
+    assert "date" not in ENTITY_OPTIONS and "event" not in ENTITY_OPTIONS
+    question = build_question("entity", ENTITY_OPTIONS)
     assert question_key(question) == "entity"
-    for group in ENTITY_GROUPS:
+    for group in ENTITY_OPTIONS:
         assert f"- {group}:" in question
+    assert "- plain: 나이\n" in question and "날짜·사건·시간·연도·직함·과목" in question
     question = build_question("entity_action", ENTITY_ACTION_OPTIONS, "정보 종류: name (사람 이름)")
     assert question_key(question) == "entity_action"
     assert "정보 종류: name" in question
@@ -75,15 +79,25 @@ def test_entity_questions_list_every_group_and_action():
     ("사는 곳은 숨겨줘", "entities.address.action", "mask"),
     ("생년월일은 가려줘", "entities.birth.action", "mask"),
     ("학번 있는 파일은 거부", "entities.student_id.action", "deny"),
+    ("사번은 가려줘", "entities.student_id.action", "mask"),               # 식별번호로 넓혔다(3e)
+    ("여권번호 있는 파일은 거부", "entities.student_id.action", "deny"),
+    ("직원 번호는 물어보고 보여줘", "entities.student_id.action", "ask_human"),
+    ("면허번호는 숨겨줘", "entities.student_id.action", "mask"),
+    ("차량번호는 그대로 보여줘", "entities.student_id.action", "allow"),
+    ("회원번호는 가려줘", "entities.student_id.action", "mask"),
+    ("식별번호는 가려줘", "entities.student_id.action", "mask"),
+    ("메신저 아이디는 가려줘", "entities.etc.action", "mask"),
+    ("카톡 아이디가 있는 파일은 거부", "entities.etc.action", "deny"),
+    ("SNS 아이디는 그대로 보여줘", "entities.etc.action", "allow"),
+    ("출생 연도는 가려줘", "entities.birth.action", "mask"),               # "연도"보다 먼저 생년월일로 본다
     ("학교 이름은 가려줘", "entities.org.action", "mask"),            # "이름"이 name으로 다시 잡히지 않는다
     ("병원 이름은 가려줘", "entities.org.action", "mask"),
     ("장소는 그대로 보여줘", "entities.place.action", "allow"),
-    ("날짜는 가려줘", "entities.date.action", "mask"),
-    ("사건 이름은 물어보고 보여줘", "entities.event.action", "ask_human"),
     ("IP 주소는 가려줘", "entities.host.action", "mask"),            # "주소"가 address로 다시 잡히지 않는다
     ("아이피 있는 파일은 거부", "entities.host.action", "deny"),
     ("나이는 가려줘", "entities.plain.action", "mask"),
-    ("과목 이름은 그대로 보여줘", "entities.plain.action", "allow"),
+    ("몇 살인지는 물어보고 보여줘", "entities.plain.action", "ask_human"),
+    ("연령은 그대로 보여줘", "entities.plain.action", "allow"),
 ])
 def test_entity_sentences(sentence, key, value):
     result = interpret(sentence, keyword())
@@ -164,10 +178,38 @@ def test_mock_boundary_fixes(sentence, outcome):
 
 # --- 안내 문구 ---
 
-def test_plain_group_says_five_kinds_change_together():
+def test_plain_group_is_only_age_now():
     result = interpret("나이는 가려줘", keyword())
-    assert "시간·연도·나이·직함·과목" in result.message and "같이 바뀝니다" in result.message
-    assert "같이 바뀝니다" not in interpret("이름은 가려줘", keyword()).message
+    assert "나이(NER): 가려서 보여줌" in result.message
+    assert "다섯 가지" not in result.message and "같이 바뀝니다" not in result.message
+
+
+# --- 지금 찾지 않는 정보 (3e, 2026-11-01 NER 교체) ---
+
+@pytest.mark.parametrize("sentence", [
+    "날짜는 가려줘", "약속 날짜가 나오면 물어봐", "몇 월 며칠인지는 거부",
+    "사건 이름은 물어보고 보여줘", "행사명은 가려줘",
+    "시간은 그대로 보여줘", "연도가 있는 파일은 거부", "직함은 가려줘", "직급은 숨겨줘", "직책은 보여줘",
+    "과목 이름은 그대로 보여줘", "수업 이름은 가려줘", "강의명은 물어보고 보여줘",
+])
+def test_retired_kinds_are_not_saved(sentence):
+    result = interpret(sentence, keyword())
+    assert (result.outcome, result.entry) == ("unsupported", None)
+    assert "지금은 날짜·사건·시간·연도·직함·과목을 따로 찾지 않아요" in result.message
+    assert [s.key for s in result.steps] == ["type", "entity"]          # 처리 방식은 묻지 않는다
+    assert result.steps[1].choice.answer == "unsupported"
+
+
+def test_retired_kind_mixed_with_a_group_is_unclear():
+    assert interpret("나이는 가리고 연도는 보여줘", keyword()).outcome == "unclear"
+    assert interpret("이름이랑 날짜는 가려줘", keyword()).outcome == "unclear"
+
+
+def test_fixed_unsupported_answer_stops_without_saving():
+    mock = fixed(type=("entity", 0.9), entity=("unsupported", 0.9))
+    result = interpret("아무 문장", mock)
+    assert (result.outcome, result.entry) == ("unsupported", None)
+    assert [c.key for c in mock.calls] == ["type", "entity"]
 
 
 @pytest.mark.parametrize("sentence, words", [
@@ -197,7 +239,7 @@ def test_fixed_entity_flow_records_questions():
     result = interpret("아무 문장", mock)
     assert result.entry == Entry(settings={"entities.name.action": "deny"}, said="아무 문장")
     assert [c.key for c in mock.calls] == ["type", "entity", "entity_action"]
-    assert mock.calls[1].options == ENTITY_GROUPS
+    assert mock.calls[1].options == ENTITY_OPTIONS
     assert mock.calls[2].options == ENTITY_ACTION_OPTIONS
     assert "정보 종류: name" in mock.calls[2].question
 

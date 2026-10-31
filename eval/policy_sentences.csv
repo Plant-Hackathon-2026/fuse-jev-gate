@@ -40,15 +40,15 @@ P038,만난 장소가 적혀 있으면 나한테 확인받아,setting,entities.p
 P039,여행 간 도시 이름은 숨겨줘,setting,entities.place.action=mask,entity,도시 이름=지명 → place. '이름'이 있지만 사람 이름 아님
 P040,지명이 나오는 파일은 차단해,setting,entities.place.action=deny,entity,차단 → 거부
 P041,장소는 숨기지 마,setting,entities.place.action=allow,entity,'숨기지 마' → 그대로
-P042,날짜는 가리지 마,setting,entities.date.action=allow,entity,가리지 마 → 그대로
-P043,날짜는 지워서 보여줘,setting,entities.date.action=mask,entity,지워서 보여줘=가림
-P044,약속 날짜가 나오면 물어보고 보여줘,setting,entities.date.action=ask_human,entity,약속 날짜=DATE
-P045,몇 월 며칠인지 나오는 문서는 거부해,setting,entities.date.action=deny,entity,몇 월 며칠=날짜
-P046,날짜는 가려도 돼,setting,entities.date.action=mask,entity,'~해도 돼'지만 동사가 가림 → mask(allow 아님)
-P047,사건 이름은 보여주지 마,setting,entities.event.action=mask,entity,정보가 주어인 '보여주지 마'는 그 부분만 가림(파일 거부 아님)
-P048,사건명이 나오는 파일은 열지 마,setting,entities.event.action=deny,entity,사건명=사건 이름(EVENT)
-P049,사건은 그대로 보여줘도 괜찮아요,setting,entities.event.action=allow,entity,사건(EVENT) 종류. 주제 규칙(unsupported)이 아니라 개체
-P050,사건 이름이 있으면 나한테 물어봐,setting,entities.event.action=ask_human,entity,물어봐 → 물어봄
+P042,날짜는 가리지 마,unsupported,,entity,가리지 마 → 그대로. 2026-11-01 NER 교체로 찾지 않음(전 정답 entities.date.action=allow)
+P043,날짜는 지워서 보여줘,unsupported,,entity,지워서 보여줘=가림. 2026-11-01 NER 교체로 찾지 않음(전 정답 entities.date.action=mask)
+P044,약속 날짜가 나오면 물어보고 보여줘,unsupported,,entity,약속 날짜=DATE. 2026-11-01 NER 교체로 찾지 않음(전 정답 entities.date.action=ask_human)
+P045,몇 월 며칠인지 나오는 문서는 거부해,unsupported,,entity,몇 월 며칠=날짜. 2026-11-01 NER 교체로 찾지 않음(전 정답 entities.date.action=deny)
+P046,날짜는 가려도 돼,unsupported,,entity,'~해도 돼'지만 동사가 가림 → mask(allow 아님). 2026-11-01 NER 교체로 찾지 않음(전 정답 entities.date.action=mask)
+P047,사건 이름은 보여주지 마,unsupported,,entity,정보가 주어인 '보여주지 마'는 그 부분만 가림(파일 거부 아님). 2026-11-01 NER 교체로 찾지 않음(전 정답 entities.event.action=mask)
+P048,사건명이 나오는 파일은 열지 마,unsupported,,entity,사건명=사건 이름(EVENT). 2026-11-01 NER 교체로 찾지 않음(전 정답 entities.event.action=deny)
+P049,사건은 그대로 보여줘도 괜찮아요,unsupported,,entity,사건(EVENT) 종류. 주제 규칙(unsupported)이 아니라 개체. 2026-11-01 NER 교체로 찾지 않음(전 정답 entities.event.action=allow)
+P050,사건 이름이 있으면 나한테 물어봐,unsupported,,entity,물어봐 → 물어봄. 2026-11-01 NER 교체로 찾지 않음(전 정답 entities.event.action=ask_human)
 P051,"기타 민감 정보는 가려 줘, 부탁해",setting,entities.etc.action=mask,entity,부탁형. 문장 안 쉼표
 P052,그 밖의 민감한 정보가 나오면 확인받고 보여줘,setting,entities.etc.action=ask_human,entity,'그 밖의'=기타 → etc 묶음. '개인정보 다'처럼 넓은 말과 구분
 P053,기타 민감 정보는 그냥 보여줘,setting,entities.etc.action=allow,entity,묶음 이름을 그대로 쓴 문장
@@ -61,12 +61,12 @@ P059,아이피 나오면 그 파일은 막아,setting,entities.host.action=deny,
 P060,IP주소는 봐도 돼,setting,entities.host.action=allow,entity,띄어쓰기 없음
 P061,나이는 가려줘,setting,entities.plain.action=mask,entity,plain 묶음 전체(시간·연도·나이·직함·과목)가 함께 바뀌지만 바꿈 하나 → setting
 P062,몇 살인지는 숨겨줘,setting,entities.plain.action=mask,entity,몇 살=나이(AGE) → plain
-P063,직함은 그대로 보여줘,setting,entities.plain.action=allow,entity,기본값과 같음. 직함=TITLE
-P064,과목 이름이 나오면 물어보고 보여줘,setting,entities.plain.action=ask_human,entity,과목=COURSE → plain. '학과'(org)와 경계
-P065,시간은 안 가려도 돼,setting,entities.plain.action=allow,entity,시간=TIME → plain. 기본값과 같음
-P066,연도가 적힌 파일은 거부해줘,setting,entities.plain.action=deny,entity,묶음 전체가 거부로 바뀜(나이·시간 등도)
-P067,직급이나 직책이 적힌 문서는 읽지 마,setting,entities.plain.action=deny,entity,직급·직책=직함(TITLE). 둘 다 plain → 바꿈 하나
-P068,수업 이름은 확인받고 보여줘,setting,entities.plain.action=ask_human,entity,수업=과목(COURSE)
+P063,직함은 그대로 보여줘,unsupported,,entity,기본값과 같음. 직함=TITLE. 2026-11-01 NER 교체로 찾지 않음(전 정답 entities.plain.action=allow)
+P064,과목 이름이 나오면 물어보고 보여줘,unsupported,,entity,과목=COURSE → plain. '학과'(org)와 경계. 2026-11-01 NER 교체로 찾지 않음(전 정답 entities.plain.action=ask_human)
+P065,시간은 안 가려도 돼,unsupported,,entity,시간=TIME → plain. 기본값과 같음. 2026-11-01 NER 교체로 찾지 않음(전 정답 entities.plain.action=allow)
+P066,연도가 적힌 파일은 거부해줘,unsupported,,entity,묶음 전체가 거부로 바뀜(나이·시간 등도). 2026-11-01 NER 교체로 찾지 않음(전 정답 entities.plain.action=deny)
+P067,직급이나 직책이 적힌 문서는 읽지 마,unsupported,,entity,직급·직책=직함(TITLE). 둘 다 plain → 바꿈 하나. 2026-11-01 NER 교체로 찾지 않음(전 정답 entities.plain.action=deny)
+P068,수업 이름은 확인받고 보여줘,unsupported,,entity,수업=과목(COURSE). 2026-11-01 NER 교체로 찾지 않음(전 정답 entities.plain.action=ask_human)
 P069,주민번호는 생년월일까지만 보여줘,setting,numbers.rrn.visible=birth,number,경계: 생년월일 묶음이 아니라 주민번호 공개 범위(앞 6자리)
 P070,주민등록번호는 성별 자리까지 보여줘도 돼,setting,numbers.rrn.visible=birth_gender,number,'보여줘도 돼'지만 번호엔 allow가 없고 공개 범위 지정
 P071,주민번호 앞자리만 보이게 해 주세요,setting,numbers.rrn.visible=birth,number,주민번호 '앞자리'=하이픈 앞 6자리=birth

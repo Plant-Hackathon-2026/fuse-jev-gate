@@ -100,3 +100,36 @@ def test_write_failure_is_change_error_and_leaves_no_history(policy_file, monkey
     with pytest.raises(pc.ChangeError, match="정책 파일을 쓸 수 없습니다"):
         pc.apply(change)
     assert pc.history(policy_file) == []
+
+
+# --- 뺀 묶음과 규칙 묶음 (3e, 2026-11-01 NER 교체) ---
+
+@pytest.mark.parametrize("key", ["entities.date.action", "entities.event.action"])
+def test_retired_keys_cannot_be_added(policy_file, key):
+    with pytest.raises(pc.ChangeError, match="지정할 수 없습니다"):
+        pc.setting_entry(key, ["mask"])
+    with pytest.raises(pc.ChangeError, match="따로 찾지 않습니다"):
+        pc.plan_add(policy_file, (), Entry(settings={key: "mask"}))   # 코드가 만든 항목도 새로 더하지 않는다
+    assert not policy_file.exists()
+
+
+def test_old_entries_with_retired_keys_stay_and_can_be_removed(policy_file):
+    old = Entry.from_dict({"set": {"entities.date.action": "deny"}, "said": "날짜는 거부"})
+    write_entries(policy_file, [old])
+    change = pc.plan_add(policy_file, pc.read_current(policy_file), pc.setting_entry("numbers.card.action", ["deny"]))
+    pc.apply(change)
+    assert [dict(e.settings) for e in read_entries(policy_file)] == [{"entities.date.action": "deny"},
+                                                                     {"numbers.card.action": "deny"}]
+    pc.apply(pc.plan_remove(policy_file, read_entries(policy_file), "1"))
+    assert [dict(e.settings) for e in read_entries(policy_file)] == [{"numbers.card.action": "deny"}]
+
+
+def test_host_setting_has_no_ner_off_note(policy_file):
+    write_entries(policy_file, [Entry(settings={"ner_backend": "none"})])
+    entries = pc.read_current(policy_file)
+    host = pc.plan_add(policy_file, entries, Entry(settings={"entities.host.action": "deny"}))
+    assert host.notes() == ()                                   # IP·내부 주소는 규칙이라 NER을 꺼도 적용
+    name = pc.plan_add(policy_file, entries, Entry(settings={"entities.name.action": "deny"}))
+    assert name.notes() == ("ner_off",)
+    assert pc.needs_ner("entities.name.action") and not pc.needs_ner("entities.host.action")
+    assert not pc.needs_ner("entities.date.action") and not pc.needs_ner("numbers.card.action")

@@ -450,3 +450,37 @@ def test_running_daemon_source_sees_change(policy_file):
     assert policy.number_rule("card") == "deny"
     _, out = gate_policy(policy_file, "show")
     assert policy.version in out
+
+
+# --- 3e: 묶음 정리 (2026-11-01 NER 교체) ---
+
+def test_show_lists_nine_groups_and_host_is_rule_based(policy_file):
+    write_entries(policy_file, [Entry(settings={"ner_backend": "none"})])
+    _, out = gate_policy(policy_file, "show")
+    assert "지금 NER이 꺼져 있어 IP·내부 주소(규칙)만 적용" in out
+    assert "IP·내부 주소: 가려서 보여줌 [기본] (규칙으로 찾음, NER을 꺼도 적용)" in out
+    assert "    나이: 그대로 보여줌 [기본]" in out and "식별번호(학번·사번·여권번호 등): 가려서 보여줌" in out
+    assert "    날짜:" not in out and "    사건:" not in out and "시간·연도" not in out
+
+
+def test_old_retired_entries_are_shown_and_removable(policy_file):
+    policy_file.parent.mkdir(parents=True)
+    policy_file.write_text("version: 1\nentries:\n- said: 날짜는 거부\n  set: {entities.date.action: deny}\n",
+                           encoding="utf-8")
+    code, out = gate_policy(policy_file, "show")
+    assert code == 0 and "날짜(NER): 거부 (지금은 찾지 않음)" in out
+    assert gate_policy(policy_file, "remove", "1")[0] == 0
+    assert read_entries(policy_file) == ()
+
+
+@pytest.mark.parametrize("key", ["entities.date.action", "entities.event.action"])
+def test_set_refuses_retired_keys(policy_file, key):
+    code, out = gate_policy(policy_file, "set", key, "mask")
+    assert code == 1 and "지정할 수 없습니다" in out and "따로 찾지 않습니다" in out
+    assert not policy_file.exists()
+
+
+def test_add_retired_kind_sentence_is_not_saved(policy_file):
+    code, out = gate_policy(policy_file, "add", "날짜는 가려줘", answers="y\n", interpreter=MockPolicyInterpreter())
+    assert code == 1 and "따로 찾지 않아요" in out and PROMPT not in out
+    assert not policy_file.exists()

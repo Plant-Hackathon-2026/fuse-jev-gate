@@ -46,7 +46,7 @@ from pathlib import Path
 from typing import TextIO
 
 from gate.detectors import KINDS
-from gate.ner_client import ENTITY_GROUPS, ENTITY_NAMES
+from gate.ner_client import ENTITY_GROUPS, ENTITY_NAMES, RULE_GROUPS
 from gate.policy import (
     ACTION_NAMES,
     DEFAULT_PATH_RULES,
@@ -339,11 +339,12 @@ def _show(path: Path, entries: tuple[Entry, ...], out: TextIO) -> None:
                      f" · 가릴 때 {VISIBLE_NAMES[policy.visible[kind]]} {mark(visible_key)}")
 
     ner_on = policy.ner_backend != "none"
-    lines.append("  이름·주소·소속 등 종류별 처리 (NER이 찾은 것, `[이름]`처럼 종류 이름으로 가림)"
-                 + ("" if ner_on else " — 지금 NER이 꺼져 있어 쓰지 않음"))
+    lines.append("  이름·주소·소속 등 종류별 처리 (NER·규칙이 찾은 것, `[이름]`처럼 종류 이름으로 가림)"
+                 + ("" if ner_on else " — 지금 NER이 꺼져 있어 IP·내부 주소(규칙)만 적용"))
     for group in ENTITY_GROUPS:
         key = f"entities.{group}.action"
-        lines.append(f"    {ENTITY_NAMES[group]}: {ACTION_NAMES[policy.entity_rule(group)]} {mark(key)}")
+        how = " (규칙으로 찾음, NER을 꺼도 적용)" if group in RULE_GROUPS else ""
+        lines.append(f"    {ENTITY_NAMES[group]}: {ACTION_NAMES[policy.entity_rule(group)]} {mark(key)}{how}")
     if ner_on:
         lines.append("    가린 것이 있으면 가린 결과를 Jev에 다시 물어, 안전하면 보여주고 아니면 사람에게 물어봄")
 

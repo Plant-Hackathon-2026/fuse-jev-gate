@@ -58,16 +58,18 @@ ENTITY_KINDS: tuple[str, ...] = (
     *RULE_KINDS,
 )
 
-# 정책 묶음. 순서는 표시 순서다. plain은 기본으로 가리지 않는다.
-ENTITY_GROUPS: tuple[str, ...] = (
-    "name", "address", "birth", "student_id", "org", "place", "date", "event", "etc", "host", "plain",
-)
+# 정책 묶음. 순서는 표시 순서다. plain(나이)은 기본으로 가리지 않는다. host는 규칙이 찾는다(NER을 꺼도 적용).
+ENTITY_GROUPS: tuple[str, ...] = ("name", "address", "birth", "student_id", "org", "place", "etc", "host", "plain")
 DEFAULT_ENTITY_ACTIONS: dict[str, str] = {group: ("allow" if group == "plain" else "mask") for group in ENTITY_GROUPS}
 ENTITY_NAMES: dict[str, str] = {
     "name": "이름", "address": "주소", "birth": "생년월일", "student_id": "식별번호(학번·사번·여권번호 등)",
-    "org": "소속(학교·회사·병원 등)", "place": "장소", "date": "날짜", "event": "사건",
-    "etc": "기타(메신저·SNS 아이디 등)", "host": "IP·내부 주소", "plain": "시간·연도·나이·직함·과목",
+    "org": "소속(학교·회사·병원 등)", "place": "장소", "etc": "기타(메신저·SNS 아이디 등)", "host": "IP·내부 주소",
+    "plain": "나이",
 }
+RULE_GROUPS: frozenset[str] = frozenset({"host"})  # NER이 아니라 규칙이 찾는 묶음
+# 새 모델이 찾지 않아 뺀 묶음(2026-11-01). 예전 정책 파일의 entities.<묶음>.action은 읽되 효과가 없고, 새로 저장하지 못한다.
+RETIRED_ENTITY_GROUPS: tuple[str, ...] = ("date", "event")
+RETIRED_ENTITY_NAMES: dict[str, str] = {"date": "날짜", "event": "사건"}
 
 _GROUP_OF: dict[str, str] = {
     "NAME": "name",

@@ -33,21 +33,21 @@ numbers:
     action: mask
     visible: none
 
-# NER(이름·주소·소속 등)이 찾은 개체 묶음별 처리 (3c). ner_backend가 server일 때만 쓴다.
+# NER(이름·연락처·소속 등)과 규칙(IP·내부 주소)이 찾은 개체 묶음별 처리 (3c, 3e).
 #   action: allow(그대로 보여줌) | mask(가려서 보여줌, `[이름]`처럼 종류 이름으로) | ask_human | deny
-#   전화번호·이메일·비밀값을 NER이 찾으면 위 numbers 칸을 따른다(정규식이 같은 곳을 찾았으면 정규식이 우선).
+#   NER 묶음은 ner_backend가 server일 때만 쓴다. host는 규칙(gate/host_rules.py)이 찾아 NER을 꺼도 쓴다.
+#   전화번호·이메일을 NER이 찾으면 위 numbers 칸을 따른다(정규식이 같은 곳을 찾았으면 정규식이 우선).
+#   date(날짜)·event(사건)는 2026-11-01 NER 교체로 뺐다. 예전 정책 파일에 있으면 읽되 효과가 없고, 새로 지정할 수 없다.
 entities:
   name:        {action: mask}   # 이름 (상담사·가족·교수 이름 포함)
-  address:     {action: mask}   # 주소
+  address:     {action: mask}   # 주소 (NER 연락처 중 한글이 있는 상세 주소)
   birth:       {action: mask}   # 생년월일
-  student_id:  {action: mask}   # 학번
-  org:         {action: mask}   # 소속: 학교·학과/부서·회사/기관·병원·모임·사업 이름
+  student_id:  {action: mask}   # 식별번호: 학번·사번·여권번호·면허번호 등
+  org:         {action: mask}   # 소속: 학교·학과/부서·회사/기관·병원·모임 이름
   place:       {action: mask}   # 장소
-  date:        {action: mask}   # 날짜
-  event:       {action: mask}   # 사건
-  etc:         {action: mask}   # 기타 민감 정보
-  host:        {action: mask}   # IP 주소·내부 주소
-  plain:       {action: allow}  # 시간·연도·나이·직함·과목 (그것만으로는 사람을 좁히기 어려워 기본으로 보여 줌)
+  etc:         {action: mask}   # 기타: 메신저·SNS 아이디 같은 그 밖의 연락처
+  host:        {action: mask}   # IP 주소·내부 주소 (규칙으로 찾음, NER을 꺼도 적용)
+  plain:       {action: allow}  # 나이 (그것만으로는 사람을 좁히기 어려워 기본으로 보여 줌)
 
 # NER 서버(nerserve, README 참고). 끄면(none) 이름·주소 등은 가리지 않고 3b와 똑같이 동작한다.
 # 켜면(server) 가린 것이 있는 문서는 가린 결과를 Jev에 다시 물어, 안전하면 가린 채 보여 주고 아니면 사람에게 묻는다.
