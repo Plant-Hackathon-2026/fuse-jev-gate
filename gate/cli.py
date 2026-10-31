@@ -1,10 +1,10 @@
 """gate 명령: 게이트 데몬 실행(serve), 조회(ls, stat, cat, search), 사용자 정책(policy), 사람 승인(approve, deny),
-에이전트 작업 폴더 설정(workspace init), 설치 때 Claude Code 사용자 설정에 원본 보호 합치기(setup).
+에이전트 작업 폴더 설정(workspace init), 설치 때 Claude Code 사용자 설정에 원본 보호 합치기(setup), 감사 로그 보기(audit).
 
 소켓 경로는 --socket 또는 GATE_SOCKET, 정책 파일은 --policy 또는 GATE_POLICY로 지정한다.
 정책 파일이 없으면 기본 정책으로 동작하고, 데몬은 요청마다 정책 파일이 바뀌었는지 보고 다시 읽는다.
 policy는 소켓을 쓰지 않고 정책 파일을 직접 다룬다(gate.policy_cli). workspace init은 설정 파일만 만든다(gate.workspace).
-setup은 사용자 설정 파일만 고친다(gate.claude_setup).
+setup은 사용자 설정 파일만 고친다(gate.claude_setup). audit은 감사 로그를 읽기만 한다(gate.audit_cli).
 
 사람 승인(Phase 5)
   - serve는 맥이면 대화상자로 묻고(--no-dialog로 끔), 승인 소켓도 연다. 승인 소켓은 --approve-socket 또는
@@ -18,6 +18,7 @@ setup은 사용자 설정 파일만 고친다(gate.claude_setup).
     파일 해시는 같은 폴더의 audit.key로 만든 HMAC이다(없으면 만든다).
   - 기록에 실패해도 데몬은 계속 돈다. 응답은 이미 보낸 뒤라서 요청 결과에는 영향이 없고, stderr에 경고한다
     (실패가 이어지는 동안은 한 번만, 다시 기록되면 알린다).
+  - gate audit(--audit 또는 GATE_AUDIT)으로 사용자 터미널에서 본다. 최근·막힌 요청, 결정·경로·시각, 같은 내용의 파일로 거른다.
 """
 
 import argparse
@@ -29,7 +30,7 @@ import threading
 from pathlib import Path
 from typing import TextIO
 
-from gate import claude_setup, policy_cli, workspace
+from gate import audit_cli, claude_setup, policy_cli, workspace
 from gate.approval import Approvals, DialogChannel, Pending, clean_text, kinds_text
 from gate.audit import AuditLog
 from gate.client import ApprovalClient, GateClient
@@ -192,6 +193,7 @@ def main(argv: list[str] | None = None) -> int:
     policy_cli.register(sub)
     workspace.register(sub)
     claude_setup.register(sub)
+    audit_cli.register(sub)
 
     args = parser.parse_args(argv)
     if args.command == "policy":
@@ -200,6 +202,8 @@ def main(argv: list[str] | None = None) -> int:
         return workspace.run(args)
     if args.command == "setup":
         return claude_setup.run(args)
+    if args.command == "audit":
+        return audit_cli.run(args)
     if args.command in ("approve", "deny"):
         approve_socket = approve_socket_path(args.socket, args.approve_socket)
         if not approve_socket:

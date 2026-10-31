@@ -191,14 +191,21 @@ def load_or_create_key(path: str | os.PathLike) -> bytes:
     try:
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, _FILE_MODE)
     except FileExistsError:
-        with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC), "rb") as file:
-            key = file.read(KEY_BYTES + 1)
-        if len(key) != KEY_BYTES:
-            raise ValueError(f"감사 로그 키 파일이 {KEY_BYTES}바이트가 아닙니다: {path}") from None
+        pass
+    else:
+        key = secrets.token_bytes(KEY_BYTES)
+        with os.fdopen(fd, "wb") as file:
+            file.write(key)
         return key
-    key = secrets.token_bytes(KEY_BYTES)
-    with os.fdopen(fd, "wb") as file:
-        file.write(key)
+    return load_key(path)
+
+
+def load_key(path: str | os.PathLike) -> bytes:
+    """있는 HMAC 키를 읽기만 한다(만들지 않는다, 조회 명령용). 없으면 FileNotFoundError, 링크면 OSError, 길이가 다르면 ValueError."""
+    with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC), "rb") as file:
+        key = file.read(KEY_BYTES + 1)
+    if len(key) != KEY_BYTES:
+        raise ValueError(f"감사 로그 키 파일이 {KEY_BYTES}바이트가 아닙니다: {path}")
     return key
 
 
@@ -209,7 +216,7 @@ def _write_all(fd: int, data: bytes) -> None:
 
 
 def read_records(path: str | os.PathLike) -> list[dict]:
-    """감사 로그를 읽어 기록 목록을 돌려준다(테스트와 나중의 조회 명령용).
+    """감사 로그를 읽어 기록 목록을 돌려준다(테스트용. 조회 명령 gate audit은 깨진 줄을 건너뛰고 알린다).
 
     깨진 줄(UTF-8·JSON이 아니거나 JSON 객체가 아닌 줄, 빈 줄 포함)은 건너뛰지 않고 ValueError로 알린다. 메시지에는 줄 번호만 넣는다.
     """
