@@ -510,6 +510,24 @@
     setAddButton(why);
   }
 
+  // 터미널에 그대로 붙여 넣을 수 있게, 띄어쓰기 같은 글자가 든 경로는 작은따옴표로 감싼다.
+  function shellPath(path) {
+    return /^[\w\/.\-가-힣]+$/.test(path) ? path : "'" + path.replace(/'/g, "'\\''") + "'";
+  }
+
+  // 폴더마다 디스크 경로와 에이전트가 읽는 경로를 이름표와 함께 보여 준다(사용자 결정, 2026-11-01).
+  // 보호만 남은 폴더는 에이전트가 읽을 수 없으니 디스크 경로만 보여 준다.
+  function folderPaths(f) {
+    var dl = h("dl", { class: "mpaths" },
+      h("dt", { text: "디스크 경로" }), h("dd", { class: "mono", text: f.path }));
+    if (f.connected) {
+      dl.appendChild(h("dt", { text: "에이전트가 읽는 경로" }));
+      dl.appendChild(h("dd", null, h("code", { text: f.vpath }), h("span", { class: "sep", text: " · " }),
+        h("code", { text: "plant cat " + shellPath(f.vpath + "/파일이름") })));
+    }
+    return dl;
+  }
+
   function folderRow(f, editedWorkspace) {
     var kept = !f.connected;
     var stale = f.unprotected_workspaces || [];
@@ -519,7 +537,8 @@
     var meta = [];
     if (f.exists) meta.push(fileCountText(f.file_count, f.file_count_capped));
     if (f.added_at) {
-      meta.push("추가 " + when(f.added_at, true) + (f.added_by === "ui" ? " · 화면에서" : (f.added_by === "terminal" ? " · 터미널에서" : "")));
+      meta.push("추가 " + when(f.added_at, true));
+      if (f.added_by === "ui" || f.added_by === "terminal") meta.push(f.added_by === "ui" ? "화면에서" : "터미널에서");
     }
     var desc = kept ? "PLANT에서는 뺐고, 에이전트가 이 폴더를 직접 여는 것만 막고 있어요. 다시 연결하려면 [폴더 추가]에서 같은 폴더를 고르세요."
       : (!f.exists ? "폴더를 찾을 수 없어요. 외장 디스크를 뺐거나 폴더를 옮기거나 지웠을 수 있어요. 그동안 PLANT 목록에는 보이지 않아요." : null);
@@ -539,10 +558,9 @@
       h("code", { text: "plant workspace init --force" }), "로 다시 만들어 주세요.")) : null;
     return h("div", { class: "mrow" + (kept ? " kept" : "") },
       h("div", { class: "mmain" },
-        h("div", { class: "mtitle" }, h("span", { class: "name", text: f.name }),
-          h("code", { class: "vpath", title: "PLANT 안 경로", text: f.vpath }), tags),
-        h("span", { class: "mpath" }, h("span", { class: "sr-only", text: "실제 경로 " }), f.path),
-        meta.length ? h("div", { class: "mmeta" }, meta.map(function (m) { return h("span", { text: m }); })) : null,
+        h("div", { class: "mtitle" }, h("span", { class: "name", text: f.name }), tags),
+        folderPaths(f),
+        meta.length ? h("p", { class: "mmeta", text: meta.join(" · ") }) : null,
         desc ? h("p", { class: "mdesc", text: desc }) : null),
       button ? h("div", { class: "mside" }, button) : null,
       warn);
@@ -569,11 +587,14 @@
     box.focus();
   }
 
+  // 확인 창의 경로도 목록 줄과 같은 이름표(디스크 경로·에이전트가 읽는 경로)로 보여 준다.
   function mountDialog(p, again) {
-    var facts = [["PLANT 안 이름", p.name + "  (" + p.vpath + ")"], ["실제 경로", p.path, true]];
+    var disk = ["디스크 경로", p.path, true];
     var lead = again ? "그사이 상태가 바뀌어 다시 계산했어요. 바뀐 내용을 보고 다시 확인해 주세요. " : "";
     var places = p.workspaces && p.workspaces.length ? p.workspaces.length + "곳" : "없음";
+    var facts;
     if (p.op === "add") {
+      facts = [disk, ["에이전트가 읽을 경로", p.vpath, true]];
       facts.push(["파일 수", fileCountText(p.file_count, p.file_count_capped)]);
       facts.push(["직접 열기를 막을 작업 폴더", places]);
       var folderName = (p.path.split("/").pop() || "").normalize("NFC");
@@ -582,7 +603,7 @@
         lead: lead + "연결하면 에이전트가 PLANT를 거쳐 이 폴더 문서를 읽을 수 있어요. 정책대로 가리거나 물어봐요. " +
           "동시에 작업 폴더 설정에서 이 폴더를 직접 열지 못하게 막아요.",
         facts: facts,
-        items: folderName && folderName !== p.name.normalize("NFC") ? ["같은 이름이 이미 있어 PLANT 안 이름 뒤에 숫자를 붙였어요."] : [],
+        items: folderName && folderName !== p.name.normalize("NFC") ? ["같은 이름이 이미 있어 에이전트가 읽을 경로의 이름 뒤에 숫자를 붙였어요."] : [],
         warn: p.workspaces && p.workspaces.length ? null
           : "등록된 작업 폴더가 없어 직접 열기는 막지 못해요. 터미널에서 `plant workspace init`으로 작업 폴더를 먼저 만들면 함께 막아요.",
         yes: p.reconnect ? "다시 연결" : "연결"
@@ -592,12 +613,13 @@
       return {
         title: "이 폴더를 PLANT에서 뺄까요?",
         lead: lead + "PLANT에서 이 폴더를 빼요. 에이전트는 이 폴더 문서를 더는 PLANT로 읽지 못해요. 직접 열기 막기는 남겨 둬요.",
-        facts: facts,
+        facts: [disk, ["에이전트가 읽던 경로", p.vpath, true]],
         items: ["뺀 폴더는 “보호만 남음”으로 남아요. 다시 연결하려면 [폴더 추가]에서 같은 폴더를 고르세요."],
         yes: "빼기"
       };
     }
-    facts.push(["다시 쓸 작업 폴더", places]);
+    // 보호만 남은 폴더는 에이전트가 PLANT로 읽지 못하므로 디스크 경로만 보여 준다(목록 줄과 같다).
+    facts = [["이름", p.name], disk, ["다시 쓸 작업 폴더", places]];
     return {
       title: "이 폴더의 보호도 풀까요?",
       lead: lead + "목록에서 이 폴더를 지우고, 작업 폴더 설정의 직접 열기 막기도 풀어요.",

@@ -701,6 +701,30 @@ def test_screen_script_has_mount_flows_and_plan_texts():
     assert "path:" not in js.split('confirmMount("mounts/add"', 1)[1].split(")", 1)[0]
 
 
+def test_folder_rows_show_disk_path_and_agent_path():
+    """폴더 줄은 이름표가 붙은 두 줄(디스크 경로, 에이전트가 읽는 경로 + plant cat 예)을 보여 준다. 보호만 남은 폴더는
+    디스크 경로만. 제목 옆의 작은 PLANT 안 경로 칩은 둘째 줄과 겹쳐 없앴다(사용자 결정, 2026-11-01)."""
+    js = static_text("app.js")
+    paths = js.split("function folderPaths(f)", 1)[1].split("\n  }\n", 1)[0]
+    assert paths.index('"디스크 경로"') < paths.index("if (f.connected)") < paths.index('"에이전트가 읽는 경로"')
+    assert '"plant cat " + shellPath(f.vpath + "/파일이름")' in paths
+    row = js.split("function folderRow(f, editedWorkspace)", 1)[1].split("\n  }\n", 1)[0]
+    assert "folderPaths(f)" in row and "vpath" not in row and "mpath\"" not in row
+    dialog = js.split("function mountDialog(p, again)", 1)[1].split("\n  }\n", 1)[0]
+    assert "PLANT 안 이름" not in dialog and "실제 경로" not in dialog
+    for label in ('"디스크 경로"', '"에이전트가 읽을 경로"', '"에이전트가 읽던 경로"'):
+        assert label in dialog, label
+    css = static_text("app.css")
+    assert ".mpaths {" in css and ".vpath" not in css and ".mpath " not in css
+
+
+def test_shell_path_quotes_only_when_needed():
+    """plant cat 예의 경로: 영문·숫자·한글·/._- 말고 다른 글자(띄어쓰기 등)가 있으면 작은따옴표로 감싼다."""
+    body = static_text("app.js").split("function shellPath(path) {", 1)[1].split("\n  }\n", 1)[0]
+    assert r"/^[\w\/.\-가-힣]+$/.test(path) ? path : " in body
+    assert """"'" + path.replace(/'/g, "'\\\\''") + "'\"""" in body
+
+
 def test_screen_text_uses_polite_tone():
     for name in ("index.html", "app.js"):
         assert "니다" not in static_text(name), name
