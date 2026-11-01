@@ -75,12 +75,12 @@ class JevDecision:
 
     def __post_init__(self) -> None:
         if not isinstance(self.label, str) or self.label not in LABELS:
-            raise JevError(f"Jev 응답의 라벨이 {', '.join(LABELS)} 중 하나가 아닙니다")
+            raise JevError(f"판단 모델 응답의 라벨이 {', '.join(LABELS)} 중 하나가 아닙니다")
         c = self.confidence
         if isinstance(c, bool) or not isinstance(c, (int, float)) or not math.isfinite(c) or not 0.0 <= c <= 1.0:
-            raise JevError("Jev 응답의 확신도가 0.0~1.0 사이 숫자가 아닙니다")
+            raise JevError("판단 모델 응답의 확신도가 0.0~1.0 사이 숫자가 아닙니다")
         if not isinstance(self.raw, dict):
-            raise JevError("Jev 응답 원문(raw)은 dict여야 합니다")
+            raise JevError("판단 모델 응답 원문(raw)은 dict여야 합니다")
         object.__setattr__(self, "confidence", float(c))
 
 
@@ -247,7 +247,7 @@ class FailClosedJevClient:
     def __init__(self, inner: JevClient, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> None:
         if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) \
                 or timeout <= 0:
-            raise JevError("Jev 타임아웃은 0보다 큰 숫자(초)여야 합니다")
+            raise JevError("판단 모델 타임아웃은 0보다 큰 숫자(초)여야 합니다")
         self.inner = inner
         self.timeout = float(timeout)
 
@@ -264,14 +264,14 @@ class FailClosedJevClient:
         worker.start()
         worker.join(self.timeout)
         if not outcome:
-            raise JevError(f"Jev 응답이 {self.timeout:g}초 안에 오지 않았습니다")
+            raise JevError(f"판단 모델 응답이 {self.timeout:g}초 안에 오지 않았습니다")
         ok, value = outcome[0]
         if not ok:
             if isinstance(value, JevError):
                 raise value
-            raise JevError(f"Jev 호출 중 오류가 났습니다: {type(value).__name__}") from value
+            raise JevError(f"판단 모델 호출 중 오류가 났습니다: {type(value).__name__}") from value
         if not isinstance(value, JevDecision):
-            raise JevError(f"Jev 응답 형식이 올바르지 않습니다: {type(value).__name__}")
+            raise JevError(f"판단 모델 응답 형식이 올바르지 않습니다: {type(value).__name__}")
         return value
 
     def cache_tag(self) -> str:
@@ -280,7 +280,7 @@ class FailClosedJevClient:
         except JevError:
             raise
         except Exception as exc:
-            raise JevError(f"Jev 모델 식별값을 만들 수 없습니다: {type(exc).__name__}") from exc
+            raise JevError(f"판단 모델 식별값을 만들 수 없습니다: {type(exc).__name__}") from exc
 
 
 # --- Laya: 로컬 laya-serve에 묻는 백엔드 ---
@@ -421,7 +421,7 @@ class LayaJevClient:
             raise JevError("laya 백엔드는 JEV_BASE_URL(laya-serve 주소, 예: http://127.0.0.1:8000)이 필요합니다")
         if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) \
                 or timeout <= 0:
-            raise JevError("Jev 타임아웃은 0보다 큰 숫자(초)여야 합니다")
+            raise JevError("판단 모델 타임아웃은 0보다 큰 숫자(초)여야 합니다")
         if isinstance(window_chars, bool) or not isinstance(window_chars, int) or window_chars < 1:
             raise JevError("window_chars는 1 이상인 정수여야 합니다")
         self._endpoint = laya_endpoint(raw_url)
@@ -553,11 +553,11 @@ def make_client(name: str, *, timeout: float = DEFAULT_TIMEOUT_SECONDS, **option
     """이름으로 백엔드를 골라 FailClosedJevClient로 감싸 돌려준다. 모르는 이름이나 잘못된 옵션은 JevError."""
     factory = _BACKENDS.get(name)
     if factory is None:
-        raise JevError(f"알 수 없는 Jev 백엔드: {name!r} (사용 가능: {', '.join(available_backends())})")
+        raise JevError(f"알 수 없는 판단 모델 백엔드: {name!r} (사용 가능: {', '.join(available_backends())})")
     try:
         inner = factory(timeout=timeout, **options) if name in _NETWORK_BACKENDS else factory(**options)
     except JevError:
         raise
     except Exception as exc:
-        raise JevError(f"Jev 백엔드 {name!r}를 만들 수 없습니다: {type(exc).__name__}") from exc
+        raise JevError(f"판단 모델 백엔드 {name!r}를 만들 수 없습니다: {type(exc).__name__}") from exc
     return FailClosedJevClient(inner, timeout)

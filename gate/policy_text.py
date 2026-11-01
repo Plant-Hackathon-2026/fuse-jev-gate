@@ -137,7 +137,7 @@ _ENTITY_ACTION_NOTES = {
     "deny": "{finder}이 이 정보를 찾은 파일은 읽기를 거부해요.",
     "ask_human": "{finder}이 이 정보를 찾은 파일은 사람에게 물어본 뒤 보여줘요(허용해도 이 정보는 가린 채로 보여줘요).",
     "mask": "{finder}이 찾은 부분을 {sample}처럼 종류 이름으로 바꿔 보여줘요.",
-    "allow": "{finder}이 찾아도 가리지 않아요. 다만 판단 모델(Jev)이 문서를 민감하다고 보면 사람에게 묻거나 막을 수 있어요.",
+    "allow": "{finder}이 찾아도 가리지 않아요. 다만 판단 모델이 문서를 민감하다고 보면 사람에게 묻거나 막을 수 있어요.",
 }
 UNSUPPORTED_ENTITY_MESSAGE = (
     "지금은 날짜·사건·시간·연도·직함·과목을 따로 찾지 않아요. 그래서 저장하지 않았어요.\n"
@@ -278,7 +278,7 @@ def interpret(
             message = (
                 "이렇게 이해했어요:\n"
                 f"  맥락 규칙: \"{text}\"\n"
-                "  파일을 보여 줄지 Jev가 판단할 때 이 문장을 그대로 함께 봐요."
+                "  파일을 보여 줄지 판단 모델이 정할 때 이 문장을 그대로 함께 봐요."
             )
             return Interpretation("context", text, message, entry, tuple(steps))
         if kind_of_sentence == "entity":

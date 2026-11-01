@@ -286,16 +286,16 @@ class Inspector:
             jev_effective = "allow" if jev.label == "safe" else "ask_human"
         final = strictest(by_path, by_number, by_entity, jev_effective)
         if final == "deny":
-            reason = jev.error or f"Jev 판단({jev.label}, 확신도 {jev.confidence:.2f})에 따라 차단했습니다"
+            reason = jev.error or f"판단 모델 결과({jev.label}, 확신도 {jev.confidence:.2f})에 따라 차단했습니다"
             return Verdict(Judgment("deny", reason, "jev", **common, **jev_info))
         if final == "ask_human":
             if by_path == "ask_human":
                 stage, reason = "path", "경로 규칙에 따라 사람에게 물어봅니다"
             elif jev_effective == "ask_human" and recheck:
-                stage, reason = "jev", (f"가린 뒤에도 Jev가 가려지지 않은 정보가 남았다고 판단했습니다"
+                stage, reason = "jev", (f"가린 뒤에도 판단 모델이 가려지지 않은 정보가 남았다고 판단했습니다"
                                         f"({jev.label}, 확신도 {jev.confidence:.2f})")
             elif jev_effective == "ask_human":
-                stage, reason = "jev", f"Jev 판단({jev.label}, 확신도 {jev.confidence:.2f})이 확실하지 않습니다"
+                stage, reason = "jev", f"판단 모델 결과({jev.label}, 확신도 {jev.confidence:.2f})가 확실하지 않습니다"
             else:
                 asked = {k: n for k, n in counts.items() if policy.slot_rule(k) == "ask_human"}
                 stage = "number" if by_number == "ask_human" else "entity"
@@ -305,7 +305,7 @@ class Inspector:
         if counts:
             reason = f"{_kind_names(counts)}을(를) 가렸습니다"
             if recheck and jev is not None:
-                reason += f" (가린 뒤 Jev 판단 {jev.label}, 확신도 {jev.confidence:.2f})"
+                reason += f" (가린 뒤 판단 모델 결과 {jev.label}, 확신도 {jev.confidence:.2f})"
             return Verdict(Judgment("mask", reason + note, "jev", **common, **jev_info), shown, codec)
         return Verdict(Judgment("allow", "허용했습니다" + note, "jev", **common, **jev_info), data, codec)
 
@@ -391,7 +391,7 @@ class Inspector:
             client = self._client(policy)
             model_tag = cache_tag(client) + (f"|{ner_model}" if ner_model else "")
         except Exception as exc:
-            return _JevResult("deny", None, None, 0, False, f"Jev를 준비하지 못해 차단했습니다: {_safe_error(exc)}")
+            return _JevResult("deny", None, None, 0, False, f"판단 모델을 준비하지 못해 차단했습니다: {_safe_error(exc)}")
         key = CacheKey.build(digest, policy.version, path, peer.exe if peer else None, purpose, model_tag)
         hit = self.cache.get(key)
         if hit is not None:
@@ -406,9 +406,9 @@ class Inspector:
             try:
                 decision = client.judge(chunk.decode("utf-8"), context)
                 if not isinstance(decision, JevDecision):
-                    raise JevError(f"Jev 응답 형식이 올바르지 않습니다: {type(decision).__name__}")
+                    raise JevError(f"판단 모델 응답 형식이 올바르지 않습니다: {type(decision).__name__}")
             except Exception as exc:
-                return _JevResult("deny", None, None, calls, False, f"Jev 판단에 실패해 차단했습니다: {_safe_error(exc)}")
+                return _JevResult("deny", None, None, calls, False, f"판단 모델 검사에 실패해 차단했습니다: {_safe_error(exc)}")
             action = jev_action(policy, decision)
             # 동작이 같으면 safe가 아닌 답을 남긴다. 그래야 조각 하나라도 민감하면 label이 safe가 아니다(3c ②가 label을 본다)
             rank = (ACTIONS.index(action), decision.label != "safe")

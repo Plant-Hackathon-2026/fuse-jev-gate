@@ -30,7 +30,7 @@
 [원본 폴더]  ← 에이전트 세션은 Claude Code 권한 규칙 + 샌드박스로 직접 못 읽음
      ▲ 원본 읽기 (데몬은 샌드박스 밖, 내 계정 권한)
 [게이트 데몬]  gate serve
-     │  경로 규칙 → 인코딩 확인 → 정규식 탐지·가림 → IP·내부 주소 규칙 → NER 가림(기본 켜짐) → Jev 판단(캐시) → 정책 → 사람 승인 → 감사 로그
+     │  경로 규칙 → 인코딩 확인 → 정규식 탐지·가림 → IP·내부 주소 규칙 → NER 가림(기본 켜짐) → 판단 모델(캐시) → 정책 → 사람 승인 → 감사 로그
      ▲ Unix 소켓 gate.sock (요청자 PID·UID 확인)
      └── gate CLI    Claude Code가 Bash로 실행 (샌드박스 안에서 이 소켓 하나만 열 수 있음)
 [Claude Code]  에이전트 세션
@@ -51,7 +51,7 @@
 4. **정규식 탐지.** 주민·외국인등록번호, 카드번호, 휴대폰·일반 전화번호, 이메일, 계좌번호, 비밀값(비밀번호·API 키·토큰·개인 키, URL 속 비밀번호)을 찾아 같은 길이의 `*`로 가립니다. 종류마다 가림·사람 승인·거부를 정할 수 있습니다.
 5. **IP·내부 주소 규칙.** IPv4·IPv6와 내부 호스트 이름(`db.internal`, `wiki.intra.example.co.kr` 등)을 찾아 `[IP]`·`[내부 주소]`로 가립니다. NER을 꺼도 적용됩니다.
 6. **NER 가림(기본 켜짐).** 로컬 NER 서버가 이름·연락처·식별번호·소속·장소·생년월일 등을 찾아 `[이름]`, `[소속]`처럼 종류 이름으로 가립니다. NER 서버가 응답하지 않으면 그 파일은 차단합니다. 자세한 내용은 [이름·주소 가리기 (NER)](#이름주소-가리기-ner).
-7. **Jev 판단.** 가린 내용을 판단 모델(기본 Mock, 실제 모델은 Laya)에 보내 `safe`·`sensitive`·`highly_sensitive`와 확신도를 받습니다. 같은 파일·정책·요청·모델이면 캐시를 씁니다. 판단 모델이 실패하면 차단합니다.
+7. **판단 모델.** 가린 내용을 판단 모델(기본 Mock, 실제 모델은 Laya)에 보내 `safe`·`sensitive`·`highly_sensitive`와 확신도를 받습니다. 같은 파일·정책·요청·모델이면 캐시를 씁니다. 판단 모델이 실패하면 차단합니다.
 8. **정책.** 기본값은 `safe`이고 확신도 0.95 이상이면 허용, 민감이고 0.95 이상이면 거부, 그 사이면 사람에게 묻습니다. NER이 켜져 있고 가린 것이 있으면, 판단 모델은 가린 결과를 보고 안전하면 가린 채 보여 주고 아니면 사람에게 묻습니다.
 9. **사람 승인.** 맥 대화상자나 내 터미널에서 답합니다. 30초 안에 답이 없으면 차단합니다.
 10. **감사 로그.** 원문 없이 요청 한 줄을 남깁니다.
@@ -96,7 +96,7 @@ export GATE_SOCKET=$DATA/run/gate.sock GATE_POLICY=$DATA/policy.yaml GATE_AUDIT=
 
 ## 빠른 시작
 
-저장소의 합성 샘플(`samples/`)로 게이트를 직접 돌려 봅니다. 아래 결과는 실제로 돌려서 확인했습니다(Mock Jev, NER 끔, 그 밖은 기본 정책).
+저장소의 합성 샘플(`samples/`)로 게이트를 직접 돌려 봅니다. 아래 결과는 실제로 돌려서 확인했습니다(판단 모델 Mock, NER 끔, 그 밖은 기본 정책).
 
 NER은 기본으로 켜져 있어서, NER 서버(`nerserve`)가 없으면 데몬이 모든 내용 읽기를 막습니다(`gate cat`마다 `NER 판단에 실패해 차단했습니다: NER 서버에 연결하지 못했습니다`). NER까지 보려면 [이름·주소 가리기 (NER)](#이름주소-가리기-ner)대로 nerserve를 **데몬보다 먼저** 띄웁니다. 모델 없이 해 보려면 아래처럼 데몬을 띄우기 전에 NER을 끕니다(정책을 느슨하게 하는 바꿈이라 한 번 더 묻습니다. `y`로 답합니다).
 
@@ -128,14 +128,14 @@ $ gate cat /medical_note/none_1.txt              # 허용: 개인정보가 없�
 [외래 운영 메모] 내과 외래 / 2026-01-15
 ...
 
-$ gate cat /medical_note/pii_1.txt               # 차단: Jev가 매우 민감하다고 판단
-gate: /medical_note/pii_1.txt: Jev 판단(highly_sensitive, 확신도 0.97)에 따라 차단했습니다 (EACCES)
+$ gate cat /medical_note/pii_1.txt               # 차단: 판단 모델이 매우 민감하다고 판단
+gate: /medical_note/pii_1.txt: 판단 모델 결과(highly_sensitive, 확신도 0.97)에 따라 차단했습니다 (EACCES)
 
 $ gate cat /.env                                 # 차단: 경로 규칙
 gate: /.env: 경로 규칙에 따라 차단했습니다 (EACCES)
 
 $ gate search 진료 /medical_note                  # 통과한 파일에서만 찾고, 막힌 파일은 건너뜀
-gate: 건너뜀 /medical_note/pii_1.txt: Jev 판단(highly_sensitive, 확신도 0.97)에 따라 차단했습니다 (EACCES)
+gate: 건너뜀 /medical_note/pii_1.txt: 판단 모델 결과(highly_sensitive, 확신도 0.97)에 따라 차단했습니다 (EACCES)
 ...
 /medical_note/none_2.txt:1:[진료 참고 메모] 성인 고혈압 첫 진료 때 확인할 것 (내부 교육용)
 
@@ -148,7 +148,7 @@ $ gate cat /안내문.txt                            # 사람 승인: 답할 때
 $ gate approve                                   # 기다리는 요청 목록
 기다리는 승인 요청 1건
   [6e5a98] /안내문.txt  (남은 시간 28초)
-     이유: Jev 판단(sensitive, 확신도 0.80)이 확실하지 않습니다
+     이유: 판단 모델 결과(sensitive, 확신도 0.80)가 확실하지 않습니다
   ...
 $ gate approve 6e5a98                            # 이번만 허용 (--folder면 그 폴더 60분)
 ```
@@ -166,12 +166,12 @@ gate: 개인정보 일부를 같은 길이의 *로 가렸습니다 (휴대폰 �
 
 ```console
 $ gate audit --blocked
-2026-10-31 17:34:39  cat     차단       /medical_note/pii_1.txt  — Jev 판단(highly_sensitive, 확신도 0.97)에 따라 차단했습니다 · 찾음: 주민등록번호 1건, 휴대폰 번호 1건 · ...
+2026-10-31 17:34:39  cat     차단       /medical_note/pii_1.txt  — 판단 모델 결과(highly_sensitive, 확신도 0.97)에 따라 차단했습니다 · 찾음: 주민등록번호 1건, 휴대폰 번호 1건 · ...
 2026-10-31 17:34:40  cat     차단       /.env  — 경로 규칙에 따라 차단했습니다 · python3.12 pid 25259
 기록 6건 중 조건에 맞는 2건 · 차단 2
 ```
 
-지금 Jev는 Mock이라 판단은 키워드 규칙으로 나옵니다. 그래서 번호가 든 문서는 대부분 승인이나 차단으로 끝나고, 가린 내용은 승인한 뒤에 보입니다. 데몬은 `Ctrl-C`로 끕니다. NER을 다시 켜려면 `gate policy set ner_backend server`입니다.
+지금 판단 모델은 Mock이라 결과가 키워드 규칙으로 나옵니다. 그래서 번호가 든 문서는 대부분 승인이나 차단으로 끝나고, 가린 내용은 승인한 뒤에 보입니다. 데몬은 `Ctrl-C`로 끕니다. NER을 다시 켜려면 `gate policy set ner_backend server`입니다.
 
 ## Claude Code 연결
 
@@ -244,6 +244,7 @@ gate setup --source $DATA/source --print   # 합칠 설정 조각(JSON)만 출�
 | `JEV_API_KEY` | laya-serve에 `LAYA_API_KEY`를 걸었을 때만 같은 값 |
 | `JEV_QUESTION` | 질문이 여러 개인 체크포인트에서 쓸 질문 ID. 기본은 질문이 하나면 그것, 여럿이면 `has_pii` |
 
+- 설정 이름(`jev_backend`, `jev_timeout_seconds`, `JEV_BASE_URL` 등)에는 판단 모델의 예전 이름 jev가 남아 있습니다. 적을 때는 이 이름 그대로 씁니다.
 - v3에는 질문이 9개 있습니다. 게이트는 그중 `has_pii`("특정 개인을 식별하거나 식별에 도움이 되는 정보가 가려지지 않은 채 포함되어 있는가?") 하나만 묻고 예/아니오 확률 p를 받습니다. 기본 정책으로는 p ≤ 0.05면 허용, p ≥ 0.95면 차단, 그 사이는 사람에게 묻습니다. 이전 체크포인트(질문 하나)도 그대로 쓸 수 있습니다.
 - 문서는 450자 안팎 조각으로 나눠 묻고 가장 높은 p를 씁니다. laya-serve가 꺼져 있거나 답이 이상하면 차단합니다.
 - **체크포인트 바꾸기:** 새 폴더로 바꾸고 laya-serve를 다시 띄운 뒤 `uv run python -m eval.run_eval --client laya`로 샘플 36개를 다시 평가합니다. 데몬은 다시 띄우지 않아도 됩니다.
@@ -321,7 +322,7 @@ gate policy add "주민번호는 생년월일까지만 보여줘"      # 문장 
 gate policy add "비밀번호가 있는 파일은 거부해줘"
 gate policy add "이름은 가려줘"                       # NER 묶음 (entities.name.action = mask)
 gate policy add "학번이 있는 파일은 물어보고 보여줘"
-gate policy add "병원 기록은 보여주지 마"               # 맥락 규칙 (Jev 질문에 그대로 넣음)
+gate policy add "병원 기록은 보여주지 마"               # 맥락 규칙 (판단 모델 질문에 그대로 넣음)
 gate policy set numbers.email.action deny          # 문장 해석 없이 바로 지정
 gate policy set path "가계부/**" deny               # 경로 규칙 (allow | ask_human | deny)
 gate policy remove 2                               # show의 번호로 지우기
@@ -356,7 +357,7 @@ gate --socket $DATA/run/gate.sock ui --policy $DATA/policy.yaml --audit $DATA/au
 
 ## 사람 승인
 
-Jev 확신도가 애매하거나, 내가 경로·번호 종류에 `ask_human`을 정한 파일이면 사람에게 묻습니다.
+판단 모델의 확신도가 애매하거나, 내가 경로·번호 종류에 `ask_human`을 정한 파일이면 사람에게 묻습니다.
 
 - **맥 대화상자**: 거부 · 이번만 허용 · 이 폴더 허용. `gate serve --no-dialog`로 끕니다.
 - **터미널**: `gate approve`(목록), `gate approve <id> [--folder]`, `gate deny <id>`. 답하는 명령은 실제 터미널에서만 받습니다.
@@ -378,7 +379,7 @@ $ gate audit --file ~/문서/계약서.pdf  # 이 파일과 내용이 같은 파
 $ gate audit --json                # 고른 기록을 JSONL 그대로 (스크립트용)
 ```
 
-- **남기는 것**: 시각, 요청자 PID·UID·프로그램, 연산, 게이트 안 경로, 오류, 결정과 이유, 결정 단계, 정책 버전, 파일 해시, 종류별 탐지 건수, Jev 라벨·확신도·호출 수, 캐시 여부, 사람 승인 결과와 답한 곳, 걸린 시간. 키 목록과 규칙은 [`gate/audit.py`](gate/audit.py) 맨 위 설명에 있습니다.
+- **남기는 것**: 시각, 요청자 PID·UID·프로그램, 연산, 게이트 안 경로, 오류, 결정과 이유, 결정 단계, 정책 버전, 파일 해시, 종류별 탐지 건수, 판단 모델 라벨·확신도·호출 수, 캐시 여부, 사람 승인 결과와 답한 곳, 걸린 시간. 키 목록과 규칙은 [`gate/audit.py`](gate/audit.py) 맨 위 설명에 있습니다.
 - **남기지 않는 것**: 원문, 탐지한 값, 에이전트가 밝힌 목적.
 - **파일 해시**는 SHA-256이 아니라 `HMAC-SHA256(audit.key, SHA-256(내용))`입니다. "연락처 010-xxxx-xxxx"처럼 짧고 틀이 정해진 파일은 SHA-256만 보고 후보를 넣어 원문을 맞혀 볼 수 있기 때문입니다. 키는 설치마다 만드는 32바이트 난수입니다. `gate audit --file`은 이 키로 파일을 맞춰 봅니다.
 - 파일은 0600, 폴더는 0700이고 심볼릭 링크로 바꿔치기한 경로에는 쓰지 않습니다. 돌려 쓰기(rotation)는 없습니다. `gate audit`은 읽기만 하고, 깨진 줄은 건너뛰고 줄 번호를 알려 줍니다.
@@ -408,7 +409,7 @@ uv run python -m sandbox.bypass --settings 시험.json --workspace $DATA/plain-p
 ## 테스트
 
 ```bash
-uv run pytest                     # 맥: 1896 통과, 1 skip(FUSE), 약 40초 (사람 승인 시간 초과를 실제로 기다림)
+uv run pytest                     # 맥: 1904 통과, 1 skip(FUSE), 약 40초 (사람 승인 시간 초과를 실제로 기다림)
 
 docker build -f sandbox/gate.Dockerfile -t fuse-jev-gate .
 docker run --rm --device /dev/fuse --cap-add SYS_ADMIN fuse-jev-gate pytest -q    # Linux (FUSE 포함): 맥 통과 수 + FUSE 1개
@@ -453,7 +454,7 @@ gate/
   detectors.py                                 정규식 탐지와 같은 길이 가림
   host_rules.py                                IP·내부 주소 규칙
   ner_client.py, ner_spans.py                  NER 클라이언트(라벨 나누기·정책 칸·가림 표시), 범위 다듬기
-  jev_client.py                                Jev 인터페이스(답 + 확신도), Mock, Laya(laya-serve)
+  jev_client.py                                판단 모델 인터페이스(답 + 확신도), Mock, Laya(laya-serve)
   policy.py, policy_text.py, policy_cli.py     정책 기본값·파일, 문장 해석기, gate policy
   approval.py                                  사람 승인(대화상자, 승인 소켓)
   audit.py, audit_cli.py                       감사 로그, gate audit

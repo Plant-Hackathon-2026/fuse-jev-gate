@@ -87,10 +87,10 @@ def test_table_shows_every_record_in_file_order_with_korean_labels(log, capsys):
     assert len(lines) == len(EVENTS)
     when = (START + timedelta(minutes=1)).astimezone().strftime("%Y-%m-%d %H:%M:%S")
     assert lines[1].startswith(f"{when}  cat     가림       /이력서/resume.txt  — ")
-    assert "가림: 휴대폰 번호 1건" in lines[1] and "Jev safe 0.93" in lines[1] and "python3.12 pid 4321" in lines[1]
+    assert "가림: 휴대폰 번호 1건" in lines[1] and "판단 모델 safe 0.93" in lines[1] and "python3.12 pid 4321" in lines[1]
     assert "차단" in lines[2] and "경로 규칙으로 거부합니다 (*.env)" in lines[2]
     assert "허용" in lines[3] and "승인: 이 폴더 허용(대화상자)" in lines[3]
-    assert "승인: 무응답(시간 초과)" in lines[4] and "Jev sensitive 0.71 (캐시)" in lines[4]
+    assert "승인: 무응답(시간 초과)" in lines[4] and "판단 모델 sensitive 0.71 (캐시)" in lines[4]
     assert "오류" in lines[5] and "접근 거부 (EACCES)" in lines[5]
     assert "없는 경로 (ENOENT)" in lines[6]
     assert "승인: 폴더 승인 기억" in lines[7] and "(대화상자)" not in lines[7]

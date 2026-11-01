@@ -244,7 +244,7 @@ def test_make_client_registered_backends():
 
 @pytest.mark.parametrize("name", ["jev", "typesafe", "", "MOCK"])
 def test_make_client_unknown_backend(name):
-    with pytest.raises(JevError, match="알 수 없는 Jev 백엔드"):
+    with pytest.raises(JevError, match="알 수 없는 판단 모델 백엔드"):
         make_client(name)
 
 

@@ -33,7 +33,7 @@ from gate.daemon import ApprovalServer
 
 
 def request(path="/상담/메모.txt", timeout=2.0, session_minutes=60, **kw) -> ApprovalRequest:
-    fields = dict(folder="/상담", reason="Jev 판단(sensitive, 확신도 0.70)이 확실하지 않습니다",
+    fields = dict(folder="/상담", reason="판단 모델 결과(sensitive, 확신도 0.70)가 확실하지 않습니다",
                   exe="/usr/bin/python3", pid=4321, purpose="요약", findings={"mobile": 1})
     fields.update(kw)
     return ApprovalRequest(path, timeout_seconds=timeout, session_minutes=session_minutes, **fields)
