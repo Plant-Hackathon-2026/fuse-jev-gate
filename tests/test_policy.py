@@ -464,9 +464,9 @@ def test_loosened_is_empty_for_stricter_changes():
 def test_describe_setting_is_korean():
     assert describe_setting("numbers.rrn.visible", "birth") == "주민등록번호: 생년월일(앞 6자리)까지 공개"
     assert describe_setting("numbers.card.action", "deny") == "카드번호: 거부"
-    assert describe_setting("jev_timeout_seconds", 3.0) == "Jev 응답 제한 시간(초): 3"
+    assert describe_setting("jev_timeout_seconds", 3.0) == "판단 모델 응답 제한 시간(초): 3"
     assert describe_setting("thresholds.allow_if_safe_confidence_gte", 0.97) == \
-        "Jev가 '안전'이라고 답할 때 보여 주는 최소 확신도: 0.97"
+        "판단 모델이 '안전'이라고 답할 때 보여 주는 최소 확신도: 0.97"
     assert set(SETTING_NAMES) == {k for k in setting_keys() if not k.startswith(("numbers.", "entities."))}
 
 

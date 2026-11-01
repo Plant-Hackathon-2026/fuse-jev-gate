@@ -229,7 +229,7 @@ def _details(record: dict) -> list[str]:
         prefix = "가림" if decision in ("allow", "mask") else "찾음"
         parts.append(f"{prefix}: {clean_text(kinds_text(findings))}")
     if isinstance(record.get("jev_label"), str):
-        jev = f"Jev {clean_text(record['jev_label'])}"
+        jev = f"판단 모델 {clean_text(record['jev_label'])}"
         if isinstance(record.get("jev_confidence"), (int, float)):
             jev += f" {record['jev_confidence']:.2f}"
         parts.append(jev + (" (캐시)" if record.get("cached") else ""))

@@ -183,7 +183,7 @@ class _Prompt:
 
 
 _NOTE_TEXT: dict[Note, str] = {
-    "context_mock": "  주의: 지금 Jev는 Mock(키워드 규칙)이라 맥락 규칙을 판단에 쓰지 않아요. 실제 Jev를 붙여야 효과가 있어요.",
+    "context_mock": "  주의: 지금 판단 모델은 Mock(키워드 규칙)이라 맥락 규칙을 판단에 쓰지 않아요. 실제 판단 모델을 붙여야 효과가 있어요.",
     "ner_off": "  주의: 지금 NER이 꺼져 있어(ner_backend: none) 이 설정은 효과가 없어요. "
                "켜려면: gate policy set ner_backend server",
     "no_change": "  (지금 정책과 같은 값이라 동작은 바뀌지 않아요)",
@@ -346,14 +346,14 @@ def _show(path: Path, entries: tuple[Entry, ...], out: TextIO) -> None:
         how = " (규칙으로 찾음, NER을 꺼도 적용)" if group in RULE_GROUPS else ""
         lines.append(f"    {ENTITY_NAMES[group]}: {ACTION_NAMES[policy.entity_rule(group)]} {mark(key)}{how}")
     if ner_on:
-        lines.append("    가린 것이 있으면 가린 결과를 Jev에 다시 물어, 안전하면 보여주고 아니면 사람에게 물어봄")
+        lines.append("    가린 것이 있으면 가린 결과를 판단 모델에 다시 물어, 안전하면 보여주고 아니면 사람에게 물어봄")
 
     allow_key, deny_key = "thresholds.allow_if_safe_confidence_gte", "thresholds.deny_if_sensitive_confidence_gte"
     timeout_key, session_key = "approval.timeout_seconds", "approval.session_minutes"
     lines += [
-        "  Jev 판단 기준",
-        f"    Jev가 '안전'이라고 확신도 {policy.allow_threshold:g} 이상으로 답하면 보여줌 {mark(allow_key)}",
-        f"    Jev가 '민감'이라고 확신도 {policy.deny_threshold:g} 이상으로 답하면 거부 {mark(deny_key)}",
+        "  판단 모델 기준",
+        f"    판단 모델이 '안전'이라고 확신도 {policy.allow_threshold:g} 이상으로 답하면 보여줌 {mark(allow_key)}",
+        f"    판단 모델이 '민감'이라고 확신도 {policy.deny_threshold:g} 이상으로 답하면 거부 {mark(deny_key)}",
         "    그 사이는 사람에게 물어봄",
         "  사람 승인 (맥 대화상자 또는 내 터미널의 gate approve / gate deny. 허용해도 가린 정보는 가린 채로 보여줌)",
         f"    답을 기다리는 시간: {policy.approval_timeout_seconds:g}초, 넘으면 거부 {mark(timeout_key)}",
@@ -366,13 +366,13 @@ def _show(path: Path, entries: tuple[Entry, ...], out: TextIO) -> None:
         origin = "[기본]" if i < len(DEFAULT_PATH_RULES) else "[지정]"
         lines.append(f"    {rule.pattern} → {ACTION_NAMES[rule.action]} {origin}")
 
-    lines.append("  맥락 규칙 (Jev에게 함께 알려 주는 내 문장)")
+    lines.append("  맥락 규칙 (판단 모델에게 함께 알려 주는 내 문장)")
     if not policy.context_rules:
         lines.append("    없음 [기본]")
     for rule in policy.context_rules:
         lines.append(f"    - {' '.join(rule.split())} [지정]")
     if policy.context_rules and policy.jev_backend == "mock":
-        lines.append("    주의: 지금 Jev는 Mock(키워드 규칙)이라 맥락 규칙을 판단에 쓰지 않아요.")
+        lines.append("    주의: 지금 판단 모델은 Mock(키워드 규칙)이라 맥락 규칙을 판단에 쓰지 않아요.")
 
     lines.append("  기타")
     for key in _OTHER_KEYS:

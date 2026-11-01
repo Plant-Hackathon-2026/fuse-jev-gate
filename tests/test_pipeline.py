@@ -126,7 +126,7 @@ def test_number_rule_ask_human_still_lets_jev_deny(source, tmp_path):
 # --- 실패하면 차단 ---
 
 def test_jev_error_denies_and_is_not_cached(source, tmp_path):
-    jev = MockJevClient("fixed", label="safe", confidence=0.99, error=JevError("Jev 응답이 3초 안에 오지 않았습니다"))
+    jev = MockJevClient("fixed", label="safe", confidence=0.99, error=JevError("판단 모델 응답이 3초 안에 오지 않았습니다"))
     inspector, _, _ = make(source, tmp_path, jev=jev)
     for expected_calls in (1, 2):
         verdict = inspector.inspect(PEER, "/회의.txt")
@@ -564,7 +564,7 @@ def test_approved_once_returns_content_and_records_who(source, tmp_path):
     j = verdict.judgment
     assert (j.action, j.stage, j.approval, j.approved_by) == ("allow", "human", "once", "dialog")
     assert verdict.data == PLAIN.encode()
-    assert j.reason == "사용자가 승인했습니다 (Jev 판단(sensitive, 확신도 0.70)이 확실하지 않습니다)"
+    assert j.reason == "사용자가 승인했습니다 (판단 모델 결과(sensitive, 확신도 0.70)가 확실하지 않습니다)"
     assert (j.jev_label, j.jev_confidence) == ("sensitive", 0.7)
     [req] = channel.requests
     assert (req.path, req.folder, req.exe, req.pid, req.purpose) == ("/회의.txt", "/", PEER.exe, PEER.pid, "요약")
@@ -701,6 +701,6 @@ def test_without_approvals_ask_human_is_blocked_as_before(source, tmp_path):
     inspector, _, _ = make(source, tmp_path, jev=UNSURE)
     verdict = inspector.inspect(PEER, "/회의.txt")
     assert (verdict.judgment.action, verdict.judgment.approval) == ("ask_human", None)
-    assert Blocked(verdict.judgment).message == "사람 승인이 필요합니다 (Jev 판단(sensitive, 확신도 0.70)이 확실하지 않습니다)"
+    assert Blocked(verdict.judgment).message == "사람 승인이 필요합니다 (판단 모델 결과(sensitive, 확신도 0.70)가 확실하지 않습니다)"
     skipped = search(inspector, PEER, "/회의.txt", "회의")["skipped"]
     assert "gate cat" not in skipped[0]["message"]

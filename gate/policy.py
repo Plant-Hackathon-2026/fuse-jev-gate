@@ -105,11 +105,11 @@ KIND_NAMES = {
 }
 ACTION_NAMES = {"allow": "그대로 보여줌", "mask": "가려서 보여줌", "ask_human": "사람에게 물어봄", "deny": "거부"}
 SETTING_NAMES = {
-    "thresholds.allow_if_safe_confidence_gte": "Jev가 '안전'이라고 답할 때 보여 주는 최소 확신도",
-    "thresholds.deny_if_sensitive_confidence_gte": "Jev가 '민감'이라고 답할 때 거부하는 최소 확신도",
-    "jev_backend": "Jev 백엔드",
-    "jev_timeout_seconds": "Jev 응답 제한 시간(초)",
-    "max_inspect_bytes": "Jev에 한 번에 넘기는 최대 크기(바이트)",
+    "thresholds.allow_if_safe_confidence_gte": "판단 모델이 '안전'이라고 답할 때 보여 주는 최소 확신도",
+    "thresholds.deny_if_sensitive_confidence_gte": "판단 모델이 '민감'이라고 답할 때 거부하는 최소 확신도",
+    "jev_backend": "판단 모델 백엔드",
+    "jev_timeout_seconds": "판단 모델 응답 제한 시간(초)",
+    "max_inspect_bytes": "판단 모델에 한 번에 넘기는 최대 크기(바이트)",
     "ner_backend": "NER(이름·주소·소속 가리기) 백엔드",
     "ner_timeout_seconds": "NER 응답 제한 시간(초)",
     "approval.timeout_seconds": "사람 승인을 기다리는 시간(초)",

@@ -253,7 +253,7 @@ def test_blocked_read_is_eacces_with_reason_and_no_content(judged):
     with pytest.raises(GateError) as exc:
         client.cat("/readme.txt")
     assert exc.value.errno == errno.EACCES
-    assert "Jev 판단(sensitive" in exc.value.message
+    assert "판단 모델 결과(sensitive" in exc.value.message
     event = settled(events, 1)
     assert (event.errno, event.judgment.action) == ("EACCES", "deny")
 
@@ -442,7 +442,7 @@ def test_cat_waits_and_terminal_approval_returns_content(asking_gate):
     thread, box = _read_in_background(client, "/상담/2026-03.txt")
     [p] = _wait_pending(approver)
     assert (p["path"], p["folder"], p["purpose"], p["pid"]) == ("/상담/2026-03.txt", "/상담", "요약", os.getpid())
-    assert p["reason"] == "Jev 판단(sensitive, 확신도 0.70)이 확실하지 않습니다"
+    assert p["reason"] == "판단 모델 결과(sensitive, 확신도 0.70)가 확실하지 않습니다"
     approver.answer(p["id"], "once")
     thread.join(3)
     assert box["result"].data == SAMPLE.encode() and box["result"].decision == "allow"

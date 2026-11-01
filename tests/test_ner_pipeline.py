@@ -135,7 +135,7 @@ def test_names_are_replaced_with_kind_names_and_numbers_keep_stars(source, tmp_p
     assert "이름" in j.reason and "소속" in j.reason
     assert ner.texts == [INTRO]                              # NER은 원문을 본다
     assert jev.calls[0].text == INTRO_SHOWN                  # Jev는 가린 결과(보여 줄 내용)를 본다
-    assert "가린 뒤 Jev 판단 safe" in j.reason
+    assert "가린 뒤 판단 모델 결과 safe" in j.reason
 
 
 @pytest.mark.parametrize("label, confidence, action", [

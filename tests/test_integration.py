@@ -122,7 +122,7 @@ def test_defaults_without_policy_file(demo):
         denied = _gate(sock, "cat", path)
         assert denied.returncode == 1 and denied.stdout == b""
         assert "EACCES" in denied.stderr.decode()
-    assert "Jev 판단(sensitive" in _gate(sock, "cat", "/진료/메모.txt").stderr.decode()
+    assert "판단 모델 결과(sensitive" in _gate(sock, "cat", "/진료/메모.txt").stderr.decode()
 
 
 def test_user_policy_changes_results_without_restart(demo):
