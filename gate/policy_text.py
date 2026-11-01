@@ -224,7 +224,7 @@ def _unclear(text: str, reason: str, steps: Sequence[Step] = ()) -> Interpretati
     message = (
         f"문장을 확실히 이해하지 못했어요({reason}). 저장하지 않았어요.\n"
         f"다시 말해 주세요. 예:\n{examples}\n"
-        "또는 `gate policy set <키> <값>`으로 직접 지정할 수 있어요."
+        "또는 `plant policy set <키> <값>`으로 직접 지정할 수 있어요."
     )
     return Interpretation("unclear", text, message, None, tuple(steps))
 
@@ -262,8 +262,8 @@ def interpret(
             message = (
                 "폴더나 파일 이름(경로)에 대한 규칙으로 보여요. 경로 패턴은 문장에서 정확히 고를 수 없어서 저장하지 않았어요.\n"
                 "다음처럼 직접 지정하세요:\n"
-                "  gate policy set path \"<패턴>\" <allow|ask_human|deny>\n"
-                "  예: gate policy set path \"공개/**\" allow"
+                "  plant policy set path \"<패턴>\" <allow|ask_human|deny>\n"
+                "  예: plant policy set path \"공개/**\" allow"
             )
             return Interpretation("path", text, message, None, tuple(steps))
         if kind_of_sentence == "context":
@@ -271,7 +271,7 @@ def interpret(
                 message = (
                     "문서 내용에 대한 규칙을 느슨하게 하는 문장으로 보여요. 저장하지 않았어요.\n"
                     "맥락 규칙은 더 막는 쪽(예: \"병원 기록은 보여주지 마\")으로만 지정할 수 있어요.\n"
-                    "특정 폴더를 그대로 보여 주려면: gate policy set path \"<패턴>\" allow"
+                    "특정 폴더를 그대로 보여 주려면: plant policy set path \"<패턴>\" allow"
                 )
                 return Interpretation("unsupported", text, message, None, tuple(steps))
             entry = Entry(context=text, said=text)
@@ -320,7 +320,7 @@ def _entity_action_note(group: str, value: str) -> str:
 def _error(text: str, reason: str, steps: Sequence[Step]) -> Interpretation:
     message = (
         f"문장 해석기에 문제가 있어 저장하지 않았어요({reason}).\n"
-        "잠시 뒤 다시 하거나 `gate policy set <키> <값>`으로 직접 지정하세요."
+        "잠시 뒤 다시 하거나 `plant policy set <키> <값>`으로 직접 지정하세요."
     )
     return Interpretation("error", text, message, None, tuple(steps))
 

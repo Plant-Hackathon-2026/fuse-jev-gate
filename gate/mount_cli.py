@@ -53,7 +53,7 @@ _YES = frozenset({"y", "yes", "예", "네", "ㅛ"})  # ㅛ: 한글 자판 상태
 _STATE_TEXT = {
     "ok": "지금 목록대로 막고 있어요",
     "stale": "예전 목록대로예요(다음에 폴더를 연결하거나 보호를 풀 때 자동으로 다시 써요)",
-    "edited": "손으로 바뀌었어요(자동으로 덮지 않아요. `gate workspace init --force`로 다시 만드세요)",
+    "edited": "손으로 바뀌었어요(자동으로 덮지 않아요. `plant workspace init --force`로 다시 만드세요)",
     "missing": "작업 폴더나 설정 파일이 없어요(건너뛰어요)",
 }
 
@@ -76,9 +76,9 @@ def register(subparsers) -> argparse.ArgumentParser:
     sub.add_parser("list", parents=[common], help="연결한 폴더와 작업 폴더 설정 상태")
     add = sub.add_parser("add", parents=[common], help="폴더 연결 (확인 뒤)")
     add.add_argument("folder")
-    remove = sub.add_parser("remove", parents=[common], help="게이트에서 빼기 (직접 읽기 막기는 남음)")
+    remove = sub.add_parser("remove", parents=[common], help="PLANT에서 빼기 (직접 읽기 막기는 남음)")
     remove.add_argument("name")
-    unprotect = sub.add_parser("unprotect", parents=[common], help="보호도 풀기 (게이트에서 뺀 폴더만)")
+    unprotect = sub.add_parser("unprotect", parents=[common], help="보호도 풀기 (PLANT에서 뺀 폴더만)")
     unprotect.add_argument("name")
     return parser
 
@@ -93,7 +93,7 @@ def run(args: argparse.Namespace, *, stdin: TextIO | None = None, stdout: TextIO
         ctx = _context(args)
         if command in CHANGE_COMMANDS and require_tty and not _isatty(stdin):
             raise _Stop("폴더 연결을 바꾸는 명령은 사람이 터미널에서 직접 실행해야 해요(입력이 터미널이 아님). "
-                        "보기는 `gate mount list`로 할 수 있어요.")
+                        "보기는 `plant mount list`로 할 수 있어요.")
         if command == "list":
             _show(ctx, list_mounts(ctx), out)
             return 0
@@ -104,7 +104,7 @@ def run(args: argparse.Namespace, *, stdin: TextIO | None = None, stdout: TextIO
             return _remove(ctx, args.name, io)
         return _unprotect(ctx, args.name, io)
     except (_Stop, MountError) as exc:
-        print(f"gate mount: {exc}", file=out)
+        print(f"plant mount: {exc}", file=out)
         return 1
 
 
@@ -160,7 +160,7 @@ def _p(path: str) -> str:
 def _row_state(row: FolderRow) -> str:
     if row.kind == "base":
         return "기본 · 띄울 때 정함" + ("" if row.exists else " · 찾을 수 없음")
-    state = "연결됨" if row.connected else "보호만 남음(게이트에서 뺌, 직접 읽기 막기는 남음)"
+    state = "연결됨" if row.connected else "보호만 남음(PLANT에서 뺌, 직접 읽기 막기는 남음)"
     return state + ("" if row.exists else " · 찾을 수 없음")
 
 
@@ -173,7 +173,7 @@ def _show(ctx: MountContext, view: MountsView, out: TextIO) -> None:
         lines += [f"  문제: {view.error}"]
     lines.append("")
     if not bases:
-        lines.append("  /  기본 폴더: 알 수 없음 (등록된 작업 폴더가 없어요. `gate workspace init`으로 만들면 등록돼요)")
+        lines.append("  /  기본 폴더: 알 수 없음 (등록된 작업 폴더가 없어요. `plant workspace init`으로 만들면 등록돼요)")
     for row in [*bases, *mounts]:
         title = "(기본)" if row.kind == "base" else row.name
         lines.append(f"  {row.vpath}  {title}  —  {_row_state(row)}")
@@ -193,14 +193,14 @@ def _show(ctx: MountContext, view: MountsView, out: TextIO) -> None:
     for ws in view.workspaces:
         lines.append(f"  {_p(ws.path)}: {_STATE_TEXT[ws.state]}")
     if view.global_setup:
-        lines += ["", "전역 설치(gate setup) 기록이 있어요. 새로 연결한 폴더는 `gate setup`을 다시 실행해야 전역 설정에서도 막혀요."]
+        lines += ["", "전역 설치(plant setup) 기록이 있어요. 새로 연결한 폴더는 `plant setup`을 다시 실행해야 전역 설정에서도 막혀요."]
     print("\n".join(lines), file=out)
 
 
 # --- 바꾸기 ---
 
 def _describe(change: MountChange, io: _Prompt) -> None:
-    io.say(f"  게이트 안 경로: /{change.name}")
+    io.say(f"  PLANT 안 경로: /{change.name}")
     io.say(f"  실제 경로: {_p(change.path)} · {_count_text(change.file_count, change.file_count_capped)}")
     if change.workspaces:
         io.say("  다시 쓸 작업 폴더 설정: " + ", ".join(_p(p) for p in change.workspaces))
@@ -218,9 +218,9 @@ def _notes(result: MountResult, io: _Prompt) -> None:
         io.say(f"  작업 폴더 설정을 다시 썼어요: {_p(path)}")
     text: dict[Note, str] = {
         "restart_session": "  이미 켜진 에이전트 세션은 다시 시작하세요. 그래야 바뀐 작업 폴더 설정이 확실히 적용돼요.",
-        "rerun_setup": "  전역 설정에는 아직 반영되지 않았어요. 터미널에서 `gate setup`을 다시 실행하세요.",
+        "rerun_setup": "  전역 설정에는 아직 반영되지 않았어요. 터미널에서 `plant setup`을 다시 실행하세요.",
         "no_workspace": ("  등록된 작업 폴더가 없어 어느 작업 폴더에서도 이 폴더 직접 읽기가 막히지 않았어요. "
-                         "`gate workspace init`으로 작업 폴더를 만드세요." if result.change.op == "add" else
+                         "`plant workspace init`으로 작업 폴더를 만드세요." if result.change.op == "add" else
                          "  등록된 작업 폴더가 없어 바꾼 작업 폴더 설정은 없어요."),
     }
     for note in result.notes:
@@ -230,15 +230,15 @@ def _notes(result: MountResult, io: _Prompt) -> None:
 def _add(ctx: MountContext, folder: str, io: _Prompt) -> int:
     change = plan_add(ctx, folder, added_by="terminal")
     if change.reconnect:
-        io.say("보호만 남아 있던 폴더를 게이트에 다시 연결해요:")
+        io.say("보호만 남아 있던 폴더를 PLANT에 다시 연결해요:")
     else:
-        io.say("이 폴더를 게이트에 연결해요:")
+        io.say("이 폴더를 PLANT에 연결해요:")
     _describe(change, io)
     if not change.workspaces:
         view = list_mounts(ctx, count_files=False)
         if not any(ws.state in ("ok", "stale") for ws in view.workspaces):
             io.say("  주의: 등록된 작업 폴더가 없어요. 어느 작업 폴더에서도 이 폴더 직접 읽기가 막히지 않아요.")
-    io.say("연결하면 에이전트가 게이트를 거쳐 이 폴더 문서를 읽을 수 있어요(정책대로 가리거나 물어봐요). "
+    io.say("연결하면 에이전트가 PLANT를 거쳐 이 폴더 문서를 읽을 수 있어요(정책대로 가리거나 물어봐요). "
            "동시에 작업 폴더 설정에서 이 폴더를 직접 열지 못하게 막아요.")
     if not io.confirm("연결할까요?"):
         io.say("연결하지 않았어요.")
@@ -247,17 +247,17 @@ def _add(ctx: MountContext, folder: str, io: _Prompt) -> int:
         io.say("취소했어요. 연결하지 않았어요.")
         return 1
     result = _commit(ctx, change, io)
-    io.say(f"연결했어요: /{change.name}. 실행 중인 게이트는 다음 요청부터 이 폴더를 보여 줘요(다시 띄우지 않아도 돼요).")
+    io.say(f"연결했어요: /{change.name}. 실행 중인 PLANT는 다음 요청부터 이 폴더를 보여 줘요(다시 띄우지 않아도 돼요).")
     _notes(result, io)
     return 0
 
 
 def _remove(ctx: MountContext, name: str, io: _Prompt) -> int:
     change = plan_remove(ctx, name)
-    io.say("이 폴더를 게이트에서 빼요:")
+    io.say("이 폴더를 PLANT에서 빼요:")
     _describe(change, io)
-    io.say("에이전트는 이 폴더 문서를 더는 게이트로 읽지 못해요. 작업 폴더 설정의 직접 읽기 막기는 그대로 남아요"
-           f"(풀려면 `gate mount unprotect {change.name}`).")
+    io.say("에이전트는 이 폴더 문서를 더는 PLANT로 읽지 못해요. 작업 폴더 설정의 직접 읽기 막기는 그대로 남아요"
+           f"(풀려면 `plant mount unprotect {change.name}`).")
     if not io.confirm("뺄까요?"):
         io.say("빼지 않았어요.")
         return 1

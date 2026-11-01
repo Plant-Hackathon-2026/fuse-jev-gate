@@ -194,13 +194,13 @@ def agent_guide(paths: GatePaths) -> str:
     gate = paths.gate_bin
     return f"""# 이 폴더에서 문서 읽기
 
-원본 문서는 이 컴퓨터의 게이트를 거쳐서만 읽을 수 있습니다. 원본 폴더를 직접 열면 막힙니다.
+원본 문서는 이 컴퓨터의 PLANT를 거쳐서만 읽을 수 있습니다. 원본 폴더를 직접 열면 막힙니다.
 
 - 목록: `{gate} ls /` (하위 폴더는 `{gate} ls /폴더`)
 - 읽기: `{gate} cat <경로> --purpose "읽는 목적"`
 - 찾기: `{gate} search <글자> [경로] [-i]`
 
-- 경로는 `/`로 시작하는 게이트 안 경로입니다.
+- 경로는 `/`로 시작하는 PLANT 안 경로입니다.
 - 개인정보와 비밀값은 가려져 나옵니다. 번호·비밀값은 같은 길이의 `*`(예: `***-****-****`)로, 이름·주소·소속·장소·IP 등은 `[이름]`·`[주소]`·`[IP]` 같은 표시로 바뀝니다. 둘 다 원래 값이 아닙니다.
 - 사용자 승인이 필요한 파일은 사용자가 답할 때까지 잠시 기다립니다.
 - `EACCES`는 정책상 읽을 수 없다는 뜻입니다. 다른 방법으로 읽으려 하지 말고 사용자에게 알리세요.
@@ -271,9 +271,19 @@ def register_workspace(root: Path, paths: GatePaths, settings: str,
 
 
 def _default_gate_bin() -> str | None:
-    if Path(sys.argv[0]).name == "gate":
-        return os.path.abspath(sys.argv[0])
-    return shutil.which("gate")
+    """지금 실행한 plant의 경로. 설정·안내에는 늘 plant를 적는다.
+
+    gate는 예전 이름(pyproject의 별칭)이라, gate로 실행했으면 같은 폴더의 plant를 적는다. 그 폴더에 plant가 없으면
+    PATH의 plant를 찾는다.
+    """
+    argv0 = Path(sys.argv[0])
+    if argv0.name in ("gate", "plant"):
+        sibling = argv0.with_name("plant")
+        if sibling.exists():
+            return os.path.abspath(sibling)
+        if argv0.name == "plant":
+            return os.path.abspath(argv0)
+    return shutil.which("plant")
 
 
 def register(sub: argparse._SubParsersAction) -> None:
@@ -284,7 +294,10 @@ def register(sub: argparse._SubParsersAction) -> None:
     init.add_argument("--source", required=True, help="원본 폴더")
     init.add_argument("--policy", default=os.environ.get("GATE_POLICY"), help="정책 파일 (기본: $GATE_POLICY)")
     init.add_argument("--audit", default=os.environ.get("GATE_AUDIT"), help="감사 로그 파일 (기본: $GATE_AUDIT)")
-    init.add_argument("--gate-bin", default=None, help="gate 실행 파일 (기본: 지금 실행한 gate)")
+    init.add_argument("--plant-bin", dest="gate_bin", metavar="PLANT_BIN", default=None,
+                      help="plant 실행 파일 (기본: 지금 실행한 plant)")
+    # 예전 옵션 이름. 도움말에는 보이지 않는다
+    init.add_argument("--gate-bin", dest="gate_bin", default=None, help=argparse.SUPPRESS)
     init.add_argument("--force", action="store_true", help="내용이 다른 기존 파일을 덮어쓴다")
 
 
@@ -293,16 +306,16 @@ def run(args: argparse.Namespace) -> int:
                                         ("--audit(GATE_AUDIT)", args.audit)) if not value]
     gate_bin = args.gate_bin or _default_gate_bin()
     if not gate_bin:
-        missing.append("--gate-bin")
+        missing.append("--plant-bin")
     if missing:
-        print(f"gate: 작업 폴더 설정에는 {', '.join(missing)}이 필요합니다 (막을 경로를 정확히 적어야 합니다)",
+        print(f"plant: 작업 폴더 설정에는 {', '.join(missing)}이 필요합니다 (막을 경로를 정확히 적어야 합니다)",
               file=sys.stderr)
         return 1
     try:
         paths = resolve_paths(args.source, args.socket, args.policy, args.audit, gate_bin)
         written = init_workspace(args.folder, paths, force=args.force)
     except (WorkspaceError, MountsFileError, OSError) as exc:
-        print(f"gate: {exc}", file=sys.stderr)
+        print(f"plant: {exc}", file=sys.stderr)
         return 1
     for path, state in written.items():
         print(f"{path}: {state}")

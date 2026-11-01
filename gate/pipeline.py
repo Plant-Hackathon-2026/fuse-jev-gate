@@ -487,7 +487,7 @@ def search(
             blocked = Blocked(verdict.judgment)
             message = blocked.message
             if verdict.judgment.action == "ask_human" and inspector.approvals is not None:
-                message += ". search는 묻지 않습니다. gate cat으로 열면 사용자에게 묻습니다"
+                message += ". search는 묻지 않습니다. plant cat으로 열면 사용자에게 묻습니다"
             skipped.append({"path": path, "errno": blocked.name, "message": message})
             continue
         for number, line in enumerate(verdict.data.decode(verdict.codec, "replace").splitlines(), 1):

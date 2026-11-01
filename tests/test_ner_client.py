@@ -189,7 +189,7 @@ def test_unhealthy_server_is_an_error(server):
     ([{"start": 0, "end": 2, "label": "B-NAME", "score": 0.9}], "모르는 종류"),
     ([{"start": 0, "end": 2, "label": "SCHOOL", "score": 0.9}], "모르는 종류"),      # 기존 32종 모델의 라벨
     ([{"start": 0, "end": 2, "label": "IP_ADDRESS", "score": 0.9}], "모르는 종류"),  # 규칙 종류는 서버가 주지 않는다
-    ([{"start": 0, "end": 2, "label": "EMAIL", "score": 0.9}], "모르는 종류"),       # 게이트 종류도 서버 라벨이 아니다
+    ([{"start": 0, "end": 2, "label": "EMAIL", "score": 0.9}], "모르는 종류"),       # PLANT 종류도 서버 라벨이 아니다
     ([{"start": 0, "end": 2, "label": "NAME", "score": 1.5}], "score"),
     ([{"start": 0, "end": 2, "label": "NAME", "score": float("nan")}], "score"),
     ([{"start": 0, "end": 2, "label": "NAME"}], "score"),

@@ -58,7 +58,7 @@ ANSWER_NAMES = {"once": "이번만 허용", "session": "이 폴더 허용", "den
 
 
 def _err(text: str) -> None:
-    print(f"gate: {text}", file=sys.stderr, flush=True)
+    print(f"plant: {text}", file=sys.stderr, flush=True)
 
 
 def _log(event: RequestEvent) -> None:
@@ -77,7 +77,7 @@ def _log(event: RequestEvent) -> None:
 def _announce(pending: Pending) -> None:
     r = pending.request
     _err(f"승인 대기 [{pending.id}] {clean_text(r.path)} — {clean_text(r.reason)} ({r.timeout_seconds:g}초). "
-         f"터미널에서 gate approve {pending.id} 또는 gate deny {pending.id}")
+         f"터미널에서 plant approve {pending.id} 또는 plant deny {pending.id}")
 
 
 def _log_answer(peer: Peer, id: str, answer: str) -> None:
@@ -152,21 +152,21 @@ def _serve(socket_path: str, approve_socket: str, source: str, policy_path: str 
         raise
     threading.Thread(target=approval_server.serve_forever, daemon=True).start()
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
-    print(f"gate: {socket_path} 에서 대기 중 (원본: {base_root})", file=sys.stderr)
+    print(f"plant: {socket_path} 에서 대기 중 (원본: {base_root})", file=sys.stderr)
     _announce_mounts(base_root, mounts)
-    print(f"gate: 사람 승인: {'맥 대화상자 + ' if channels else ''}터미널(gate approve, 승인 소켓 {approve_socket})",
+    print(f"plant: 사람 승인: {'맥 대화상자 + ' if channels else ''}터미널(plant approve, 승인 소켓 {approve_socket})",
           file=sys.stderr)
     audit_note = f"{audit_path} (파일 해시 키 {audit.key_path})" if audit else "남기지 않음 (--audit 또는 GATE_AUDIT로 지정)"
-    print(f"gate: 감사 로그: {audit_note}", file=sys.stderr)
+    print(f"plant: 감사 로그: {audit_note}", file=sys.stderr)
     try:
         policy = policy_source.current()
         where = policy_path or "지정 안 함"
-        print(f"gate: 정책 {where} (버전 {policy.version}, 사용자 항목 {len(policy.entries)}개)", file=sys.stderr)
+        print(f"plant: 정책 {where} (버전 {policy.version}, 사용자 항목 {len(policy.entries)}개)", file=sys.stderr)
         if policy.ner_backend != "none":  # 기본은 켜짐(3e). 서버가 없으면 모든 읽기가 막히므로 시작할 때 알린다
-            print(f"gate: NER 켜짐. NER 서버(NER_BASE_URL, 없으면 {DEFAULT_NER_URL})가 응답하지 않으면 내용 읽기를 "
-                  "모두 차단합니다. 끄려면: gate policy set ner_backend none", file=sys.stderr)
+            print(f"plant: NER 켜짐. NER 서버(NER_BASE_URL, 없으면 {DEFAULT_NER_URL})가 응답하지 않으면 내용 읽기를 "
+                  "모두 차단합니다. 끄려면: plant policy set ner_backend none", file=sys.stderr)
     except PolicyError as exc:
-        print(f"gate: 정책 파일 오류. 고칠 때까지 내용 읽기를 모두 차단합니다: {exc}", file=sys.stderr)
+        print(f"plant: 정책 파일 오류. 고칠 때까지 내용 읽기를 모두 차단합니다: {exc}", file=sys.stderr)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -194,14 +194,15 @@ def _announce_mounts(base_root: Path, mounts: MountsSource | None) -> None:
          f" · 폴더 목록 {mounts.mounts_file} (바뀌면 다시 띄우지 않아도 다음 요청부터 씁니다)")
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="gate", description="파일 접근 게이트")
-    parser.add_argument("--socket", default=os.environ.get("GATE_SOCKET"), help="게이트 소켓 경로 (기본: $GATE_SOCKET)")
+def build_parser() -> argparse.ArgumentParser:
+    # 실행 이름은 plant로 고정한다. gate(예전 이름)는 pyproject의 별칭일 뿐이라 그 이름으로 실행해도 도움말·오류에는 plant가 보인다
+    parser = argparse.ArgumentParser(prog="plant", description="PLANT — AI 에이전트의 파일 읽기를 지키는 도구")
+    parser.add_argument("--socket", default=os.environ.get("GATE_SOCKET"), help="PLANT 소켓 경로 (기본: $GATE_SOCKET)")
     parser.add_argument("--approve-socket", default=os.environ.get("GATE_APPROVE_SOCKET"),
-                        help="승인 소켓 경로 (기본: $GATE_APPROVE_SOCKET, 없으면 게이트 소켓 옆의 approve.sock)")
+                        help="승인 소켓 경로 (기본: $GATE_APPROVE_SOCKET, 없으면 PLANT 소켓 옆의 approve.sock)")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    serve = sub.add_parser("serve", help="게이트 데몬을 실행한다")
+    serve = sub.add_parser("serve", help="PLANT 데몬을 실행한다")
     serve.add_argument("--source", required=True, help="원본 폴더")
     serve.add_argument("--policy", default=os.environ.get("GATE_POLICY"),
                        help="정책 파일 (기본: $GATE_POLICY, 없으면 기본 정책)")
@@ -238,7 +239,11 @@ def main(argv: list[str] | None = None) -> int:
     audit_cli.register(sub)
     ui.register(sub)
     mount_cli.register(sub)
+    return parser
 
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
     args = parser.parse_args(argv)
     if args.command == "policy":
         return policy_cli.run(args)
@@ -258,7 +263,7 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--socket(GATE_SOCKET) 또는 --approve-socket(GATE_APPROVE_SOCKET)을 지정하세요")
         return _approval(ApprovalClient(approve_socket), args)
     if not args.socket:
-        parser.error("--socket 또는 GATE_SOCKET 환경변수로 게이트 소켓 경로를 지정하세요")
+        parser.error("--socket 또는 GATE_SOCKET 환경변수로 PLANT 소켓 경로를 지정하세요")
 
     if args.command == "serve":
         return _serve(args.socket, approve_socket_path(args.socket, args.approve_socket), args.source, args.policy,
@@ -280,7 +285,7 @@ def main(argv: list[str] | None = None) -> int:
             if result.masked:
                 print(mask_notice(result.masked, result.labeled), file=sys.stderr)
     except GateError as exc:
-        print(f"gate: {getattr(args, 'path', '')}: {exc.message} ({exc.name})", file=sys.stderr)
+        print(f"plant: {getattr(args, 'path', '')}: {exc.message} ({exc.name})", file=sys.stderr)
         return 1
     return 0
 
@@ -297,11 +302,11 @@ def mask_notice(masked: Mapping[str, int], labeled: Mapping[str, int] | None) ->
     stars = {kind: n - labeled.get(kind, 0) for kind, n in masked.items() if n > labeled.get(kind, 0)}
     labels = {kind: n for kind, n in labeled.items() if n > 0}
     if stars and labels:
-        return (f"gate: 개인정보 일부를 같은 길이의 *로 ({kinds_text(stars)}), "
+        return (f"plant: 개인정보 일부를 같은 길이의 *로 ({kinds_text(stars)}), "
                 f"[이름]처럼 종류 이름으로 ({kinds_text(labels)}) 가렸습니다")
     if labels:
-        return f"gate: 개인정보 일부를 [이름]처럼 종류 이름으로 가렸습니다 ({kinds_text(labels)})"
-    return f"gate: 개인정보 일부를 같은 길이의 *로 가렸습니다 ({kinds_text(stars)})"
+        return f"plant: 개인정보 일부를 [이름]처럼 종류 이름으로 가렸습니다 ({kinds_text(labels)})"
+    return f"plant: 개인정보 일부를 같은 길이의 *로 가렸습니다 ({kinds_text(stars)})"
 
 
 def _search(client: GateClient, args: argparse.Namespace) -> int:
@@ -311,9 +316,9 @@ def _search(client: GateClient, args: argparse.Namespace) -> int:
     for m in result["matches"]:
         print(f"{m['path']}:{m['line']}:{m['text']}")
     for s in result["skipped"]:
-        print(f"gate: 건너뜀 {s['path']}: {s['message']} ({s['errno']})", file=sys.stderr)
+        print(f"plant: 건너뜀 {s['path']}: {s['message']} ({s['errno']})", file=sys.stderr)
     if result["truncated"]:
-        print("gate: 결과가 많아 일부만 보여 줍니다 (--max로 늘릴 수 있음)", file=sys.stderr)
+        print("plant: 결과가 많아 일부만 보여 줍니다 (--max로 늘릴 수 있음)", file=sys.stderr)
     return 0 if result["matches"] else 1
 
 
@@ -340,9 +345,9 @@ def _show_pending(pending: list[dict], out: TextIO) -> None:
         if p.get("findings"):
             lines.append(f"     가린 것: {kinds_text(p['findings'])} (허용해도 가린 채로 보여 줍니다)")
     folder = pending[0]["session_minutes"]
-    lines.append("  답하기: gate approve <id> (이번만)"
-                 + (f" · gate approve <id> --folder (그 폴더 {folder}분 동안)" if folder > 0 else "")
-                 + " · gate deny <id>")
+    lines.append("  답하기: plant approve <id> (이번만)"
+                 + (f" · plant approve <id> --folder (그 폴더 {folder}분 동안)" if folder > 0 else "")
+                 + " · plant deny <id>")
     print("\n".join(lines), file=out)
 
 
@@ -355,13 +360,13 @@ def _approval(client: ApprovalClient, args: argparse.Namespace, stdin: TextIO | 
             _show_pending(client.pending(), out)
             return 0
         if not _isatty(stdin):
-            print("gate: 승인과 거부는 사용자 터미널에서만 받습니다", file=sys.stderr)
+            print("plant: 승인과 거부는 사용자 터미널에서만 받습니다", file=sys.stderr)
             return 1
         answer = "deny" if args.command == "deny" else ("session" if args.folder else "once")
         client.answer(args.id, answer)
         print(f"{args.id}: {ANSWER_NAMES[answer]}", file=out)
     except GateError as exc:
-        print(f"gate: {exc.message} ({exc.name})", file=sys.stderr)
+        print(f"plant: {exc.message} ({exc.name})", file=sys.stderr)
         return 1
     return 0
 

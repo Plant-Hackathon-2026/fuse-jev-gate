@@ -400,7 +400,7 @@ def test_cli_lists_pending_requests(approval_socket):
     assert f"[{pid}] /상담/ [2J메모.txt" in text and "\x1b" not in text
     assert "에이전트가 밝힌 목적(확인되지 않음): 요약 가짜 줄" in text
     assert "휴대폰 번호 1건 (허용해도 가린 채로 보여 줍니다)" in text
-    assert "gate approve <id> --folder (그 폴더 60분 동안)" in text
+    assert "plant approve <id> --folder (그 폴더 60분 동안)" in text
     approvals.answer(pid, "deny", "terminal")
     thread.join(2)
 

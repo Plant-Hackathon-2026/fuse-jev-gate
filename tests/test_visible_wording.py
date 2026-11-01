@@ -93,8 +93,8 @@ def test_pipeline_error_reasons_say_judge_model(source, tmp_path):
     assert not JEV.search(broken + unknown)
 
 
-def gate_policy(path, *argv, answers=""):
-    parser = argparse.ArgumentParser(prog="gate")
+def plant_policy(path, *argv, answers=""):
+    parser = argparse.ArgumentParser(prog="plant")
     register(parser.add_subparsers(dest="command", required=True))
     out = io.StringIO()
     run(parser.parse_args(["policy", "--policy", str(path), *argv]), stdin=io.StringIO(answers), stdout=out,
@@ -104,12 +104,12 @@ def gate_policy(path, *argv, answers=""):
 
 def test_policy_cli_output_says_judge_model(tmp_path):
     path = tmp_path / "policy.yaml"
-    added = gate_policy(path, "add", "병원 기록은 보여주지 마", answers="y\n")
+    added = plant_policy(path, "add", "병원 기록은 보여주지 마", answers="y\n")
     assert "판단 모델이 정할 때" in added and "지금 판단 모델은 Mock" in added
-    shown = gate_policy(path, "show")
+    shown = plant_policy(path, "show")
     assert "판단 모델 기준" in shown and "판단 모델에게 함께 알려 주는 내 문장" in shown
     assert "가린 결과를 판단 모델에 다시 물어" in shown and "판단 모델 백엔드: mock" in shown
-    allowed = gate_policy(path, "add", "이름은 그대로 보여줘", answers="n\n")
+    allowed = plant_policy(path, "add", "이름은 그대로 보여줘", answers="n\n")
     assert "다만 판단 모델이 문서를 민감하다고 보면" in allowed
     assert not JEV.search(added + shown + allowed)
 

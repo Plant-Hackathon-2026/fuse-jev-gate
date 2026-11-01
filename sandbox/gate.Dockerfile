@@ -1,4 +1,4 @@
-# 게이트 데몬을 Linux에서 돌리는 이미지.
+# PLANT 데몬을 Linux에서 돌리는 이미지.
 # 실행 시 FUSE 장치와 권한이 필요하다:
 #   docker run --rm --device /dev/fuse --cap-add SYS_ADMIN fuse-jev-gate ...
 FROM python:3.12-slim

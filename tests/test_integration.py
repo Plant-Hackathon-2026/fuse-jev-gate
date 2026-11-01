@@ -329,4 +329,4 @@ def test_default_daemon_has_ner_on_and_blocks_without_ner_server(tmp_path, socke
         daemon.send_signal(signal.SIGTERM)
         _, log = daemon.communicate(timeout=10)
     log = log.decode()
-    assert "gate: NER 켜짐" in log and "gate policy set ner_backend none" in log
+    assert "plant: NER 켜짐" in log and "plant policy set ner_backend none" in log

@@ -1,7 +1,7 @@
-# 게이트 기본 정책 (설명용 참고 파일).
+# PLANT 기본 정책 (설명용 참고 파일).
 #
-# 게이트는 이 파일을 읽지 않는다. 기본값은 gate/policy.py에 있고, tests/test_policy.py가 이 파일과 같은지 확인한다.
-# 사용자 정책은 `gate policy` 명령으로 정책 파일(기본 hackathon/gate-data/policy.yaml, GATE_POLICY)에 따로 저장한다.
+# PLANT는 이 파일을 읽지 않는다. 기본값은 gate/policy.py에 있고, tests/test_policy.py가 이 파일과 같은지 확인한다.
+# 사용자 정책은 `plant policy` 명령으로 정책 파일(기본 hackathon/gate-data/policy.yaml, GATE_POLICY)에 따로 저장한다.
 # 정책 파일에 없는 설정은 아래 기본값을 쓴다. 사용자 정책에서는 설정을 점 표기 키로 쓴다(예: numbers.rrn.visible).
 
 # 정규식이 찾은 번호·비밀값 종류별 처리.
@@ -49,9 +49,9 @@ entities:
   host:        {action: mask}   # IP 주소·내부 주소 (규칙으로 찾음, NER을 꺼도 적용)
   plain:       {action: allow}  # 나이 (그것만으로는 사람을 좁히기 어려워 기본으로 보여 줌)
 
-# NER 서버(nerserve, README 참고). 기본은 켬(server, 2026-11-01)이라 게이트 데몬보다 NER 서버를 먼저 띄운다.
+# NER 서버(nerserve, README 참고). 기본은 켬(server, 2026-11-01)이라 PLANT 데몬보다 NER 서버를 먼저 띄운다.
 # 켜면 가린 것이 있는 문서는 가린 결과를 판단 모델에 다시 물어, 안전하면 가린 채 보여 주고 아니면 사람에게 묻는다.
-# NER 서버가 응답하지 않으면 모든 내용 읽기가 차단된다. 끄면(none, `gate policy set ner_backend none`) 이름·주소 등은
+# NER 서버가 응답하지 않으면 모든 내용 읽기가 차단된다. 끄면(none, `plant policy set ner_backend none`) 이름·주소 등은
 # 가리지 않고 IP·내부 주소(규칙) 말고는 3b와 똑같이 동작한다.
 ner_backend: server          # server(켬, 데몬 환경변수 NER_BASE_URL, 없으면 http://127.0.0.1:8001) | none(끔)
 ner_timeout_seconds: 10.0    # 이 시간 안에 답이 없으면 차단
@@ -65,7 +65,7 @@ jev_backend: mock            # mock(키워드 규칙, 시험용) | laya(로컬 l
 jev_timeout_seconds: 3.0     # 이 시간 안에 답이 없으면 차단
 max_inspect_bytes: 200000    # 판단 모델에 한 번에 넘기는 최대 바이트. 넘으면 나눠서 묻고 가장 엄격한 답을 쓴다
 
-# 사람 승인 (Phase 5). 판단이 ask_human이면 사용자에게 묻는다: 맥 대화상자, 또는 사용자 터미널에서 gate approve / gate deny.
+# 사람 승인 (Phase 5). 판단이 ask_human이면 사용자에게 묻는다: 맥 대화상자, 또는 사용자 터미널에서 plant approve / plant deny.
 # 승인해도 번호·비밀값은 가린 채로 보여 준다. 원본을 그대로 보여 주는 길은 경로 규칙 allow뿐이다.
 approval:
   timeout_seconds: 30.0      # 이 시간 안에 답이 없으면 차단

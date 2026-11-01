@@ -121,7 +121,7 @@ def run(
         path = _policy_path(args)
         if command in CHANGE_COMMANDS and require_tty and not _isatty(stdin):
             raise _Stop("정책을 바꾸는 명령은 사람이 터미널에서 직접 실행해야 해요(입력이 터미널이 아님). "
-                        "보기는 `gate policy show`로 할 수 있어요.")
+                        "보기는 `plant policy show`로 할 수 있어요.")
         if command == "undo":
             return _undo(path, _Prompt(stdin, out))
         entries = _read(path)
@@ -135,7 +135,7 @@ def run(
             return _remove(path, entries, args.number, io)
         return _set(path, entries, args.key, args.values, io)
     except _Stop as exc:
-        print(f"gate policy: {exc}", file=out)
+        print(f"plant policy: {exc}", file=out)
         return 1
 
 
@@ -185,7 +185,7 @@ class _Prompt:
 _NOTE_TEXT: dict[Note, str] = {
     "context_mock": "  주의: 지금 판단 모델은 Mock(키워드 규칙)이라 맥락 규칙을 판단에 쓰지 않아요. 실제 판단 모델을 붙여야 효과가 있어요.",
     "ner_off": "  주의: 지금 NER이 꺼져 있어(ner_backend: none) 이 설정은 효과가 없어요. "
-               "켜려면: gate policy set ner_backend server",
+               "켜려면: plant policy set ner_backend server",
     "no_change": "  (지금 정책과 같은 값이라 동작은 바뀌지 않아요)",
 }
 
@@ -219,8 +219,8 @@ def _confirm_loosening(change: Change, io: _Prompt) -> bool:
 
 def _saved(path: Path, policy: Policy, io: _Prompt) -> None:
     io.say(f"저장했어요: {path}")
-    io.say("실행 중인 게이트 데몬은 다음 요청부터 바뀐 정책을 써요(다시 시작하지 않아도 돼요).")
-    io.say(f"되돌리려면 `gate policy undo`. 정책 버전 {policy.version}")
+    io.say("실행 중인 PLANT 데몬은 다음 요청부터 바뀐 정책을 써요(다시 시작하지 않아도 돼요).")
+    io.say(f"되돌리려면 `plant policy undo`. 정책 버전 {policy.version}")
 
 
 def _plan(make, *args) -> Change:
@@ -284,7 +284,7 @@ def _undo(path: Path, io: _Prompt) -> int:
 
 def _say_problem(problem: str, io: _Prompt) -> None:
     io.say(f"지금 정책 파일에 문제가 있어요: {problem}")
-    io.say("게이트 데몬은 지금 내용 읽기를 모두 차단하고 있어요. 되돌리면 잘못된 파일은 기록의 내용으로 바뀌어요.")
+    io.say("PLANT 데몬은 지금 내용 읽기를 모두 차단하고 있어요. 되돌리면 잘못된 파일은 기록의 내용으로 바뀌어요.")
 
 
 def _set(path: Path, entries: tuple[Entry, ...], key: str, values: list[str], io: _Prompt) -> int:
@@ -302,7 +302,7 @@ def _set(path: Path, entries: tuple[Entry, ...], key: str, values: list[str], io
 # --- show ---
 
 def _entry_title(entry: Entry) -> str:
-    return f"\"{' '.join(entry.said.split())}\"" if entry.said else "(gate policy set으로 지정)"
+    return f"\"{' '.join(entry.said.split())}\"" if entry.said else "(plant policy set으로 지정)"
 
 
 def _describe_entry(entry: Entry) -> str:
@@ -322,7 +322,7 @@ def _show(path: Path, entries: tuple[Entry, ...], out: TextIO) -> None:
         return "[지정]" if key in last_set else "[기본]"
 
     lines = [f"정책 파일: {path}" + ("" if path.exists() else " (아직 없음, 전부 기본값)"), ""]
-    lines.append("내가 지정한 항목 (지우기: gate policy remove <번호>)")
+    lines.append("내가 지정한 항목 (지우기: plant policy remove <번호>)")
     if not entries:
         lines.append("  없음. 아래는 전부 기본값이에요.")
     for i, entry in enumerate(entries):
@@ -355,7 +355,7 @@ def _show(path: Path, entries: tuple[Entry, ...], out: TextIO) -> None:
         f"    판단 모델이 '안전'이라고 확신도 {policy.allow_threshold:g} 이상으로 답하면 보여줌 {mark(allow_key)}",
         f"    판단 모델이 '민감'이라고 확신도 {policy.deny_threshold:g} 이상으로 답하면 거부 {mark(deny_key)}",
         "    그 사이는 사람에게 물어봄",
-        "  사람 승인 (맥 대화상자 또는 내 터미널의 gate approve / gate deny. 허용해도 가린 정보는 가린 채로 보여줌)",
+        "  사람 승인 (맥 대화상자 또는 내 터미널의 plant approve / plant deny. 허용해도 가린 정보는 가린 채로 보여줌)",
         f"    답을 기다리는 시간: {policy.approval_timeout_seconds:g}초, 넘으면 거부 {mark(timeout_key)}",
         f"    '이 폴더 허용'을 기억하는 시간: {policy.approval_session_minutes}분 {mark(session_key)}"
         if policy.approval_session_minutes > 0 else

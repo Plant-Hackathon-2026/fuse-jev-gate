@@ -338,7 +338,7 @@ def test_picker_problems_are_reported(make_ui, error, status, code):
 def test_not_mac_message_points_to_terminal(make_ui):
     u = make_ui(picker=MacFolderPicker(system=lambda: "Linux"))
     status, data = u.post("mounts/pick", {}, u.launch())
-    assert (status, data["error"]) == (501, "picker-unavailable") and "gate mount add" in data["message"]
+    assert (status, data["error"]) == (501, "picker-unavailable") and "plant mount add" in data["message"]
 
 
 def fake_osascript(tmp_path: Path, body: str) -> str:
@@ -472,7 +472,7 @@ def test_add_mount_error_is_shown_and_pick_is_dropped(make_ui, where):
     u = make_ui()
     session = u.launch()
     picked = pick(u, session)
-    u.ops.errors[where] = MountError("작업 폴더 설정이 손으로 바뀌어 있어요. `gate workspace init --force`로 다시 만든 뒤 추가하세요.")
+    u.ops.errors[where] = MountError("작업 폴더 설정이 손으로 바뀌어 있어요. `plant workspace init --force`로 다시 만든 뒤 추가하세요.")
     status, data = u.post("mounts/add", {"pick": picked["pick"], "confirm": picked["confirm"]}, session)
     assert (status, data["error"]) == (409, "mount") and data["message"].startswith("작업 폴더 설정이 손으로")
     assert data["path"] == PICKED
@@ -563,12 +563,12 @@ def test_saved_add_explains_notes_in_plain_words(make_ui):
     done = saved_add(u)
     assert done["notes"] == [
         {"code": "restart_session", "text": "이미 켜 둔 에이전트 세션은 다시 시작해야 이 폴더를 직접 여는 것이 막혀요."},
-        {"code": "rerun_setup", "text": "전역 설정에는 아직 반영되지 않았어요. 터미널에서 `gate setup`을 다시 실행하세요."},
+        {"code": "rerun_setup", "text": "전역 설정에는 아직 반영되지 않았어요. 터미널에서 `plant setup`을 다시 실행하세요."},
         {"code": "no_workspace", "text": "등록된 작업 폴더가 없어 직접 열기를 막지 못했어요. "
-                                         "`gate workspace init`으로 작업 폴더를 만든 뒤 쓰세요."},
+                                         "`plant workspace init`으로 작업 폴더를 만든 뒤 쓰세요."},
     ]
     assert done["rewritten"] == [WORKSPACE] and done["rewritten_count"] == 1
-    assert done["message"] == ("“가계부” 폴더를 연결했어요. 에이전트는 이제 게이트에서 /가계부 아래로 이 폴더 문서를 읽어요. "
+    assert done["message"] == ("“가계부” 폴더를 연결했어요. 에이전트는 이제 PLANT에서 /가계부 아래로 이 폴더 문서를 읽어요. "
                                "작업 폴더 설정 1곳에서 이 폴더를 직접 열지 못하게 막았어요.")
 
 
@@ -673,14 +673,14 @@ def test_screen_script_has_mount_flows_and_plan_texts():
     js = static_text("app.js")
     for needle in ('"mounts/pick"', '"mounts/add"', '"mounts/" + op', 'api("GET", "mounts")',
                    # 계획 5절 확인 상자 문구
-                   "연결하면 에이전트가 게이트를 거쳐 이 폴더 문서를 읽을 수 있어요. 정책대로 가리거나 물어봐요. ",
+                   "연결하면 에이전트가 PLANT를 거쳐 이 폴더 문서를 읽을 수 있어요. 정책대로 가리거나 물어봐요. ",
                    "동시에 작업 폴더 설정에서 이 폴더를 직접 열지 못하게 막아요.",
-                   "게이트에서 이 폴더를 빼요. 에이전트는 이 폴더 문서를 더는 게이트로 읽지 못해요. 직접 열기 막기는 남겨 둬요.",
+                   "PLANT에서 이 폴더를 빼요. 에이전트는 이 폴더 문서를 더는 PLANT로 읽지 못해요. 직접 열기 막기는 남겨 둬요.",
                    "다시 직접 읽을 수 있어요",
                    # 상태 태그·파일 수
                    '"기본"', '"연결됨"', '"보호만 남음"', '"찾을 수 없음"', '"작업 폴더 설정에 반영 안 됨"', "1만 개 넘음",
                    # 배너·안내
-                   "gate workspace init --force", "등록된 작업 폴더가 없어요", "원본 폴더 목록 파일에 문제가 있어요",
+                   "plant workspace init --force", "등록된 작업 폴더가 없어요", "원본 폴더 목록 파일에 문제가 있어요",
                    '"원본 폴더", folderSummary(g.folders)'):
         assert needle in js, needle
     assert 'confirmMount("mounts/add", { pick: result.pick }' in js  # 추가 요청에는 선택 번호만 싣는다

@@ -1,11 +1,13 @@
 import hashlib
 import json
 import stat
+import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-from gate import cli
+from gate import cli, workspace
 from gate.mounts import MountEntry, read_workspaces, write_mounts
 from gate.workspace import GatePaths, WorkspaceError, agent_guide, agent_settings, init_workspace, resolve_paths
 
@@ -15,7 +17,7 @@ EXAMPLE = GatePaths(
     socket=EXAMPLE_ROOT / "run" / "gate.sock",
     policy=EXAMPLE_ROOT / "policy.yaml",
     audit=EXAMPLE_ROOT / "audit" / "audit.jsonl",
-    gate_bin=Path("/path/to/hackathon/fuse-jev-gate/.venv/bin/gate"),
+    gate_bin=Path("/path/to/hackathon/fuse-jev-gate/.venv/bin/plant"),
 )
 
 
@@ -24,7 +26,7 @@ def data(tmp_path):
     root = tmp_path / "gate-data"
     (root / "source").mkdir(parents=True)
     paths = resolve_paths(root / "source", root / "run" / "gate.sock", root / "policy.yaml",
-                          root / "audit" / "audit.jsonl", tmp_path / "bin" / "gate")
+                          root / "audit" / "audit.jsonl", tmp_path / "bin" / "plant")
     return root.resolve(), paths
 
 
@@ -45,7 +47,7 @@ def test_permission_rules_use_double_slash_absolute_paths():
         assert f"Read({root}/{name})" in deny and f"Edit({root}/{name})" in deny
         assert f"Read({root}/{name}/**)" not in deny
     assert f"Edit({root}/run/**)" in deny
-    assert not any(rule.startswith("Read(") and "/run" in rule for rule in deny)  # 게이트 소켓 연결은 막지 않는다
+    assert not any(rule.startswith("Read(") and "/run" in rule for rule in deny)  # PLANT 소켓 연결은 막지 않는다
     for rule in deny:
         if "(/" in rule and not rule.startswith(("Edit(~", "Read(~")):
             assert "(//" in rule, rule  # 한 슬래시는 작업 폴더 기준 상대 경로가 된다
@@ -135,7 +137,7 @@ def test_cli_init(data, capsys):
     root, paths = data
     code = cli.main(["--socket", str(paths.socket), "workspace", "init", str(root / "agent-workspace"),
                      "--source", str(paths.source), "--policy", str(paths.policy), "--audit", str(paths.audit),
-                     "--gate-bin", str(paths.gate_bin)])
+                     "--plant-bin", str(paths.gate_bin)])
     assert code == 0
     assert (root / "agent-workspace" / ".claude" / "settings.json").is_file()
     assert "하위 폴더에서 띄우면" in capsys.readouterr().out
@@ -145,7 +147,7 @@ def test_cli_init_requires_every_protected_path(data, capsys, monkeypatch):
     root, paths = data
     monkeypatch.delenv("GATE_AUDIT", raising=False)
     code = cli.main(["--socket", str(paths.socket), "workspace", "init", str(root / "agent-workspace"),
-                     "--source", str(paths.source), "--policy", str(paths.policy), "--gate-bin", str(paths.gate_bin)])
+                     "--source", str(paths.source), "--policy", str(paths.policy), "--plant-bin", str(paths.gate_bin)])
     assert code == 1
     assert "--audit(GATE_AUDIT)" in capsys.readouterr().err
     assert not (root / "agent-workspace").exists()
@@ -242,7 +244,77 @@ def test_cli_init_reports_registration(data, capsys):
     root, paths = data
     code = cli.main(["--socket", str(paths.socket), "workspace", "init", str(root.parent / "ws"),
                      "--source", str(paths.source), "--policy", str(paths.policy), "--audit", str(paths.audit),
-                     "--gate-bin", str(paths.gate_bin)])
+                     "--plant-bin", str(paths.gate_bin)])
     assert code == 0
     assert "작업 폴더를 등록했습니다" in capsys.readouterr().out
     assert [r.path for r in read_workspaces(paths.workspaces_file)] == [str(root.parent / "ws")]
+
+
+# --- 실행 이름 plant (gate는 pyproject의 별칭) ---
+
+def _bin_dir(tmp_path, *names):
+    """가짜 venv bin 폴더. names마다 실행 파일을 하나씩 둔다."""
+    folder = tmp_path / "venv" / "bin"
+    folder.mkdir(parents=True)
+    for name in names:
+        (folder / name).write_text("#!/bin/sh\n", encoding="utf-8")
+        (folder / name).chmod(0o755)
+    return folder.resolve()
+
+
+def _init_args(root, paths, *extra):
+    return ["--socket", str(paths.socket), "workspace", "init", str(root / "agent-workspace"),
+            "--source", str(paths.source), "--policy", str(paths.policy), "--audit", str(paths.audit), *extra]
+
+
+def test_init_run_as_gate_writes_the_sibling_plant(data, tmp_path, monkeypatch):
+    """예전 이름(gate)으로 실행해도 CLAUDE.md·작업 폴더 등록에는 같은 폴더의 plant를 적는다."""
+    root, paths = data
+    folder = _bin_dir(tmp_path, "gate", "plant")
+    monkeypatch.setattr(sys, "argv", [str(folder / "gate")])
+    assert cli.main(_init_args(root, paths)) == 0
+    plant, gate = str(folder / "plant"), str(folder / "gate")
+    guide = (root / "agent-workspace" / "CLAUDE.md").read_text(encoding="utf-8")
+    assert f"`{plant} ls /`" in guide and f"`{plant} cat <경로>" in guide and f"`{plant} search <글자>" in guide
+    assert gate not in guide
+    settings = (root / "agent-workspace" / ".claude" / "settings.json").read_text(encoding="utf-8")
+    assert json.loads(settings) == agent_settings(replace(paths, gate_bin=Path(plant)))
+    assert gate not in settings  # 권한 규칙·샌드박스 설정에는 실행 파일 경로가 들어가지 않는다(예전 이름은 더더욱)
+    assert [r.gate_bin for r in read_workspaces(paths.workspaces_file)] == [plant]
+
+
+@pytest.mark.parametrize("argv0, names, which, expected", [
+    ("plant", ("plant",), None, "plant"),                 # plant로 실행: 그 파일
+    ("gate", ("gate", "plant"), None, "plant"),           # gate로 실행: 옆의 plant
+    ("gate", ("gate",), "/usr/local/bin/plant", "which"),  # 옆에 plant가 없으면 PATH의 plant
+    ("python", ("python",), "/usr/local/bin/plant", "which"),
+])
+def test_default_bin_is_always_plant(tmp_path, monkeypatch, argv0, names, which, expected):
+    folder = _bin_dir(tmp_path, *names)
+    monkeypatch.setattr(sys, "argv", [str(folder / argv0)])
+    asked = []
+    monkeypatch.setattr(workspace.shutil, "which", lambda name: asked.append(name) or which)
+    got = workspace._default_gate_bin()
+    assert got == (which if expected == "which" else str(folder / expected))
+    assert asked in ([], ["plant"])
+
+
+def test_plant_bin_option_shows_in_help_and_old_gate_bin_is_hidden(data, capsys, monkeypatch):
+    monkeypatch.setenv("COLUMNS", "300")
+    with pytest.raises(SystemExit):
+        cli.main(["workspace", "init", "--help"])
+    help_text = capsys.readouterr().out
+    assert "--plant-bin PLANT_BIN" in help_text and "plant 실행 파일 (기본: 지금 실행한 plant)" in help_text
+    assert "--gate-bin" not in help_text and "GATE_BIN" not in help_text
+    root, paths = data
+    assert cli.main(_init_args(root, paths, "--gate-bin", str(paths.gate_bin))) == 0  # 예전 옵션 이름도 그대로 된다
+    assert f"`{paths.gate_bin} ls /`" in (root / "agent-workspace" / "CLAUDE.md").read_text(encoding="utf-8")
+
+
+def test_missing_bin_names_the_plant_option(data, tmp_path, capsys, monkeypatch):
+    root, paths = data
+    monkeypatch.setattr(sys, "argv", [str(tmp_path / "python")])
+    monkeypatch.setattr(workspace.shutil, "which", lambda name: None)
+    assert cli.main(_init_args(root, paths)) == 1
+    err = capsys.readouterr().err
+    assert err.startswith("plant: 작업 폴더 설정에는 --plant-bin이 필요합니다") and "gate" not in err

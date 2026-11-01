@@ -78,7 +78,7 @@ def test_change_commands_need_a_terminal(env, argv):
     argv = [a.format(book=env.book) for a in argv]
     code, out = run(env, *argv, answers="y\ny\n", tty=False)
     assert code == 1
-    assert "사람이 터미널에서 직접 실행해야 해요(입력이 터미널이 아님)" in out and "gate mount list" in out
+    assert "사람이 터미널에서 직접 실행해야 해요(입력이 터미널이 아님)" in out and "plant mount list" in out
     assert not env.ctx.mounts_file.exists()
 
 
@@ -144,7 +144,7 @@ def test_list_shows_workspaces_that_do_not_block_yet(env):
 def test_add_asks_twice_and_reports(env):
     code, out = run(env, "add", str(env.book), answers="y\ny\n")
     assert code == 0, out
-    assert "이 폴더를 게이트에 연결해요:" in out and "게이트 안 경로: /가계부" in out
+    assert "이 폴더를 PLANT에 연결해요:" in out and "PLANT 안 경로: /가계부" in out
     assert f"다시 쓸 작업 폴더 설정: {env.ws}" in out
     assert out.count("[y/N]") == 2
     assert "연결했어요: /가계부" in out and f"작업 폴더 설정을 다시 썼어요: {env.ws}" in out
@@ -164,7 +164,7 @@ def test_add_declined_changes_nothing(env, answers):
 def test_refused_folder_is_explained(env):
     (env.data / "audit").mkdir(exist_ok=True)
     code, out = run(env, "add", str(env.data / "audit"), answers="y\ny\n")
-    assert code == 1 and out.strip() == "gate mount: 게이트 데이터(감사 로그 폴더)는 연결할 수 없어요."
+    assert code == 1 and out.strip() == "plant mount: PLANT 데이터(감사 로그 폴더)는 연결할 수 없어요."
 
 
 def test_global_setup_and_missing_workspace_notes(tmp_path, isolate):
@@ -181,13 +181,13 @@ def test_global_setup_and_missing_workspace_notes(tmp_path, isolate):
     assert mount_cli.run(args, stdin=Tty("y\ny\n"), stdout=out) == 0
     text = out.getvalue()
     assert "주의: 등록된 작업 폴더가 없어요" in text
-    assert "`gate setup`을 다시 실행하세요" in text and "`gate workspace init`으로 작업 폴더를 만드세요" in text
+    assert "`plant setup`을 다시 실행하세요" in text and "`plant workspace init`으로 작업 폴더를 만드세요" in text
 
 
 def test_remove_then_unprotect(env):
     run(env, "add", str(env.book), answers="y\ny\n")
     code, out = run(env, "remove", "가계부", answers="y\n")
-    assert code == 0 and "뺐어요: /가계부" in out and "gate mount unprotect 가계부" in out
+    assert code == 0 and "뺐어요: /가계부" in out and "plant mount unprotect 가계부" in out
     assert out.count("[y/N]") == 1
     assert read_mounts(env.ctx.mounts_file)[0].connected is False
     assert str(env.book) in env.settings.read_text(encoding="utf-8")  # 보호는 남음
@@ -204,7 +204,7 @@ def test_errors_are_reported_with_exit_1(env):
     assert code == 1 and "목록에 없어요" in out
     run(env, "add", str(env.book), answers="y\ny\n")
     code, out = run(env, "unprotect", "가계부", answers="y\ny\n")
-    assert code == 1 and "먼저 게이트에서 뺀" in out
+    assert code == 1 and "먼저 PLANT에서 뺀" in out
 
 
 # --- gate setup·gate workspace init이 목록을 읽는다 ---

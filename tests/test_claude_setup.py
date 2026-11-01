@@ -13,7 +13,7 @@ from gate.workspace import CLAUDE_CONFIG_EDIT_DENY, GatePaths, agent_settings, p
 EXAMPLE_ROOT = Path("/path/to/hackathon/gate-data")
 EXAMPLE = GatePaths(source=EXAMPLE_ROOT / "source", socket=EXAMPLE_ROOT / "run" / "gate.sock",
                     policy=EXAMPLE_ROOT / "policy.yaml", audit=EXAMPLE_ROOT / "audit" / "audit.jsonl",
-                    gate_bin=Path("/path/to/hackathon/fuse-jev-gate/.venv/bin/gate"))
+                    gate_bin=Path("/path/to/hackathon/fuse-jev-gate/.venv/bin/plant"))
 FRAGMENT = protection_settings(EXAMPLE)
 YES = lambda _: True  # noqa: E731
 NO = lambda _: False  # noqa: E731

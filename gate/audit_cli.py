@@ -273,4 +273,4 @@ def _pad(text: str, width: int) -> str:
 
 
 def _err(text: str) -> None:
-    print(f"gate: {text}", file=sys.stderr, flush=True)
+    print(f"plant: {text}", file=sys.stderr, flush=True)
