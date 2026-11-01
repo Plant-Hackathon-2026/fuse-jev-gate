@@ -313,8 +313,10 @@ td.t-reason { color: var(--forest-500); }
 .mrow .warn { flex: 1 1 100%; }
 .mrow .warn code { color: inherit; }
 .mside { flex: none; display: flex; align-items: center; gap: 12px; }
+.mempty { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 20px; background: var(--sage-50); }
+.mempty p { flex: 1 1 320px; font-size: 15px; }
+.mempty strong { font-weight: 700; }
 .ftag { display: inline-flex; align-items: center; min-height: 22px; padding: 0 8px; font-size: 12px; font-weight: 700; }
-.ftag-base { border: 1px solid var(--forest-700); color: var(--forest-700); }
 .ftag-on { background: var(--allow-bg); color: var(--allow-fg); }
 .ftag-kept { background: var(--ask-bg); color: var(--ask-fg); }
 .ftag-missing { background: var(--deny-bg); color: var(--deny-fg); }

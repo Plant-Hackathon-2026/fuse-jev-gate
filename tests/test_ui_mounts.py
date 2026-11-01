@@ -46,10 +46,9 @@ class FakeContext:
     audit: Path | None
 
 
-def row(kind="mount", name="가계부", path=PICKED, connected=True, exists=True, count=12, capped=False, stale=()):
-    base = kind == "base"
-    return FolderRow(kind, None if base else name, "/" if base else f"/{name}", path, connected, exists, count, capped,
-                     None if base else "2026-11-02T10:00:00+09:00", None if base else "ui", tuple(stale))
+def row(name="가계부", path=PICKED, connected=True, exists=True, count=12, capped=False, stale=()):
+    return FolderRow("mount", name, f"/{name}", path, connected, exists, count, capped, "2026-11-02T10:00:00+09:00", "ui",
+                     tuple(stale))
 
 
 class FakeMounts:
@@ -67,8 +66,7 @@ class FakeMounts:
         self.generation = 0  # 올리면 다음 plan_add의 파일 수가 달라져 확인 값이 바뀐다(그사이 바뀜)
         self.notes: tuple[str, ...] = ("restart_session",)
         self.rewritten: tuple[str, ...] = (WORKSPACE,)
-        self.folders = (row("base", path="/Users/me/gate-data/source", count=40),
-                        row(name="가계부"),
+        self.folders = (row(name="가계부"),
                         row(name="사진", path="/Volumes/외장/사진", connected=False, count=None))
         self.workspaces = (WorkspaceStatus(WORKSPACE, "ok"),)
         self.global_setup = False
@@ -246,12 +244,12 @@ def test_list_shape(make_ui):
                                          stale=(WORKSPACE,)))
     status, data = u.get("mounts", u.launch())
     assert status == 200 and data["ok"] is True
-    assert [set(f) for f in data["folders"]] == [FOLDER_KEYS] * 4
-    base, first, kept, gone = data["folders"]
-    assert base == {"kind": "base", "name": None, "vpath": "/", "path": "/Users/me/gate-data/source", "connected": True,
-                    "exists": True, "file_count": 40, "file_count_capped": False, "added_at": None, "added_by": None,
-                    "unprotected_workspaces": []}
-    assert (first["name"], first["vpath"], first["added_by"]) == ("가계부", "/가계부", "ui")
+    assert [set(f) for f in data["folders"]] == [FOLDER_KEYS] * 3
+    first, kept, gone = data["folders"]
+    assert first == {"kind": "mount", "name": "가계부", "vpath": "/가계부", "path": PICKED, "connected": True,
+                     "exists": True, "file_count": 12, "file_count_capped": False,
+                     "added_at": "2026-11-02T10:00:00+09:00", "added_by": "ui", "unprotected_workspaces": []}
+    assert all(f["kind"] == "mount" for f in data["folders"])  # 기본 폴더 줄은 없다(2026-11-01)
     assert kept["connected"] is False and gone["exists"] is False and gone["unprotected_workspaces"] == [WORKSPACE]
     assert data["workspaces"] == [{"path": WORKSPACE, "state": "ok"}]
     assert data["global_setup"] is True and data["error"] is None and data["limit"] == 20 and data["mount_count"] == 3
@@ -616,7 +614,7 @@ def test_status_counts_folders(make_ui):
     u.ops.folders = (*u.ops.folders, row(name="외장", path="/Volumes/외장/문서", exists=False, count=None))
     status, st = u.get("status", u.launch())
     assert status == 200
-    assert st["gate"]["folders"] == {"count": 3, "base": 1, "mounts": 2, "protected_only": 1, "missing": 1, "error": False}
+    assert st["gate"]["folders"] == {"count": 2, "protected_only": 1, "missing": 1, "error": False}
     assert u.ops.calls == [("list_mounts", False)]  # 상태 카드는 파일 수를 세지 않는다
 
 
@@ -626,7 +624,16 @@ def test_status_folders_without_registered_workspace_and_with_file_error(make_ui
     u.ops.workspaces = ()
     u.ops.error = "workspaces.yaml이 잘못됐어요."
     _, st = u.get("status", u.launch())
-    assert st["gate"]["folders"] == {"count": 1, "base": 0, "mounts": 1, "protected_only": 0, "missing": 0, "error": True}
+    assert st["gate"]["folders"] == {"count": 1, "protected_only": 0, "missing": 0, "error": True}
+
+
+def test_status_counts_no_folders(make_ui):
+    u = make_ui()
+    u.ops.folders = ()
+    _, st = u.get("status", u.launch())
+    assert st["gate"]["folders"] == {"count": 0, "protected_only": 0, "missing": 0, "error": False}
+    _, data = u.get("mounts", u.launch())
+    assert data["folders"] == [] and data["mount_count"] == 0
 
 
 @pytest.mark.parametrize("error", [NotImplementedError(), MountError("못 읽어요."), OSError("디스크 오류"), ValueError()])
@@ -678,12 +685,19 @@ def test_screen_script_has_mount_flows_and_plan_texts():
                    "PLANT에서 이 폴더를 빼요. 에이전트는 이 폴더 문서를 더는 PLANT로 읽지 못해요. 직접 열기 막기는 남겨 둬요.",
                    "다시 직접 읽을 수 있어요",
                    # 상태 태그·파일 수
-                   '"기본"', '"연결됨"', '"보호만 남음"', '"찾을 수 없음"', '"작업 폴더 설정에 반영 안 됨"', "1만 개 넘음",
+'"연결됨"', '"보호만 남음"', '"찾을 수 없음"', '"작업 폴더 설정에 반영 안 됨"', "1만 개 넘음",
                    # 배너·안내
                    "plant workspace init --force", "등록된 작업 폴더가 없어요", "원본 폴더 목록 파일에 문제가 있어요",
                    '"원본 폴더", folderSummary(g.folders)'):
         assert needle in js, needle
     assert 'confirmMount("mounts/add", { pick: result.pick }' in js  # 추가 요청에는 선택 번호만 싣는다
+    # 기본 폴더는 화면에 없다(2026-11-01). 폴더가 없을 때는 [폴더 추가] 옆에 안내를 보여 준다
+    html = static_text("index.html")
+    for text in (js, html):
+        assert "기본 폴더" not in text and "기본 포함" not in text and "unknownBaseRow" not in text
+    assert '"기본"' not in js and "--source" not in js + html
+    assert "아직 연결한 폴더가 없어요. " in js and "폴더를 추가해야 에이전트가 문서를 읽을 수 있어요." in js
+    assert "연결하지 않은 폴더는 PLANT로 읽을 수 없어요." in html
     assert "path:" not in js.split('confirmMount("mounts/add"', 1)[1].split(")", 1)[0]
 
 
@@ -695,10 +709,10 @@ def test_screen_text_uses_polite_tone():
 # --- 실제 폴더 관리 함수(gate.mount_change)와 함께 (9-1 ∥ 9-2를 합친 뒤 메인이 더함) ---
 
 def test_real_mount_functions_through_ui(tmp_path, monkeypatch):
-    """가짜 없이: 폴더 선택 → 확인 → 연결 → 목록 → 빼기(보호만 남음) → 보호도 풀기. 작업 폴더 설정과 게이트가 같이 바뀐다."""
+    """가짜 없이: 폴더 선택 → 확인 → 연결 → 목록 → 빼기(보호만 남음) → 보호도 풀기. 작업 폴더 설정과 게이트가 같이 바뀐다.
+    기본 폴더 없이(--source 없이) 띄운 데몬·작업 폴더와 같다(2026-11-01)."""
     from gate.mounts import MountedStore, MountsSource
     from gate.protocol import GateError
-    from gate.store import PlainStore
     from gate.workspace import init_workspace, resolve_paths
 
     root = tmp_path.resolve()
@@ -707,8 +721,7 @@ def test_real_mount_functions_through_ui(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     data = root / "gate-data"
-    (data / "source" / "상담").mkdir(parents=True)
-    paths = resolve_paths(data / "source", data / "run" / "gate.sock", data / "policy.yaml",
+    paths = resolve_paths(None, data / "run" / "gate.sock", data / "policy.yaml",
                           data / "audit" / "audit.jsonl", root / "bin" / "gate")
     workspace = data / "agent-workspace"
     init_workspace(workspace, paths)
@@ -720,15 +733,16 @@ def test_real_mount_functions_through_ui(tmp_path, monkeypatch):
     app = UiApp(UiConfig(data / "policy.yaml", data / "audit" / "audit.jsonl", data / "run" / "gate.sock",
                          closed_port_url(), closed_port_url(), health_timeout=0.5),
                 picker=FakePicker(str(book)))
-    store = MountedStore(PlainStore(data / "source"),
-                         MountsSource(data / "policy.yaml", source=data / "source", socket=data / "run" / "gate.sock",
-                                      audit=data / "audit" / "audit.jsonl", warn=lambda _: None))
+    store = MountedStore(None, MountsSource(data / "policy.yaml", socket=data / "run" / "gate.sock",
+                                            audit=data / "audit" / "audit.jsonl", warn=lambda _: None))
 
     def deny_rules() -> list[str]:
         return json.loads(settings.read_text(encoding="utf-8"))["permissions"]["deny"]
 
     view = app.mounts()
-    assert [f["kind"] for f in view["folders"]] == ["base"] and view["error"] is None
+    assert view["folders"] == [] and view["error"] is None and view["mount_count"] == 0
+    assert app.status()["gate"]["folders"]["count"] == 0
+    assert store.list_dir("/") == []  # 연결하기 전에는 아무것도 보이지 않는다
 
     picked = app.pick_folder()
     assert picked["status"] == "confirm" and picked["preview"]["name"] == "가계부"
@@ -743,9 +757,10 @@ def test_real_mount_functions_through_ui(tmp_path, monkeypatch):
     assert f"Read(/{book})" in deny_rules() and f"Read(/{book}/**)" in deny_rules()
     assert store.read("/가계부/메모.txt") == "메모\n".encode()
     rows = app.mounts()["folders"]
-    assert [(r["kind"], r["name"], r["connected"], r["added_by"]) for r in rows] == \
-        [("base", None, True, None), ("mount", "가계부", True, "ui")]
-    assert app.status()["gate"]["folders"]["count"] == 2
+    assert [(r["kind"], r["name"], r["vpath"], r["path"], r["connected"], r["added_by"]) for r in rows] == \
+        [("mount", "가계부", "/가계부", str(book), True, "ui")]
+    assert app.status()["gate"]["folders"]["count"] == 1
+    assert [e.name for e in store.list_dir("/")] == ["가계부"]
     with pytest.raises(ui_api.UiError) as reused:
         app.add_mount(picked["pick"], picked["confirm"])  # 선택 번호는 한 번만
     assert reused.value.code == "pick-expired"
@@ -757,11 +772,12 @@ def test_real_mount_functions_through_ui(tmp_path, monkeypatch):
     assert f"Read(/{book})" in deny_rules()  # 보호는 남는다
     with pytest.raises(GateError):
         store.read("/가계부/메모.txt")
-    assert [r["connected"] for r in app.mounts()["folders"]] == [True, False]
+    assert [r["connected"] for r in app.mounts()["folders"]] == [False]
+    assert store.list_dir("/") == []
 
     asked = app.unprotect_mount("가계부")
     assert asked["status"] == "confirm" and asked["preview"]["loosening"] is True
     freed = app.unprotect_mount("가계부", asked["confirm"])
     assert freed["status"] == "saved" and freed["rewritten_count"] == 1
     assert f"Read(/{book})" not in deny_rules()
-    assert [r["kind"] for r in app.mounts()["folders"]] == ["base"]
+    assert app.mounts()["folders"] == []

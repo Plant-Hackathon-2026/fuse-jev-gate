@@ -44,6 +44,10 @@
              gate mount add(pty, y·y) → 작업 폴더 설정에 막기(Read·Edit 거부 + denyRead) → 데몬을 다시 띄우지 않아도 gate ls /에
              /가계부 → 그 안 문서는 가려지고 .env는 경로 규칙으로 EACCES → 감사 기록에 게이트 안 경로만(실제 경로 없음) →
              gate mount remove(pty, y): 안 보이고 읽으면 ENOENT, 막기는 남음 → gate mount unprotect(pty, y·y): 막기가 빠짐
+  no-folder  폴더를 연결하지 않으면 아무것도 못 읽음(2026-11-01 기본 폴더 없앰): --source 없이 띄운 세 번째 데몬(다른 정책·
+             소켓·감사 로그) → 시작 안내에 "아직 연결한 폴더가 없습니다" → gate ls /는 비어 있고 cat은 ENOENT, search는 못 찾음 →
+             gate mount add(pty, y·y) → 다시 띄우지 않아도 ls /에 보이고 그 안 문서는 평소대로 허용·가림. 나머지 시나리오는
+             숨은 개발용 --source로 띄운 첫 데몬을 쓴다
   encoding   UTF-16·EUC-KR·바이너리(2026-11-01): UTF-16(BOM) 설정 파일의 비밀번호·토큰이 *로 가려져 UTF-16 그대로 나온다,
              EUC-KR 상담 문서가 UTF-8과 같이 [이름] 등으로 가려져 EUC-KR 그대로 나온다, 바이너리(PNG)는 판단 없이
              사람 승인(이유에 '바이너리') → gate approve <id>(pty) → 원본 그대로
@@ -143,6 +147,11 @@ MOUNT_NAME = "가계부"
 MOUNT_DOC = f"/{MOUNT_NAME}/상담.txt"
 MOUNT_SAMPLE = SAMPLES["/consult_chat/pii_1.txt"]
 MOUNT_ENV = f"/{MOUNT_NAME}/.env"
+# 폴더 없음(2026-11-01). 세 번째 데몬이 쓰는 임시 폴더 안 nf-docs/문서함을 연결한다. 문서는 허용·가림 샘플과 같다
+NOFOLDER_NAME = "문서함"
+NOFOLDER_ALLOW = f"/{NOFOLDER_NAME}/none_1.txt"
+NOFOLDER_MASK = f"/{NOFOLDER_NAME}/상담.txt"
+NOFOLDER_SAMPLES = {NOFOLDER_ALLOW: SAMPLES["/medical_note/none_1.txt"], NOFOLDER_MASK: SAMPLES["/consult_chat/pii_1.txt"]}
 # 인코딩(2026-11-01). 시나리오가 원본 폴더 안 인코딩/에 만든다. 미리 돌려 본 결과(2026-11-01, Laya v3 + NER 재학습판):
 # UTF-16 설정은 가린 뒤 safe 1.00, EUC-KR 상담(consult_chat/pii_1과 같은 글)은 UTF-8과 같은 칸을 가리고 safe 1.00
 ENC_SECRET_DOC = "/인코딩/설정.txt"
@@ -507,8 +516,10 @@ class E2E:
         self.procs.append(proc)
         return proc
 
-    def start_daemon(self, sock: Path, env: Mapping[str, str], log: Path) -> subprocess.Popen:
-        proc = self.start("serve", "--source", str(self.source), "--no-dialog", env=env, log=log)
+    def start_daemon(self, sock: Path, env: Mapping[str, str], log: Path, source: bool = True) -> subprocess.Popen:
+        """source면 숨은 개발용 --source로 시험 원본을 `/`에 둔다(no-folder 시나리오만 빼고 모두 이렇게 띄운다)."""
+        args = ("--source", str(self.source)) if source else ()
+        proc = self.start("serve", *args, "--no-dialog", env=env, log=log)
         deadline = time.monotonic() + START_TIMEOUT
         while not socket_accepts(sock):
             if proc.poll() is not None:
@@ -963,6 +974,65 @@ def s_mount(e: E2E) -> str:
             f"감사 기록은 PLANT 안 경로만, remove → 안 보임·ENOENT·막기 남음, unprotect(y·y) → 막기 빠짐")
 
 
+def s_no_folder(e: E2E) -> str:
+    """--source 없이 띄운 데몬(사용자가 띄우는 그대로). 감사 기록 대조(audit 시나리오)에는 넣지 않는다(다른 감사 로그)."""
+    base = e.root / "nf"
+    policy, audit, sock = base / "policy.yaml", base / "audit" / "audit.jsonl", base / "run" / "gate.sock"
+    base.mkdir()
+    write_entries(policy, [Entry(settings={"jev_backend": "laya"})])  # 첫 데몬과 같은 시작 정책
+    folder = e.root / "nf-docs" / NOFOLDER_NAME
+    folder.mkdir(parents=True)
+    for vpath, sample in NOFOLDER_SAMPLES.items():
+        (folder / Path(vpath).name).write_bytes((PROJECT_ROOT / sample).read_bytes())
+    env = {**e.env, "GATE_SOCKET": str(sock), "GATE_POLICY": str(policy), "GATE_AUDIT": str(audit)}
+    log = e.root / "serve-no-folder.log"
+    try:
+        daemon = e.start_daemon(sock, env, log, source=False)
+    except RuntimeError as exc:
+        raise Fail(f"폴더 없는 데몬을 띄우지 못함: {exc}") from exc
+    try:
+        startup = log.read_text("utf-8")
+        check("아직 연결한 폴더가 없습니다" in startup and "plant mount add <폴더>" in startup,
+              f"시작 안내에 폴더 없음·연결 방법이 없음: {_gate_lines(startup)}")
+        listed = e.gate("ls", "/", env=env)
+        check(listed.code == 0 and not listed.out.split(), f"plant ls / 기대 빈 목록, 실제 코드 {listed.code} {listed.out.split()}")
+        for vpath in (CACHE_DOC, NOTICE_DOC, NOFOLDER_ALLOW):  # 첫 데몬의 원본도, 연결할 폴더도 아직 안 보인다
+            f = e.read(vpath, record=None, env=env)
+            check(f.code == 1 and "ENOENT" in f.err and not f.data,
+                  f"연결 전 {vpath}: 기대 ENOENT, 실제 종료 코드 {f.code} {_gate_lines(f.err)}")
+        found = e.gate("search", SEARCH_WORD, "/", env=env)
+        check(found.code == 1 and not found.out.strip() and "건너뜀" not in found.err,
+              f"연결 전 search 기대 결과 없음, 실제 코드 {found.code} {_short(found.out + found.err)}")
+
+        added = run_pty(e.cmd("mount", "add", str(folder)), env, ("y", "y"))
+        check(added.code == 0 and added.prompts == 2 and f"연결했어요: /{NOFOLDER_NAME}" in added.out,
+              f"plant mount add(pty) 기대 질문 2번·연결, 실제 종료 코드 {added.code} 질문 {added.prompts} {_short(added.out)}")
+        listed = e.gate("ls", "/", env=env)
+        check(listed.code == 0 and listed.out.split() == [f"{NOFOLDER_NAME}/"],
+              f"다시 띄우지 않고 plant ls /에 {NOFOLDER_NAME}/만 기대, 실제 {listed.out.split()}")
+        allow = e.read(NOFOLDER_ALLOW, record=None, env=env)
+        original = (folder / Path(NOFOLDER_ALLOW).name).read_bytes()
+        check(allow.code == 0 and allow.data == original and not allow.notice,
+              f"{NOFOLDER_ALLOW}: 기대 원문 그대로, 실제 종료 코드 {allow.code} {_gate_lines(allow.err)}")
+        masked = e.read(NOFOLDER_MASK, record=None, env=env)
+        check(masked.code == 0 and "[이름]" in masked.out,
+              f"{NOFOLDER_MASK}: 기대 가림, 실제 종료 코드 {masked.code} {_gate_lines(masked.err)}")
+        values = [m.text for m in e.must_hide.get(NOFOLDER_SAMPLES[NOFOLDER_MASK], [])]
+        leaked = leaks(masked.out, values)
+        check(not leaked, f"{NOFOLDER_MASK}: 누출 {leaked}")
+        found = e.gate("search", SEARCH_WORD, "/", env=env)
+        check(found.code == 0 and any(line.startswith(NOFOLDER_ALLOW + ":") for line in found.out.splitlines()),
+              f"연결 뒤 search에서 {NOFOLDER_ALLOW} 기대, 실제 코드 {found.code} {_short(found.out + found.err)}")
+        check(not leaks(found.out + found.err, values), "연결 뒤 search 결과에 값이 남음")
+    finally:
+        kill(daemon)
+        if daemon in e.procs:
+            e.procs.remove(daemon)
+    return (f"--source 없이 띄움: 시작 안내 '아직 연결한 폴더가 없습니다', ls / 빈 목록, cat ENOENT 3개, search 못 찾음 → "
+            f"mount add(pty y·y) → 다시 띄우지 않고 ls /에 {NOFOLDER_NAME}/, none_1 원문 그대로, "
+            f"상담 {label_summary(masked.out)}·누출 0/{len(values)}, search에서 찾음")
+
+
 def s_encoding(e: E2E) -> str:
     folder = e.source / "인코딩"
     folder.mkdir(exist_ok=True)
@@ -1080,9 +1150,11 @@ def s_ui(e: E2E) -> str:
         mounts = json.loads(body) if status == 200 else {}
         check(mounts.get("ok") and mounts.get("error") is None and isinstance(mounts.get("folders"), list),
               f"원본 폴더 API 기대 200·오류 없음, 실제 {status} {_short(body, 80)}")
+        kinds = {f.get("kind") for f in mounts["folders"]}
+        check(kinds <= {"mount"}, f"원본 폴더 API에 연결한 폴더 말고 다른 줄이 있음(기본 폴더 줄은 없어야 함): {kinds}")
         return (f"토큰 없음·틀린 토큰 403, 일회용 주소 재사용 403, 토큰으로 상태: PLANT on·Laya connected"
                 f"({data['laya'].get('model')})·NER connected, 감사 기록 {audit.get('total')}건 보임, "
-                f"원본 폴더 {len(mounts['folders'])}줄")
+                f"원본 폴더 API 연결한 폴더 {len(mounts['folders'])}줄(기본 폴더 줄 없음)")
     finally:
         kill(proc)
         if proc in e.procs:
@@ -1116,6 +1188,7 @@ SCENARIOS: tuple[Scenario, ...] = (
     Scenario("cache", "캐시", _names(CACHE_DOC), s_cache),
     Scenario("ner-down", "NER 서버 응답 없음", _names(NER_DOWN_DOC), s_ner_down),
     Scenario("mount", "원본 폴더 추가·빼기", _names(MOUNT_DOC, MOUNT_ENV), s_mount),
+    Scenario("no-folder", "폴더 없음 → 연결", _names(NOFOLDER_ALLOW, NOFOLDER_MASK), s_no_folder),
     Scenario("encoding", "UTF-16·EUC-KR·바이너리", _names(ENC_SECRET_DOC, ENC_KOREAN_DOC, ENC_BINARY_DOC), s_encoding),
     Scenario("ui", "설정 화면", "plant ui", s_ui),
     Scenario("audit", "감사 로그 대조·누출", "audit.jsonl ×2, 데몬·화면 로그", s_audit),  # 마지막: 앞 시나리오의 기록을 모두 본다

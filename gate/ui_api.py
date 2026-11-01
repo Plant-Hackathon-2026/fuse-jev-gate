@@ -30,6 +30,7 @@
     주소는 이 프로세스의 JEV_BASE_URL·NER_BASE_URL(데몬과 같은 이름), 없으면 127.0.0.1:8000·127.0.0.1:8001이다.
   - 게이트 데몬은 소켓에 연결만 해 보고 바로 끊는다(요청을 보내지 않아 감사 로그에 남지 않는다). 소켓 경로를 모르면 "확인할 수 없음".
   - 게이트 카드의 원본 폴더 수는 gate.mount_change.list_mounts로 센다(파일 수는 세지 않음). 실패해도 상태는 그대로 준다.
+    연결한 폴더만 센다(2026-11-01 기본 폴더 없앰: 목록에도 기본 폴더 줄이 없다).
   - 마지막 요청 시각은 감사 로그의 마지막 기록에서 구한다. 데몬이 정책 파일을 언제 다시 읽었는지는 알 수 없어서,
     정책 파일을 바꾼 시각만 보여 준다(데몬은 다음 요청 때 바뀐 것을 보고 다시 읽는다).
 """
@@ -679,11 +680,9 @@ class UiApp:
         except Exception:  # noqa: BLE001 - 상태 카드 하나 때문에 상태 전체가 깨지지 않게
             return None
         mounts = [f for f in folders if f.kind == "mount"]
-        return {"count": sum(1 for f in folders if f.connected),  # 연결된 폴더(기본 포함, 찾을 수 없는 것도 셈)
-                "base": sum(1 for f in folders if f.kind == "base"),
-                "mounts": sum(1 for f in mounts if f.connected),
+        return {"count": sum(1 for f in mounts if f.connected),  # 연결된 폴더(찾을 수 없는 것도 셈)
                 "protected_only": sum(1 for f in mounts if not f.connected),
-                "missing": sum(1 for f in folders if f.connected and not f.exists),
+                "missing": sum(1 for f in mounts if f.connected and not f.exists),
                 "error": bool(error)}
 
     def pick_folder(self) -> dict:

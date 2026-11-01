@@ -1,11 +1,18 @@
 """원본 폴더 여러 개(Phase 9): 폴더 목록 파일·작업 폴더 등록 파일, 추가할 수 없는 폴더 검사, 이름 정하기,
-데몬 쪽 변경 감지(MountsSource)와 저장소(MountedStore). 계획: plans/mount-ui-plan.md 4절.
+데몬 쪽 변경 감지(MountsSource)와 저장소(MountedStore). 계획: plans/mount-ui-plan.md 4절, 11절.
+
+기본 폴더 없앰 (2026-11-01 사용자 결정, 계획 11절)
+  - 데몬의 `/`는 빈 읽기 전용 폴더(gate.store.EmptyStore)이고, 사용자가 연결한 폴더만 `/<이름>/`으로 보인다.
+    폴더를 하나도 연결하지 않으면 아무 문서도 읽을 수 없다.
+  - `--source`(serve·workspace init·setup)는 e2e·하네스·테스트가 쓰는 숨은 개발용 옵션으로만 남는다. 주면 그 폴더를
+    `/`에 보여 주고(아래 "기본 폴더"), 연결 검사에서도 겹침을 막는다. 화면·`plant mount list`·도움말에는 나오지 않는다.
 
 파일 (정책 파일과 같은 폴더에 고정. `--mounts`·`GATE_MOUNTS`는 없다. 데몬·화면·작업 폴더 설정이 같은 파일을 보게)
   mounts.yaml       version: 1, mounts: [{name, path, added_at, added_by: ui|terminal, connected: bool}]
                     path는 resolve한 실제 경로. connected: false는 "보호만 남음"(게이트에는 안 보이고 직접 읽기 막기는 남음)
-  workspaces.yaml   version: 1, workspaces: [{path, source, socket, policy, audit, gate_bin, settings_sha256, registered_at}]
-                    `gate workspace init`이 적는다. 폴더를 추가·보호 해제하면 이 경로들로 작업 폴더 설정을 다시 만든다
+  workspaces.yaml   version: 1, workspaces: [{path, source?, socket, policy, audit, gate_bin, settings_sha256, registered_at}]
+                    `gate workspace init`이 적는다. 폴더를 추가·보호 해제하면 이 경로들로 작업 폴더 설정을 다시 만든다.
+                    source는 숨은 --source를 줬을 때만 있다(없거나 null이면 기본 폴더 없음)
   - 엄격하게 읽는다. 모르는 키, 이름 겹침(대소문자 무시·NFC), 경로 겹침(같음·안에 있음·감쌈), 개수 초과(MAX_MOUNTS),
     형식 오류는 MountsFileError다. 메시지에는 경로·이름을 넣지 않는다(데몬이 차단 이유로 에이전트에게 그대로 돌려준다).
   - 쓰기는 정책 파일과 같다. 같은 폴더의 임시 파일 → fsync → chmod 0600 → os.replace(심볼릭 링크를 따라 쓰지 않는다).
@@ -19,7 +26,7 @@
   - 게이트 데이터: 정책 파일·정책 기록 폴더·감사 로그 폴더·소켓 폴더·mounts.yaml·workspaces.yaml
   - gate 프로그램 폴더: 저장소(소스에서 import했으면)·sys.prefix·sys.base_prefix·등록에 적힌 gate_bin의 venv
   - ~/.claude, ~/.claude.json, CLAUDE_CONFIG_DIR
-  - 기본 폴더, 이미 있는 항목
+  - 기본 폴더(숨은 --source를 줬을 때만. 사용자 문구에는 "기본 폴더"를 쓰지 않는다), 이미 있는 항목
   - require_dir면 폴더가 아니거나 읽을 수 없는 것. 경로에 `*?[]`·제어 문자가 있는 것
   사용자 이유(message)는 해요체 한 줄, 데몬 경고에 쓰는 겹친 곳(brief)은 명사구다.
 
@@ -27,9 +34,10 @@
   - 요청마다 두 파일의 (dev, ino, size, mtime_ns)를 보고 바뀌었으면 다시 읽는다(PolicySource와 같다).
   - 다시 읽을 때 refusal을 다시 한다(목록 파일은 화면을 거치지 않고도 바뀔 수 있다). 걸리는 항목은 빼고 stderr에
     한 줄 남긴다. 경고는 내용이 바뀔 때만 다시 쓴다.
-  - 파일이 잘못되었으면 내용 읽기를 모두 EACCES로 막는다. 목록·stat은 기본 폴더만 보여 준다. 고쳐지면 다음 요청부터 정상.
-  - MountedStore: 기본 폴더는 `/`, 연결된 항목은 `/<이름>/`. 첫 칸이 연결된 이름(대소문자 무시·NFC)이면 그 폴더의
-    PlainStore로, 아니면 기본 폴더로 보낸다. 심볼릭 링크는 각 폴더 안에서만 따라간다.
+  - 파일이 잘못되었으면 내용 읽기를 모두 EACCES로 막는다. 목록·stat은 `/`(기본 폴더가 없으면 빈 폴더)만 보여 준다.
+    고쳐지면 다음 요청부터 정상.
+  - MountedStore: `/`는 빈 폴더(EmptyStore) 또는 기본 폴더, 연결된 항목은 `/<이름>/`. 첫 칸이 연결된 이름(대소문자 무시·NFC)이면
+    그 폴더의 PlainStore로, 아니면 `/` 쪽으로 보낸다(빈 폴더면 `/` 말고는 ENOENT). 심볼릭 링크는 각 폴더 안에서만 따라간다.
     `/` 목록은 합치고, 같은 이름이면 추가 폴더가 이긴다(기본 쪽은 가려지고, 다른 길로 그 항목에 닿아도 ENOENT).
     사라진 폴더(또는 기록한 경로가 지금 다른 곳을 가리키는 폴더)는 `/` 목록에 없고 읽으면 ENOENT다.
     canonical은 `/<이름>/…`을 돌려준다. 그래서 경로 규칙·폴더 승인·감사 기록이 게이트 안 경로로 동작한다.
@@ -57,7 +65,7 @@ import gate
 from gate.paths import split_vpath
 from gate.policy_change import history_dir
 from gate.protocol import GateError
-from gate.store import Entry, FileStat, PlainStore
+from gate.store import EmptyStore, Entry, FileStat, PlainStore
 
 MOUNTS_FILE_NAME = "mounts.yaml"
 WORKSPACES_FILE_NAME = "workspaces.yaml"
@@ -75,6 +83,7 @@ SHALLOW_SYSTEM = tuple(Path(p) for p in ("/private", "/Volumes", "/Users"))
 
 _MOUNT_KEYS = ("name", "path", "added_at", "added_by", "connected")
 _WORKSPACE_KEYS = ("path", "source", "socket", "policy", "audit", "gate_bin", "settings_sha256", "registered_at")
+_WORKSPACE_OPTIONAL = ("source",)  # 숨은 --source를 줬을 때만 적는다
 _BIDI = frozenset("‪‫‬‭‮⁦⁧⁨⁩‎‏")
 
 
@@ -100,7 +109,7 @@ class MountEntry:
 @dataclass(frozen=True)
 class WorkspaceRecord:
     path: str
-    source: str
+    source: str | None     # 기본 폴더(숨은 개발용 --source). 없으면 None
     socket: str
     policy: str
     audit: str
@@ -109,7 +118,8 @@ class WorkspaceRecord:
     registered_at: str
 
     def to_dict(self) -> dict:
-        return {key: getattr(self, key) for key in _WORKSPACE_KEYS}
+        return {key: getattr(self, key) for key in _WORKSPACE_KEYS
+                if not (key in _WORKSPACE_OPTIONAL and getattr(self, key) is None)}
 
 
 def mounts_file_for(policy: str | os.PathLike) -> Path:
@@ -268,13 +278,13 @@ def _load_items(path: Path, what: str, key: str) -> list:
     return items
 
 
-def _check_keys(item: object, keys: Sequence[str], where: str) -> Mapping:
+def _check_keys(item: object, keys: Sequence[str], where: str, optional: Sequence[str] = ()) -> Mapping:
     if not isinstance(item, Mapping):
         raise MountsFileError(f"{where}이 객체가 아닙니다")
     unknown = [k for k in item if k not in keys]
     if unknown:
         raise MountsFileError(f"{where}에 모르는 키가 있습니다")
-    missing = [k for k in keys if k not in item]
+    missing = [k for k in keys if k not in item and k not in optional]
     if missing:
         raise MountsFileError(f"{where}에 {', '.join(missing)}이(가) 없습니다")
     return item
@@ -332,15 +342,17 @@ def read_mounts(path: str | os.PathLike) -> tuple[MountEntry, ...]:
 
 def _workspace_from(item: object, i: int) -> WorkspaceRecord:
     where = f"workspaces {i + 1}번 항목"
-    item = _check_keys(item, _WORKSPACE_KEYS, where)
+    item = _check_keys(item, _WORKSPACE_KEYS, where, _WORKSPACE_OPTIONAL)
     for key in ("path", "source", "socket", "policy", "audit", "gate_bin"):
+        if key in _WORKSPACE_OPTIONAL and item.get(key) is None:
+            continue
         problem = path_problem(item[key])
         if problem:
             raise MountsFileError(f"{where}의 {key}를 쓸 수 없습니다({problem})")
     digest = item["settings_sha256"]
     if not isinstance(digest, str) or len(digest) != 64 or set(digest) - set("0123456789abcdef"):
         raise MountsFileError(f"{where}의 settings_sha256이 올바르지 않습니다")
-    values = {key: item[key] for key in _WORKSPACE_KEYS}
+    values = {key: item.get(key) for key in _WORKSPACE_KEYS}
     values["registered_at"] = _time_text(item["registered_at"], where, "registered_at")
     return WorkspaceRecord(**values)
 
@@ -416,7 +428,7 @@ class Guard:
     gate_data: tuple[tuple[str, Path], ...] = ()   # (이름, 경로)
     programs: tuple[Path, ...] = ()
     claude: tuple[Path, ...] = ()
-    bases: tuple[Path, ...] = ()
+    bases: tuple[Path, ...] = ()   # 기본 폴더(숨은 --source: 데몬 인자·등록에 적힌 source). 보통은 비어 있다
     mounts: tuple[MountEntry, ...] = ()
 
 
@@ -469,7 +481,7 @@ def gate_data_paths(policy: str | os.PathLike, sockets: Iterable[str | os.PathLi
 
 
 def build_guard(*, policy: str | os.PathLike, sockets: Iterable[str | os.PathLike | None] = (),
-                audits: Iterable[str | os.PathLike | None] = (), sources: Iterable[str | os.PathLike] = (),
+                audits: Iterable[str | os.PathLike | None] = (), sources: Iterable[str | os.PathLike | None] = (),
                 records: Sequence[WorkspaceRecord] = (), mounts: Sequence[MountEntry] = ()) -> Guard:
     data = gate_data_paths(policy, sockets, audits)
     for r in records:
@@ -482,7 +494,7 @@ def build_guard(*, policy: str | os.PathLike, sockets: Iterable[str | os.PathLik
         gate_data=tuple(unique.values()),
         programs=program_dirs(r.gate_bin for r in records),
         claude=claude_paths(),
-        bases=_unique([*(_real(s) for s in sources), *(_real(r.source) for r in records)]),
+        bases=_unique([*(_real(s) for s in sources if s), *(_real(r.source) for r in records if r.source)]),
         mounts=tuple(mounts),
     )
 
@@ -548,14 +560,14 @@ def refusal(path: Path, guard: Guard, *, require_dir: bool = True) -> Refusal | 
             return Refusal("Claude 설정 폴더(~/.claude)는 연결할 수 없어요.", "Claude 설정")
         if rel == "contains":
             return Refusal("Claude 설정(~/.claude)을 담은 폴더는 연결할 수 없어요.", "Claude 설정")
-    for base in guard.bases:
+    for base in guard.bases:  # 숨은 --source로 `/`에 보이는 폴더. 사용자 문구에는 "기본 폴더"라고 쓰지 않는다
         rel = relation(path, base)
         if rel == "same":
-            return Refusal("기본 폴더는 이미 PLANT에 연결되어 있어요.", "기본 폴더")
+            return Refusal("이미 PLANT로 보이는 폴더예요.", "PLANT의 / 폴더")
         if rel == "inside":
-            return Refusal("기본 폴더 안의 폴더는 이미 PLANT로 보여요.", "기본 폴더")
+            return Refusal("이미 PLANT로 보이는 폴더 안의 폴더예요. 연결이 겹쳐요.", "PLANT의 / 폴더")
         if rel == "contains":
-            return Refusal("기본 폴더를 감싸는 폴더는 연결할 수 없어요. 연결이 겹쳐요.", "기본 폴더")
+            return Refusal("이미 PLANT로 보이는 폴더를 감싸는 폴더는 연결할 수 없어요. 연결이 겹쳐요.", "PLANT의 / 폴더")
     for m in guard.mounts:
         rel = relation(path, m.path)
         state = "이미 연결된 폴더" if m.connected else "보호만 남은 폴더"
@@ -596,13 +608,14 @@ def _signature(path: Path) -> tuple | None:
 class MountsSource:
     """요청마다 목록 파일·등록 파일이 바뀌었는지 보고, 바뀌었으면 다시 읽고 검사한다. 여러 스레드에서 불러도 된다."""
 
-    def __init__(self, policy: str | os.PathLike, *, source: str | os.PathLike,
+    def __init__(self, policy: str | os.PathLike, *, source: str | os.PathLike | None = None,
                  socket: str | os.PathLike | None = None, audit: str | os.PathLike | None = None,
                  warn: Callable[[str], None] | None = None) -> None:
+        """source는 숨은 개발용 --source(기본 폴더). 없으면 None(보통)."""
         self.policy = Path(policy).expanduser().absolute()
         self.mounts_file = self.policy.parent / MOUNTS_FILE_NAME
         self.workspaces_file = self.policy.parent / WORKSPACES_FILE_NAME
-        self.source = _real(source)
+        self.source = _real(source) if source is not None else None
         self.socket = socket
         self.audit = audit
         self.warn = warn if warn is not None else (lambda _: None)
@@ -653,17 +666,17 @@ class MountsSource:
         for entry, brief in state.excluded:
             warnings.append(f"폴더 목록의 '{entry.name}'({entry.path})은(는) PLANT에 연결하지 않습니다 "
                             f"(연결할 수 없는 폴더: {brief})")
-        if state.mounts:
+        if state.mounts and self.source is not None:
             try:
                 base_names = {name_key(n): n for n in os.listdir(self.source)}
             except OSError:
                 base_names = {}
             for m in state.mounts:
                 if name_key(m.name) in base_names:
-                    warnings.append(f"추가 폴더 '{m.name}'이(가) 기본 폴더의 같은 이름 항목을 가립니다")
+                    warnings.append(f"연결한 폴더 '{m.name}'이(가) / 의 같은 이름 항목을 가립니다")
         if self._loaded and (state.mounts, state.error) != (before.mounts, before.error) and state.error is None:
             names = ", ".join(m.name for m in state.mounts) or "없음"
-            self.warn(f"폴더 목록을 다시 읽었습니다. 추가 폴더 {len(state.mounts)}개: {names}")
+            self.warn(f"폴더 목록을 다시 읽었습니다. 연결한 폴더 {len(state.mounts)}개: {names}")
         self._loaded = True
         if tuple(warnings) != self._warnings:
             for line in warnings:
@@ -674,18 +687,23 @@ class MountsSource:
 # --- 데몬: 저장소 ---
 
 class MountedStore:
-    """기본 폴더(`/`)와 추가 폴더(`/<이름>/`)를 한 이름 공간으로 보여 준다(Store 프로토콜)."""
+    """`/`(빈 폴더 또는 기본 폴더)와 연결한 폴더(`/<이름>/`)를 한 이름 공간으로 보여 준다(Store 프로토콜).
 
-    def __init__(self, base: str | os.PathLike | PlainStore, mounts: MountsSource) -> None:
-        self.base = base if isinstance(base, PlainStore) else PlainStore(base)
+    base가 None이면 `/`는 빈 폴더(EmptyStore)다(보통). 기본 폴더(숨은 개발용 --source)를 주면 그 폴더가 `/`다.
+    """
+
+    def __init__(self, base: str | os.PathLike | PlainStore | EmptyStore | None, mounts: MountsSource) -> None:
+        if base is None:
+            base = EmptyStore()
+        self.base = base if isinstance(base, (PlainStore, EmptyStore)) else PlainStore(base)
         self.mounts = mounts
         self._stores: dict[str, PlainStore] = {}
         self._lock = threading.Lock()
         self._redirected: set[str] = set()
 
     @property
-    def root(self) -> Path:
-        """기본 폴더(시작 안내용)."""
+    def root(self) -> Path | None:
+        """기본 폴더(시작 안내용). 빈 `/`면 None."""
         return self.base.root
 
     def _store(self, entry: MountEntry) -> PlainStore | None:
@@ -698,7 +716,7 @@ class MountedStore:
         if real != path:
             if entry.path not in self._redirected:  # 기록한 뒤 심볼릭 링크로 바뀌었다
                 self._redirected.add(entry.path)
-                self.mounts.warn(f"추가 폴더 '{entry.name}'의 경로가 다른 곳을 가리켜 연결하지 않습니다")
+                self.mounts.warn(f"연결한 폴더 '{entry.name}'의 경로가 다른 곳을 가리켜 연결하지 않습니다")
             return None
         if not real.is_dir():
             return None

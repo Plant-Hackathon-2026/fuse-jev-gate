@@ -375,11 +375,12 @@
       nerDesc, [["주소", n.address, true], ["서버", server]], actions));
   }
 
-  // PLANT 카드의 "원본 폴더 N개"(연결된 폴더, 기본 포함. 찾을 수 없는 폴더는 따로 적는다)
+  // PLANT 카드의 "원본 폴더 N개"(연결한 폴더만. 찾을 수 없는 폴더·보호만 남은 폴더는 따로 적는다)
   function folderSummary(f) {
     if (!f) return "확인하지 못했어요";
     if (f.error) return "목록 파일에 문제가 있어요 · 아래 “원본 폴더”를 보세요";
-    var parts = [f.base ? f.count + "개" : "추가 " + f.mounts + "개 · 기본 폴더는 알 수 없음"];
+    if (!f.count && !f.protected_only) return "아직 없어요 · 아래 “원본 폴더”에서 추가해요";
+    var parts = [f.count + "개"];
     if (f.missing) parts.push("찾을 수 없음 " + f.missing + "개");
     if (f.protected_only) parts.push("보호만 남음 " + f.protected_only + "개");
     return parts.join(" · ");
@@ -394,7 +395,7 @@
         h("li", null, "저장소 폴더의 터미널에서 서버를 띄워요. 모델을 불러오는 데 시간이 걸려요.",
           h("pre", { text: "<python> -m nerserve --model-dir <모델 폴더> --host 127.0.0.1 --port " + port })),
         h("li", null, "PLANT를 띄울 때 같은 주소를 알려 줘요.",
-          h("pre", { text: "NER_BASE_URL=http://" + address + " plant serve --source <원본 폴더>" })),
+          h("pre", { text: "NER_BASE_URL=http://" + address + " plant serve" })),
         h("li", { text: "여기서 “다시 확인”을 눌러 서버가 “응답함”이 되면 “켜기”를 눌러요." })));
   }
 
@@ -464,7 +465,16 @@
     var edited = workspaces.filter(function (w) { return w.state === "edited"; });
     var missing = workspaces.filter(function (w) { return w.state === "missing"; });
     var shown = folders.filter(function (f) { return f.connected; }).length;
-    $("mount-count").textContent = "연결된 폴더 " + shown + "개(기본 포함) · 추가한 폴더 " + mounts.mount_count + "/" + mounts.limit;
+    var kept = folders.length - shown;
+    $("mount-count").textContent = "연결된 폴더 " + shown + "개" + (kept ? " · 보호만 남음 " + kept + "개" : "") +
+      " · 최대 " + mounts.limit + "개";
+
+    var why = "";
+    if (mounts.error) why = "목록 파일에 문제가 있어 지금은 폴더를 추가할 수 없어요.";
+    else if (edited.length) why = "손으로 바뀐 작업 폴더 설정을 먼저 다시 만들어야 추가할 수 있어요.";
+    else if (mounts.mount_count >= mounts.limit) {
+      why = "폴더는 " + mounts.limit + "개까지 추가할 수 있어요(보호만 남은 폴더 포함). 쓰지 않는 폴더의 보호를 풀면 자리가 생겨요.";
+    }
 
     if (edited.length) {
       banners.appendChild(mountBanner("error", "작업 폴더 설정이 손으로 바뀌어 있어요. ", [
@@ -486,45 +496,35 @@
         ")을 쓰고 있어요. 폴더를 바꾼 뒤에는 터미널에서 ", h("code", { text: "plant setup" }), "을 다시 실행해야 전역 설정에도 반영돼요."));
     }
 
-    if (!folders.some(function (f) { return f.kind === "base"; })) list.appendChild(unknownBaseRow());
     folders.forEach(function (f) { list.appendChild(folderRow(f, edited.length > 0)); });
-    if (!mounts.mount_count) {
-      list.appendChild(h("p", { class: "empty", text: "아직 추가한 폴더가 없어요. [폴더 추가]로 이 컴퓨터의 폴더를 더 연결할 수 있어요." }));
-    }
-
-    var why = "";
-    if (mounts.error) why = "목록 파일에 문제가 있어 지금은 폴더를 추가할 수 없어요.";
-    else if (edited.length) why = "손으로 바뀐 작업 폴더 설정을 먼저 다시 만들어야 추가할 수 있어요.";
-    else if (mounts.mount_count >= mounts.limit) {
-      why = "폴더는 " + mounts.limit + "개까지 추가할 수 있어요(보호만 남은 폴더 포함). 쓰지 않는 폴더의 보호를 풀면 자리가 생겨요.";
+    if (!folders.length) {
+      // 연결한 폴더가 없으면 에이전트는 아무 문서도 읽지 못한다(사용자 결정, 2026-11-01). 추가 단추를 바로 옆에 둔다.
+      list.appendChild(h("div", { class: "mempty" },
+        h("p", null, h("strong", { text: "아직 연결한 폴더가 없어요. " }),
+          "폴더를 추가해야 에이전트가 문서를 읽을 수 있어요. [폴더 추가]를 누르면 이 컴퓨터에서 폴더를 고를 수 있어요."),
+        h("button", { type: "button", class: "btn btn-primary", text: "폴더 추가", disabled: !!why,
+          "aria-describedby": why ? "mount-add-why" : null, onclick: addFolder })));
+    } else if (!shown) {
+      list.appendChild(h("p", { class: "empty", text: "지금 연결된 폴더가 없어 에이전트가 읽을 수 있는 문서가 없어요. [폴더 추가]로 폴더를 연결해 주세요." }));
     }
     setAddButton(why);
   }
 
-  function unknownBaseRow() {
-    return h("div", { class: "mrow" }, h("div", { class: "mmain" },
-      h("div", { class: "mtitle" }, h("span", { class: "name", text: "기본 폴더" }), h("code", { class: "vpath", text: "/" }), ftag("base", "기본")),
-      h("span", { class: "mpath", text: "알 수 없음" }),
-      h("p", { class: "mdesc", text: "PLANT를 띄울 때 정한 폴더예요. 등록된 작업 폴더가 없어 어느 폴더인지 알 수 없어요." })));
-  }
-
   function folderRow(f, editedWorkspace) {
-    var base = f.kind === "base";
-    var kept = !base && !f.connected;
+    var kept = !f.connected;
     var stale = f.unprotected_workspaces || [];
-    var tags = [base ? ftag("base", "기본") : (f.connected ? ftag("on", "연결됨") : ftag("kept", "보호만 남음"))];
+    var tags = [f.connected ? ftag("on", "연결됨") : ftag("kept", "보호만 남음")];
     if (!f.exists) tags.push(ftag("missing", "찾을 수 없음"));
     if (stale.length) tags.push(ftag("stale", "작업 폴더 설정에 반영 안 됨"));
     var meta = [];
     if (f.exists) meta.push(fileCountText(f.file_count, f.file_count_capped));
-    if (base) meta.push("PLANT를 띄울 때 정함 · 화면에서 뺄 수 없어요");
-    else if (f.added_at) {
+    if (f.added_at) {
       meta.push("추가 " + when(f.added_at, true) + (f.added_by === "ui" ? " · 화면에서" : (f.added_by === "terminal" ? " · 터미널에서" : "")));
     }
     var desc = kept ? "PLANT에서는 뺐고, 에이전트가 이 폴더를 직접 여는 것만 막고 있어요. 다시 연결하려면 [폴더 추가]에서 같은 폴더를 고르세요."
       : (!f.exists ? "폴더를 찾을 수 없어요. 외장 디스크를 뺐거나 폴더를 옮기거나 지웠을 수 있어요. 그동안 PLANT 목록에는 보이지 않아요." : null);
     var button = null;
-    if (!base && f.connected) {
+    if (f.connected) {
       button = h("button", { type: "button", class: "btn-quiet", "aria-label": "“" + f.name + "” 폴더를 PLANT에서 빼기", text: "빼기",
         onclick: function () { changeMount("remove", f); } });
     } else if (kept) {
@@ -539,7 +539,7 @@
       h("code", { text: "plant workspace init --force" }), "로 다시 만들어 주세요.")) : null;
     return h("div", { class: "mrow" + (kept ? " kept" : "") },
       h("div", { class: "mmain" },
-        h("div", { class: "mtitle" }, h("span", { class: "name", text: base ? "기본 폴더" : f.name }),
+        h("div", { class: "mtitle" }, h("span", { class: "name", text: f.name }),
           h("code", { class: "vpath", title: "PLANT 안 경로", text: f.vpath }), tags),
         h("span", { class: "mpath" }, h("span", { class: "sr-only", text: "실제 경로 " }), f.path),
         meta.length ? h("div", { class: "mmeta" }, meta.map(function (m) { return h("span", { text: m }); })) : null,

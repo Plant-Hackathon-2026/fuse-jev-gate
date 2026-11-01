@@ -46,6 +46,7 @@ from gate.mounts import (
 from gate.pipeline import Inspector
 from gate.policy import Entry, PathRule, PolicySource, write_entries
 from gate.protocol import GateError
+from gate.store import EmptyStore
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 STAMP = "2026-11-01T10:00:00+09:00"
@@ -305,8 +306,8 @@ def layout(tmp_path):
     ("gate-data/policy-history", "PLANT 데이터(정책 기록 폴더)"),
     ("venv", "PLANT 프로그램 폴더는"),
     ("venv/lib", "PLANT 프로그램 폴더는"),
-    ("gate-data/source", "기본 폴더는 이미 PLANT에 연결되어 있어요"),
-    ("gate-data/source/상담", "기본 폴더 안의 폴더는"),
+    ("gate-data/source", "이미 PLANT로 보이는 폴더예요"),  # 숨은 --source 폴더(사용자 문구에 "기본 폴더" 없음)
+    ("gate-data/source/상담", "이미 PLANT로 보이는 폴더 안의 폴더예요"),
     ("가계부", "이미 연결된 폴더예요."),
     ("가계부/2026", "이미 연결된 폴더 '가계부' 안의 폴더예요"),
     ("옛", "보호만 남은 폴더 '옛'"),
@@ -317,6 +318,7 @@ def test_guard_refuses_overlaps(layout, folder, message):
     why = refusal(root / folder, guard, require_dir=False)
     assert why is not None and message in why.message
     assert "\n" not in why.message  # 한 줄
+    assert "기본 폴더" not in why.message
 
 
 def test_guard_allows_unrelated_folders(layout):
@@ -331,7 +333,7 @@ def test_folders_that_contain_gate_data_or_the_base_are_refused(tmp_path):
     assert "PLANT 데이터(정책 파일)를 담은" in refusal(root / "data", guard, require_dir=False).message
     assert "감사 로그 폴더" in refusal(root / "logs", guard, require_dir=False).message
     assert "소켓 폴더" in refusal(root / "sock" / "x", guard, require_dir=False).message
-    assert "기본 폴더를 감싸는" in refusal(root / "src", guard, require_dir=False).message
+    assert "이미 PLANT로 보이는 폴더를 감싸는" in refusal(root / "src", guard, require_dir=False).message
 
 
 def test_gate_program_folders_are_refused():
@@ -428,7 +430,7 @@ def test_connected_folder_is_shown_under_its_name_and_hides_the_base_item(world)
     assert store.stat("/가계부").type == "dir" and store.stat("/가계부/2026/1월.txt").type == "file"
     assert errno_of(lambda: store.read("/가계부/secret.txt")) == errno.ENOENT  # 기본 쪽 항목은 가려졌다
     assert store.read("/상담/a.txt") == "기본 상담\n".encode()
-    assert any("기본 폴더의 같은 이름 항목을 가립니다" in w for w in world.warnings)
+    assert any("/ 의 같은 이름 항목을 가립니다" in w for w in world.warnings)
 
 
 def test_names_are_matched_ignoring_case_and_canonical_uses_the_real_name(world):
@@ -520,11 +522,86 @@ def test_changes_are_picked_up_without_restart(world):
     assert "사진" not in [e.name for e in store.list_dir("/")]
 
 
+# --- 기본 폴더 없음 (2026-11-01 사용자 결정: 연결하지 않으면 아무것도 읽을 수 없다) ---
+
+@pytest.fixture
+def bare(world):
+    """숨은 --source 없이 띄운 데몬과 같은 저장소: `/`는 빈 폴더, 연결한 폴더만 보인다."""
+    mounts = MountsSource(world.data / "policy.yaml", socket=world.data / "run" / "gate.sock",
+                          audit=world.data / "audit" / "audit.jsonl", warn=world.warnings.append)
+    world.bare = MountedStore(None, mounts)
+    return world
+
+
+def test_empty_store_has_only_an_empty_root():
+    store = EmptyStore()
+    assert store.list_dir("/") == [] and store.list_dir("") == [] and store.canonical("/./") == "/"
+    st = store.stat("/")
+    assert st.type == "dir" and st.size == 0 and store.root is None
+    assert errno_of(lambda: store.read("/")) == errno.EISDIR
+    for path in ("/a.txt", "/상담", "/상담/a.txt"):
+        for call in (store.list_dir, store.stat, store.canonical, store.read):
+            assert errno_of(lambda: call(path)) == errno.ENOENT, (call.__name__, path)
+    assert errno_of(lambda: store.read("/../x")) == errno.EACCES  # '..'은 받지 않는다
+
+
+def test_without_base_nothing_is_visible_until_a_folder_is_connected(bare):
+    store = bare.bare
+    assert store.root is None and store.list_dir("/") == [] and store.stat("/").type == "dir"
+    for path in ("/상담/a.txt", "/안내문.txt", "/가계부/secret.txt", "/가계부/2026/1월.txt"):
+        assert errno_of(lambda: store.read(path)) == errno.ENOENT, path
+        assert errno_of(lambda: store.canonical(path)) == errno.ENOENT, path
+    connect(bare, entry("가계부", bare.book))  # 다시 띄우지 않아도 다음 요청부터 보인다
+    assert names(store.list_dir("/")) == [("가계부", "dir")]
+    assert store.read("/가계부/2026/1월.txt") == "1월 가계부\n".encode()
+    assert store.canonical("/가계부/2026/1월.txt") == "/가계부/2026/1월.txt"
+    assert errno_of(lambda: store.read("/가계부/secret.txt")) == errno.ENOENT
+    assert errno_of(lambda: store.read("/상담/a.txt")) == errno.ENOENT
+    assert not any("가립니다" in w for w in bare.warnings)  # 가릴 / 항목이 없다
+    connect(bare, entry("가계부", bare.book, connected=False))
+    assert store.list_dir("/") == [] and errno_of(lambda: store.read("/가계부/2026/1월.txt")) == errno.ENOENT
+
+
+def test_without_base_a_broken_list_file_blocks_and_lists_nothing(bare):
+    connect(bare, entry("가계부", bare.book))
+    bare.mounts_file.write_text("version: 1\nmounts: [ {\n", encoding="utf-8")
+    assert bare.bare.list_dir("/") == []
+    assert errno_of(lambda: bare.bare.read("/가계부/2026/1월.txt")) == errno.EACCES
+
+
+def test_without_base_the_guard_has_no_base_and_the_source_folder_can_be_connected(bare):
+    """--source가 없으면 예전 기본 폴더 자리도 보통 폴더처럼 연결할 수 있다."""
+    store = bare.bare
+    connect(bare, entry("source", bare.source))
+    assert names(store.list_dir("/")) == [("source", "dir")]
+    assert store.read("/source/상담/a.txt") == "기본 상담\n".encode()
+    guard = build_guard(policy=bare.data / "policy.yaml", sources=[None])
+    assert guard.bases == ()
+
+
+def test_workspace_record_source_is_optional(tmp_path):
+    data = tmp_path.resolve() / "gate-data"
+    path = data / "workspaces.yaml"
+    plain = WorkspaceRecord(path=str(data / "ws"), source=None, socket=str(data / "run" / "gate.sock"),
+                            policy=str(data / "policy.yaml"), audit=str(data / "audit" / "audit.jsonl"),
+                            gate_bin="/usr/local/bin/plant", settings_sha256="0" * 64, registered_at=STAMP)
+    write_workspaces(path, [plain])
+    assert "source" not in yaml.safe_load(path.read_text("utf-8"))["workspaces"][0]
+    assert read_workspaces(path) == (plain,)
+    text = path.read_text("utf-8").replace("- path:", "- source: null\n  path:", 1)  # null로 적어도 된다
+    assert "source: null" in text
+    path.write_text(text, encoding="utf-8")
+    assert read_workspaces(path)[0].source is None
+    path.write_text(text.replace("source: null", "source: ''"), encoding="utf-8")
+    with pytest.raises(MountsFileError, match="source"):
+        read_workspaces(path)
+
+
 @pytest.mark.parametrize("target, brief", [
     ("gate-data/audit", "감사 로그 폴더"),
     ("gate-data/run", "소켓 폴더"),
     ("gate-data/policy-history", "정책 기록 폴더"),
-    ("gate-data/source/상담", "기본 폴더"),
+    ("gate-data/source/상담", "PLANT의 / 폴더"),
     ("gate-data", "정책 파일"),
 ])
 def test_daemon_drops_forbidden_entries_and_warns_once(world, target, brief):
