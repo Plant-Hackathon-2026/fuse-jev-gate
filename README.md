@@ -74,6 +74,21 @@ cd fuse-jev-gate
 uv sync                    # .venv/bin/plant 가 생깁니다
 ```
 
+**모델 받기.** 판단 모델과 NER 모델은 팀원이 허깅페이스에 올려 두었습니다. 둘 다 공개 저장소라 로그인 없이 받습니다. 모델 없이 Mock으로만 해 볼 때는 건너뜁니다.
+
+| 모델 | 허깅페이스 | 크기 | 라이선스 | 쓰는 곳 |
+|---|---|---|---|---|
+| 판단 모델 Laya v3 | [hae8hae8/laya-pii-ko-v3](https://huggingface.co/hae8hae8/laya-pii-ko-v3) | 약 680MB | Apache-2.0 | [판단 모델 연결 (Laya)](#판단-모델-연결-laya) |
+| NER (xlm-roberta-large) | [hae8hae8/xlmr-pii-ner](https://huggingface.co/hae8hae8/xlmr-pii-ner) | 약 2.3GB | MIT | [이름·주소 가리기 (NER)](#이름주소-가리기-ner) |
+
+```bash
+mkdir -p ~/models
+uvx --from huggingface_hub hf download hae8hae8/laya-pii-ko-v3 --include "laya-pii-ko-v3/*" --local-dir ~/models
+uvx --from huggingface_hub hf download hae8hae8/xlmr-pii-ner --include "xlmr-pii-ner/*" --local-dir ~/models
+```
+
+받고 나면 체크포인트 폴더는 `~/models/laya-pii-ko-v3`와 `~/models/xlmr-pii-ner`입니다. 아래 예시는 이 경로를 씁니다. 모델은 저장소와 에이전트 작업 폴더 밖에 둡니다.
+
 데이터는 저장소와 에이전트 작업 폴더 **밖에** 둡니다. 에이전트가 쓸 수 있는 폴더 안에 두면 폴더 이름을 바꾸는 식으로 경로 기준 차단을 피할 수 있기 때문입니다. 이 저장소에서는 다음 배치를 썼습니다.
 
 ```
@@ -272,24 +287,24 @@ plant setup --print         # 합칠 설정 조각(JSON)만 출력. MDM 관리 �
 
 ## 판단 모델 연결 (Laya)
 
-기본 판단 모델은 시험용 Mock입니다. 실제 모델로는 팀원이 파인튜닝한 [Laya](https://huggingface.co/convaiinnovations/laya)(Apache-2.0) 체크포인트를 씁니다. Laya는 로컬 서버 `laya-serve`로 띄우고, PLANT 데몬이 그 서버에 묻습니다. 문서는 이 컴퓨터 밖으로 나가지 않습니다.
+기본 판단 모델은 시험용 Mock입니다. 실제 모델로는 [Laya](https://huggingface.co/convaiinnovations/laya)(Apache-2.0)를 팀원이 파인튜닝한 체크포인트 [laya-pii-ko-v3](https://huggingface.co/hae8hae8/laya-pii-ko-v3)를 씁니다. Laya는 로컬 서버 `laya-serve`로 띄우고, PLANT 데몬이 그 서버에 묻습니다. 문서는 이 컴퓨터 밖으로 나가지 않습니다.
 
 1. **laya-serve 설치** (저장소 밖, 약 740MB):
    ```bash
    mkdir -p ~/laya-serve && cd ~/laya-serve
    uv venv --python 3.12 .venv && VIRTUAL_ENV=$PWD/.venv uv pip install "laya[serve]==0.4.18"
    ```
-2. **체크포인트 폴더**를 저장소 밖에 둡니다. 지금 쓰는 것은 팀원 재학습판 v3(`laya-pii-ko-v3`, 약 650MB, 예: `/경로/models/laya-v3`)입니다. 폴더째 씁니다(`model.safetensors`, `questions.json`, `rl_agent_config.json`, `encoder/`, `tokenizer/`).
+2. **체크포인트 받기.** 지금 쓰는 것은 팀원 재학습판 v3([`hae8hae8/laya-pii-ko-v3`](https://huggingface.co/hae8hae8/laya-pii-ko-v3), 약 680MB)입니다. [설치](#설치)의 모델 받기대로 받으면 `~/models/laya-pii-ko-v3`에 생깁니다. 폴더째 씁니다(`model.safetensors`, `questions.json`, `rl_agent_config.json`, `encoder/`, `tokenizer/`).
 3. **laya-serve 실행.** `LAYA_HOST`를 빼면 0.0.0.0(다른 컴퓨터에서도 접속 가능)으로 열리고, `LAYA_MODELS`를 빼면 공식 체크포인트를 모두 내려받습니다. 둘 다 꼭 지정합니다.
    ```bash
    LAYA_HOST=127.0.0.1 LAYA_PORT=8000 \
    LAYA_MODELS=gate-laya LAYA_DEFAULT_MODEL=gate-laya \
-   LAYA_EXTRA_MODELS='{"gate-laya": "/경로/models/laya-v3"}' \
+   LAYA_EXTRA_MODELS='{"gate-laya": "'$HOME'/models/laya-pii-ko-v3"}' \
    HF_HUB_OFFLINE=1 USE_TF=0 ~/laya-serve/.venv/bin/laya-serve
    ```
 4. **데몬에 주소를 알려 주고 백엔드를 바꿉니다.**
    ```bash
-   export JEV_BASE_URL=http://127.0.0.1:8000 JEV_MODEL=gate-laya JEV_MODEL_DIR=/경로/models/laya-v3
+   export JEV_BASE_URL=http://127.0.0.1:8000 JEV_MODEL=gate-laya JEV_MODEL_DIR=$HOME/models/laya-pii-ko-v3
    plant serve                                 # 위 환경변수를 넘겨 띄운다
    plant policy set jev_backend laya            # 내 터미널에서. 되돌리기: plant policy set jev_backend mock
    ```
@@ -311,7 +326,7 @@ plant setup --print         # 합칠 설정 조각(JSON)만 출력. MDM 관리 �
 
 ## 이름·주소 가리기 (NER)
 
-정규식은 형식이 있는 번호만 찾습니다. 이름·연락처·소속 같은 말은 팀원이 학습한 NER 모델(재학습판 `xlmr-pii-ner`, xlm-roberta-large, 라벨 6종)로 찾습니다. NER도 Laya처럼 이 컴퓨터 안의 별도 서버(`nerserve`, 이 저장소에 있음)로 띄우고, 데몬은 그 서버에 묻습니다. 데몬에는 torch가 들어가지 않습니다.
+정규식은 형식이 있는 번호만 찾습니다. 이름·연락처·소속 같은 말은 팀원이 학습한 NER 모델(재학습판 [`xlmr-pii-ner`](https://huggingface.co/hae8hae8/xlmr-pii-ner), xlm-roberta-large, 라벨 6종)로 찾습니다. NER도 Laya처럼 이 컴퓨터 안의 별도 서버(`nerserve`, 이 저장소에 있음)로 띄우고, 데몬은 그 서버에 묻습니다. 데몬에는 torch가 들어가지 않습니다.
 
 **NER은 기본으로 켜져 있습니다**(`ner_backend: server`). NER 서버가 응답하지 않으면 안전을 위해 모든 내용 읽기를 막습니다(목록·`stat`은 됨). 그래서 **PLANT 데몬보다 nerserve를 먼저 띄웁니다.** `plant serve`도 시작할 때 이 점을 알려 줍니다. 모델 없이 쓰려면 내 터미널에서 끕니다.
 
@@ -321,10 +336,10 @@ plant policy set ner_backend server   # 다시 켜기
 ```
 
 1. **실행 환경.** torch와 transformers가 필요합니다. 위 laya-serve의 `.venv`에 둘 다 있으므로 그대로 씁니다(설치할 것 없음).
-2. **체크포인트 폴더**(팀원이 공유한 재학습판, 약 2.2GB, 예: `/경로/models/ner-xlmr-pii`)를 저장소 밖에 둡니다. 예전 32종 모델(`models/ner`)은 쓰지 않습니다. 라벨이 달라서 그 모델을 띄우면 모든 읽기가 막힙니다.
+2. **체크포인트 받기.** 팀원 재학습판([`hae8hae8/xlmr-pii-ner`](https://huggingface.co/hae8hae8/xlmr-pii-ner), 약 2.3GB)을 [설치](#설치)의 모델 받기대로 받으면 `~/models/xlmr-pii-ner`에 생깁니다. 예전 32종 모델(`models/ner`)은 쓰지 않습니다. 라벨이 달라서 그 모델을 띄우면 모든 읽기가 막힙니다.
 3. **nerserve 실행** (저장소 루트에서. 127.0.0.1에만 열립니다. 모델을 불러오는 데 시간이 걸립니다):
    ```bash
-   ~/laya-serve/.venv/bin/python -m nerserve --model-dir /경로/models/ner-xlmr-pii --port 8001
+   ~/laya-serve/.venv/bin/python -m nerserve --model-dir ~/models/xlmr-pii-ner --port 8001
    curl -s http://127.0.0.1:8001/health      # "status": "ok"와 labels 6종이 나오면 준비됨
    ```
 4. **데몬 띄우기.** 데몬은 `NER_BASE_URL`(없으면 `http://127.0.0.1:8001`)에 묻습니다. 다른 포트로 띄웠을 때만 정합니다.
