@@ -1,7 +1,7 @@
 """설정 화면(gate ui)의 자료와 바꾸기. HTTP와 상관없는 부분이다(gate.ui가 HTTP로 감싸고 토큰·Host·Origin을 검사한다).
 
 읽기
-  state()   지금 정책(번호·비밀값 8줄, NER 묶음 9줄), 내가 정한 항목, 기본값, 정규식 정보("찾는 규칙 보기").
+  state()   지금 정책(번호·비밀값 8줄, NER 묶음 9줄), 내가 정한 항목, 기본값, 정규식 정보(이름 옆 "규칙 보기").
             NER 묶음 중 host(IP·내부 주소)는 규칙이 찾아 NER을 꺼도 적용된다(rule: true). 뺀 묶음(날짜·사건)은 줄이 없다
   status()  게이트 데몬·판단 모델(Laya)·NER 서버 상태
   audit()   감사 기록(기간·결과·파일 이름으로 거르기)
@@ -107,7 +107,7 @@ EXAMPLE_SENTENCES = ("이름은 가려줘", "카드번호 있는 파일은 거�
 
 @dataclass(frozen=True)
 class RuleText:
-    """"찾는 규칙 보기"의 쉬운 설명. 정규식 자체는 gate.detectors.PATTERNS에서 읽는다."""
+    """"규칙 보기"(이름 옆 단추)의 쉬운 설명. 정규식 자체는 gate.detectors.PATTERNS에서 읽는다."""
     text: str
     example: str     # 예시 입력. 가린 모양은 gate.detectors.mask로 그때그때 만든다
     checks: str      # 정규식 밖에서 코드가 더 확인하는 것

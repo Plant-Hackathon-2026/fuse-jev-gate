@@ -776,6 +776,25 @@
     return h("div", { class: "lock" }, icon("lock"), h("strong", { text: "늘 전부 가림" }), h("span", { text: "안전 규칙으로 고정" }));
   }
 
+  // 펼친 "규칙 보기"(번호 종류별). 정책을 바꿔 표를 다시 그려도 펼친 채로 둔다.
+  var openRules = {};
+
+  // 이름 옆 [규칙 보기] 단추와, 줄 아래 전체 폭으로 펼쳐지는 규칙 상자(사용자 결정, 2026-11-01).
+  function ruleToggle(row, body) {
+    var open = !!openRules[row.kind];
+    body.hidden = !open;
+    var button = h("button", {
+      type: "button", class: "rule-toggle", "aria-expanded": open ? "true" : "false", "aria-controls": body.id,
+      onclick: function () {
+        var now = button.getAttribute("aria-expanded") !== "true";
+        openRules[row.kind] = now;
+        button.setAttribute("aria-expanded", now ? "true" : "false");
+        body.hidden = !now;
+      }
+    }, h("span", { class: "sr-only", text: row.name + " 찾는 " }), "규칙 보기", h("span", { class: "chev", "aria-hidden": "true" }));
+    return button;
+  }
+
   function numberRow(row) {
     var mine = row.action.mine || row.visible.mine;
     var vis;
@@ -792,7 +811,7 @@
       vis = select;
     }
     var rule = row.rule;
-    var body = h("div", { class: "rule-body" },
+    var body = h("div", { class: "rule-body", id: "rule-" + row.kind, role: "region", "aria-label": row.name + " 찾는 규칙" },
       h("div", { text: rule.text }),
       h("div", { class: "rule-ex" }, h("span", { class: "muted", text: "예" }), h("code", { text: rule.example }),
         h("span", { "aria-hidden": "true", text: "→" }), h("span", { class: "sr-only", text: "지금 설정으로 가리면" }),
@@ -803,10 +822,11 @@
       h("div", { class: "small muted" }, h("strong", { text: "추가로 확인해요" }), " · " + rule.checks),
       rule.lock_reason ? h("div", { class: "rule-lock" }, icon("lock"), h("span", { text: rule.lock_reason })) : null);
     return h("div", { class: "prow" + (mine ? " mine" : "") },
-      h("div", { class: "pname" }, h("span", { class: "name", text: row.name }), mine ? h("span", { class: "mine-tag", text: "내가 바꿈" }) : null),
+      h("div", { class: "pname" }, h("span", { class: "name", text: row.name }), ruleToggle(row, body),
+        mine ? h("span", { class: "mine-tag", text: "내가 바꿈" }) : null),
       seg(row.name + " 처리 방식", row.action.key, row.action.choices, row.action.value),
       h("div", { class: "pvis" }, vis),
-      h("details", { class: "rule-box" }, h("summary", { text: "찾는 규칙 보기" }), body));
+      body);
   }
 
   // host(IP·내부 주소)는 규칙이 찾아 NER을 꺼도 적용된다(row.rule). 그 줄에는 NER 꺼짐 안내를 붙이지 않는다.
@@ -835,7 +855,7 @@
       h("div", { class: "card-head-title" }, h("span", { class: "num num-solid", "aria-hidden": "true", text: "1" }),
         h("h3", null, "패턴으로 찾는 정보 ", h("span", { class: "sub", text: "번호·비밀값" })),
         h("span", { class: "tag", text: "모델 없음 · 정규식" })),
-      h("span", { class: "note-text", text: "형식이 정해진 번호는 늘 찾아서 가려요. 줄마다 “찾는 규칙”을 펼쳐 볼 수 있어요." })));
+      h("span", { class: "note-text", text: "형식이 정해진 번호는 늘 찾아서 가려요. 이름 옆 [규칙 보기]를 누르면 찾는 규칙(정규식)을 볼 수 있어요." })));
     state.numbers.forEach(function (row) { numbers.appendChild(numberRow(row)); });
 
     var nerOn = state.ner_backend === "server";

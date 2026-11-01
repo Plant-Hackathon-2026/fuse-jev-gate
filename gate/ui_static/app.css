@@ -231,9 +231,14 @@ select.input { padding-right: 8px; }
 .lock strong { font-size: 14px; }
 .lock span { font-size: 12px; color: var(--ink-2); }
 .lock svg { flex: none; color: var(--forest-700); }
-.rule-box { flex: 1 1 100%; }
-.rule-box summary { cursor: pointer; font-size: 14px; font-weight: 600; color: var(--forest-700); min-height: 44px; display: inline-flex; align-items: center; }
-.rule-body { margin-top: 6px; padding: 16px; background: var(--paper); border: 1px solid var(--stone); display: flex; flex-direction: column; gap: 12px; font-size: 14px; }
+/* 이름 옆 [규칙 보기]: 누르면 줄 아래에 규칙 상자가 전체 폭으로 펼쳐진다 */
+.rule-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 10px; border: 1px solid var(--sage-200); background: var(--white); color: var(--forest-700); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.rule-toggle:hover { border-color: var(--sage-600); background: var(--sage-50); }
+.rule-toggle[aria-expanded="true"] { border-color: var(--sage-600); background: var(--sage-50); }
+.rule-toggle .chev { width: 0; height: 0; border-left: 5px solid currentColor; border-top: 4px solid transparent; border-bottom: 4px solid transparent; transition: transform 0.15s; }
+.rule-toggle[aria-expanded="true"] .chev { transform: rotate(90deg); }
+.prow > .rule-body { flex: 1 1 100%; min-width: 0; }
+.rule-body { padding: 16px; background: var(--paper); border: 1px solid var(--stone); display: flex; flex-direction: column; gap: 12px; font-size: 14px; }
 .rule-ex { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
 .rule-ex code { padding: 2px 8px; background: var(--white); border: 1px solid var(--sage-200); }
 .rule-pat { display: flex; flex-direction: column; gap: 4px; }
@@ -343,6 +348,7 @@ td.t-reason { color: var(--forest-500); }
   .understood { padding: 18px 16px; }
   .prow { padding: 14px 16px; }
   .pvis { flex: 1 1 100%; }
+  .rule-body { padding: 12px; }
   .seg { flex-wrap: wrap; }
   .u-key { margin-left: 0; }
   .steps li { border-left: 0; border-top: 1px solid var(--stone); }
