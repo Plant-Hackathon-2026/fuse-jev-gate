@@ -293,7 +293,7 @@
       if (status.ner.state === "down") {
         box.appendChild(banner([h("strong", { text: "NER 서버가 응답하지 않아요. " }),
           "NER은 기본으로 켜져 있어서, 안전을 위해 지금 모든 파일 읽기를 막고 있어요. "
-          + "서버를 먼저 띄우거나 아래 연결 상태에서 NER을 꺼 주세요."], recheck()));
+          + "NER 서버를 띄운 뒤 “다시 확인”을 눌러 주세요."], recheck()));
       }
     }
   }
@@ -359,13 +359,12 @@
       : "켜면 이름·연락처·소속도 찾아서 가려요. 번호·비밀값·IP·내부 주소는 지금도 가려요.";
     var server = n.responding ? "응답함" : "응답 없음 · 켜기 전에 서버부터 띄워야 해요";
     var actions = h("div", { class: "row-wrap" });
-    if (n.enabled) {
-      actions.appendChild(h("button", { type: "button", class: "btn btn-secondary", onclick: function () { setNer(false); }, text: "끄기" }));
-    } else {
+    // NER 끄기는 화면에서 하지 않는다(켜기만 있음).
+    if (!n.enabled) {
       var why = h("span", { class: "small muted", id: "ner-why", text: n.responding ? "" : "서버가 응답해야 켤 수 있어요." });
       actions.appendChild(h("button", {
         type: "button", class: "btn btn-secondary", disabled: !n.responding,
-        "aria-describedby": n.responding ? null : "ner-why", onclick: function () { setNer(true); }, text: "켜기"
+        "aria-describedby": n.responding ? null : "ner-why", onclick: enableNer, text: "켜기"
       }));
       actions.appendChild(why);
     }
@@ -399,8 +398,8 @@
         h("li", { text: "여기서 “다시 확인”을 눌러 서버가 “응답함”이 되면 “켜기”를 눌러요." })));
   }
 
-  function setNer(enable) {
-    change("ner", { enable: enable }, enable ? "NER을 켰어요. PLANT는 다음 요청부터 이름·주소도 가려요." : "NER을 껐어요.");
+  function enableNer() {
+    change("ner", { enable: true }, "NER을 켰어요. PLANT는 다음 요청부터 이름·주소도 가려요.");
   }
 
   // ---------- 원본 폴더 ----------
