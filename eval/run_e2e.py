@@ -40,7 +40,12 @@
   policy     gate policy add "이름은 보여줘"(pty, y·y) → 같은 문서에서 [이름]이 사라진다 → undo → 다시 가려진다
   cache      같은 파일을 두 번 읽으면 두 번째 기록은 cached·Jev 호출 0
   ner-down   NER_BASE_URL을 닫힌 포트로 준 두 번째 데몬(다른 소켓·감사 로그): gate cat은 NER 실패로 EACCES, gate ls·stat은 된다
-  ui         gate ui --no-browser --port 0: 토큰 없이 403, 일회용 주소 재사용 403, 토큰으로 상태 API에 게이트·Laya·NER 연결 정상
+  mount      원본 폴더 추가(Phase 9): gate workspace init으로 작업 폴더 등록 → 터미널 없이 gate mount add는 거부 →
+             gate mount add(pty, y·y) → 작업 폴더 설정에 막기(Read·Edit 거부 + denyRead) → 데몬을 다시 띄우지 않아도 gate ls /에
+             /가계부 → 그 안 문서는 가려지고 .env는 경로 규칙으로 EACCES → 감사 기록에 게이트 안 경로만(실제 경로 없음) →
+             gate mount remove(pty, y): 안 보이고 읽으면 ENOENT, 막기는 남음 → gate mount unprotect(pty, y·y): 막기가 빠짐
+  ui         gate ui --no-browser --port 0: 토큰 없이 403, 일회용 주소 재사용 403, 토큰으로 상태 API에 게이트·Laya·NER 연결 정상,
+             원본 폴더 목록 API 응답
   audit      gate audit --json 기록이 위에서 본 결과(결정·단계·승인·캐시)와 맞고, 감사 로그(0600)·데몬·화면 로그에 원문과
              가릴 값(must_hide.csv, IP·내부 주소, .env 비밀값)이 없다. 앞 시나리오가 없으면 읽기 두 번으로 기록을 만든다
 
@@ -130,6 +135,11 @@ POLICY_DOC = "/medical_note/pii_3.txt"
 POLICY_SENTENCE = "이름은 보여줘"
 CACHE_DOC = "/medical_note/none_1.txt"
 NER_DOWN_DOC = NOTICE_DOC
+# 원본 폴더 추가(Phase 9). 임시 폴더 안 extra/가계부를 연결한다. 상담 문서는 /consult_chat/pii_1.txt와 같은 샘플이다
+MOUNT_NAME = "가계부"
+MOUNT_DOC = f"/{MOUNT_NAME}/상담.txt"
+MOUNT_SAMPLE = SAMPLES["/consult_chat/pii_1.txt"]
+MOUNT_ENV = f"/{MOUNT_NAME}/.env"
 
 # 가림 표시 → 정책 칸(gate.ner_client.policy_slot). [전화번호]는 휴대폰·일반 전화 중 어느 칸인지 글자만으로 알 수 없어 뺀다.
 LABEL_SLOTS = {"[이름]": "name", "[주소]": "address", "[생년월일]": "birth", "[식별번호]": "student_id", "[소속]": "org",
@@ -444,11 +454,11 @@ class E2E:
 
     def hidden_values(self, vpath: str) -> list[str]:
         """그 문서에서 가려져야 할 값: must_hide.csv(샘플), 직접 만든 문서의 IP·내부 주소와 비밀값."""
-        if vpath in SAMPLES:
-            return [m.text for m in self.must_hide.get(SAMPLES[vpath], [])]
+        if vpath in SAMPLES or vpath == MOUNT_DOC:
+            return [m.text for m in self.must_hide.get(SAMPLES.get(vpath, MOUNT_SAMPLE), [])]
         if vpath == HOST_DOC:
             return list(HOST_VALUES)
-        if vpath == ENV_DOC:
+        if vpath in (ENV_DOC, MOUNT_ENV):
             return list(self.secrets)
         return []
 
@@ -714,7 +724,7 @@ def _check_host(f: Flow, when: str) -> None:
 def s_host(e: E2E) -> str:
     _check_host(e.read(HOST_DOC), "NER 켬")
     off = e.human("policy", "set", "ner_backend", "none", answers=["y"])
-    check(off.code == 0 and "저장했습니다" in off.out, f"ner_backend none 저장 실패: {_short(off.out)}")
+    check(off.code == 0 and "저장했어요" in off.out, f"ner_backend none 저장 실패: {_short(off.out)}")
     check(off.prompts == 1, f"NER 끄기는 느슨해지는 바꿈이라 한 번 묻기 기대, 실제 질문 {off.prompts}번")
     _check_host(e.read(HOST_DOC), "NER 끔")
     back = e.human("policy", "undo")
@@ -810,7 +820,7 @@ def s_policy(e: E2E) -> str:
     refused = e.gate("policy", "add", POLICY_SENTENCE)
     check(refused.code == 1 and "터미널" in refused.out, f"터미널 없이 policy add가 거부되지 않음: {_short(refused.out)}")
     added = e.human("policy", "add", POLICY_SENTENCE, answers=["y", "y"])
-    check(added.code == 0 and "저장했습니다" in added.out, f"policy add 저장 실패: {_short(added.out)}")
+    check(added.code == 0 and "저장했어요" in added.out, f"policy add 저장 실패: {_short(added.out)}")
     check(added.prompts == 2, f"느슨해지는 문장이라 두 번 묻기 기대, 실제 {added.prompts}번")
     after = e.read(POLICY_DOC, on_pending="approve")
     check(after.code == 0, f"이름 보여 주기 뒤 기대 내용, 실제 종료 코드 {after.code} {_gate_lines(after.err)}")
@@ -873,6 +883,74 @@ def s_ner_down(e: E2E) -> str:
     startup = log.read_text("utf-8")
     check("NER 켜짐" in startup, "데몬 시작 안내에 NER 켜짐 경고가 없음")
     return f"닫힌 포트 {port}: ls·stat 됨, cat → {_gate_lines(f.err)}; 데몬 시작 때 NER 경고 있음"
+
+
+def s_mount(e: E2E) -> str:
+    folder = e.root / "extra" / MOUNT_NAME
+    folder.mkdir(parents=True)
+    (folder / "상담.txt").write_bytes((PROJECT_ROOT / MOUNT_SAMPLE).read_bytes())
+    (folder / ".env").write_text(f"DB_PASSWORD={e.secrets[0]}\nAPI_TOKEN={e.secrets[1]}\n", encoding="utf-8")
+    real = str(folder.resolve())  # /tmp는 /private/tmp
+    mounts_file = e.root / "mounts.yaml"
+    workspace = e.root / "ws"
+    r = e.gate("workspace", "init", str(workspace), "--source", str(e.source))
+    check(r.code == 0, f"gate workspace init 실패: {_short(r.out + r.err)}")
+    settings_file = workspace / ".claude" / "settings.json"
+
+    def protected() -> tuple[bool, bool]:
+        settings = json.loads(settings_file.read_text(encoding="utf-8"))
+        deny = settings["permissions"]["deny"]
+        rules = all(f"{tool}(/{real}{tail})" in deny for tool in ("Read", "Edit") for tail in ("", "/**"))
+        return rules, real in settings["sandbox"]["filesystem"]["denyRead"]
+
+    check(protected() == (False, False), "연결 전인데 작업 폴더 설정에 이 폴더 막기가 있음")
+    r = e.gate("mount", "add", str(folder))
+    check(r.code == 1 and "터미널" in r.out + r.err and not mounts_file.exists(),
+          f"터미널 없이 gate mount add 기대 거부, 실제 종료 코드 {r.code} {_short(r.out + r.err)}")
+
+    added = e.human("mount", "add", str(folder), answers=("y", "y"))
+    check(added.code == 0 and added.prompts == 2 and f"연결했어요: /{MOUNT_NAME}" in added.out,
+          f"gate mount add(pty) 기대 질문 2번·연결, 실제 종료 코드 {added.code} 질문 {added.prompts} {_short(added.out)}")
+    check("다시 시작" in added.out, f"세션 다시 시작 안내가 없음: {_short(added.out)}")
+    check(protected() == (True, True), f"연결 뒤 작업 폴더 설정에 막기 기대 (규칙, denyRead) 둘 다, 실제 {protected()}")
+
+    listed = e.gate("ls", "/")
+    check(listed.code == 0 and f"{MOUNT_NAME}/" in listed.out.split(),
+          f"데몬을 다시 띄우지 않고 gate ls /에 {MOUNT_NAME}/ 기대, 실제 {listed.out.split()}")
+    e.expected["main"].append({"op": "ls", "path": "/", "decision": "ok"})
+    f = e.read(MOUNT_DOC)
+    check(f.code == 0 and "[이름]" in f.out, f"{MOUNT_DOC}: 기대 가림, 실제 종료 코드 {f.code} {_gate_lines(f.err)}")
+    leaked = leaks(f.out, e.hidden_values(MOUNT_DOC))
+    check(not leaked, f"{MOUNT_DOC}: 누출 {leaked}")
+    g = e.read(MOUNT_ENV)
+    check(g.code == 1 and "EACCES" in g.err and "경로 규칙" in g.err and not g.data,
+          f"{MOUNT_ENV}: 기대 경로 규칙 EACCES, 실제 종료 코드 {g.code} {_gate_lines(g.err)}")
+    check(not leaks(g.err, e.secrets), "차단 이유에 비밀값이 들어 있음")
+    e.expected["main"][-1]["stage"] = "path"
+    records = [rec for rec in e.audit_records() if str(rec.get("path", "")).startswith(f"/{MOUNT_NAME}")]
+    check({rec.get("path") for rec in records} >= {MOUNT_DOC, MOUNT_ENV},
+          f"감사 기록에 게이트 안 경로 기대 {MOUNT_DOC}·{MOUNT_ENV}, 실제 {sorted({rec.get('path') for rec in records})}")
+    check(real not in e.audit.read_text(encoding="utf-8"), "감사 로그에 추가 폴더의 실제 경로가 남음")
+    shown = e.gate("mount", "list")
+    check(shown.code == 0 and f"/{MOUNT_NAME}" in shown.out and "연결됨" in shown.out,
+          f"gate mount list에 연결됨 기대: {_short(shown.out)}")
+
+    removed = e.human("mount", "remove", MOUNT_NAME, answers=("y",))
+    check(removed.code == 0 and "보호만 남아" in removed.out, f"gate mount remove(pty) 실패: {_short(removed.out)}")
+    listed = e.gate("ls", "/")
+    check(listed.code == 0 and f"{MOUNT_NAME}/" not in listed.out.split(), f"뺀 뒤에도 gate ls /에 보임: {listed.out.split()}")
+    e.expected["main"].append({"op": "ls", "path": "/", "decision": "ok"})
+    gone = e.read(MOUNT_DOC, record=None)
+    check(gone.code == 1 and "ENOENT" in gone.err, f"뺀 뒤 읽기 기대 ENOENT, 실제 종료 코드 {gone.code} {_gate_lines(gone.err)}")
+    check(protected() == (True, True), "뺀 뒤 작업 폴더 설정의 막기가 사라짐(남아야 함)")
+
+    freed = e.human("mount", "unprotect", MOUNT_NAME, answers=("y", "y"))
+    check(freed.code == 0 and freed.prompts == 2 and "보호를 풀었어요" in freed.out,
+          f"gate mount unprotect(pty) 기대 질문 2번·풂, 실제 종료 코드 {freed.code} 질문 {freed.prompts} {_short(freed.out)}")
+    check(protected() == (False, False), f"보호를 푼 뒤에도 막기가 남음: {protected()}")
+    return (f"작업 폴더 등록, 터미널 없이 add 거부, add(pty y·y) → 막기(규칙 4줄 + denyRead)·세션 다시 시작 안내, "
+            f"다시 띄우지 않고 ls에 /{MOUNT_NAME}, {Path(MOUNT_DOC).name} {label_summary(f.out)}·누출 0, .env 경로 규칙 EACCES, "
+            f"감사 기록은 게이트 안 경로만, remove → 안 보임·ENOENT·막기 남음, unprotect(y·y) → 막기 빠짐")
 
 
 def s_audit(e: E2E) -> str:
@@ -953,8 +1031,13 @@ def s_ui(e: E2E) -> str:
         status, _, body = http_get(f"{base}/api/audit?period=all", {"X-Gate-Token": session.group(1)})
         audit = json.loads(body) if status == 200 else {}
         check(audit.get("available"), f"감사 기록 API 기대 available, 실제 {status} {_short(body, 80)}")
+        status, _, body = http_get(f"{base}/api/mounts", {"X-Gate-Token": session.group(1)})
+        mounts = json.loads(body) if status == 200 else {}
+        check(mounts.get("ok") and mounts.get("error") is None and isinstance(mounts.get("folders"), list),
+              f"원본 폴더 API 기대 200·오류 없음, 실제 {status} {_short(body, 80)}")
         return (f"토큰 없음·틀린 토큰 403, 일회용 주소 재사용 403, 토큰으로 상태: 게이트 on·Laya connected"
-                f"({data['laya'].get('model')})·NER connected, 감사 기록 {audit.get('total')}건 보임")
+                f"({data['laya'].get('model')})·NER connected, 감사 기록 {audit.get('total')}건 보임, "
+                f"원본 폴더 {len(mounts['folders'])}줄")
     finally:
         kill(proc)
         if proc in e.procs:
@@ -987,6 +1070,7 @@ SCENARIOS: tuple[Scenario, ...] = (
     Scenario("policy", "정책 문장·undo", _names(POLICY_DOC), s_policy),
     Scenario("cache", "캐시", _names(CACHE_DOC), s_cache),
     Scenario("ner-down", "NER 서버 응답 없음", _names(NER_DOWN_DOC), s_ner_down),
+    Scenario("mount", "원본 폴더 추가·빼기", _names(MOUNT_DOC, MOUNT_ENV), s_mount),
     Scenario("ui", "설정 화면", "gate ui", s_ui),
     Scenario("audit", "감사 로그 대조·누출", "audit.jsonl ×2, 데몬·화면 로그", s_audit),  # 마지막: 앞 시나리오의 기록을 모두 본다
 )

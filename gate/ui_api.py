@@ -15,11 +15,21 @@
     NER 켜기·끄기(ner_backend)는 ner()로만 바꾼다. 켜기는 NER 서버 /health가 응답할 때만 쓴다(화면을 거치지 않은 요청도 같다).
     응답하지 않는 서버를 켜면 게이트가 모든 읽기를 막기 때문이다. 서버를 띄우는 일은 하지 않는다. 끄기는 검사 없이 된다
     (느슨해지는 바꿈이라 확인은 받는다).
+원본 폴더 (Phase 9-2, plans/mount-ui-plan.md 5절. 계산·검사·쓰기는 모두 gate.mount_change. `gate mount`와 같은 함수)
+  mounts() 목록 → pick_folder() 맥 폴더 선택 창 → add_mount(선택 번호, 확인 값), remove_mount(이름), unprotect_mount(이름)
+  - 추가는 폴더 선택 창(gate.folder_picker)에서 사람이 고른 폴더만 받는다. 서버는 고른 경로를 한 번 쓰는 선택 번호(5분)로만
+    기억하고, 추가 요청은 경로가 아니라 선택 번호를 받는다(토큰이 새어도 사람이 고르지 않은 폴더는 화면으로 연결할 수 없게).
+  - 추가·빼기·보호도 풀기는 모두 확인 값(gate.mount_change.MountChange.confirm_token)이 맞을 때만 쓴다.
+    확인 값이 없거나 틀리면 쓰지 않고 {"status": "confirm", "confirm": 값, "preview": {...}}를 돌려준다.
+    쓰기는 정책 바꾸기와 같은 잠금(_write) 안에서 한 번에 하나씩 한다.
+  - 쓴 뒤 알려 줄 점(MountResult.notes)은 여기서 사람 말로 바꾼다(MOUNT_NOTE_TEXT).
+  - 바꿔 끼울 자리(테스트): UiApp.mount_ops(기본 gate.mount_change 모듈), UiApp.picker(기본 맥 폴더 선택 창).
 
 상태 확인
   - 판단 모델·NER 서버 /health는 이 컴퓨터의 IP 주소(127.0.0.1 같은 loopback IP)에만 묻는다. 이름(localhost 등)은 묻지 않는다.
     주소는 이 프로세스의 JEV_BASE_URL·NER_BASE_URL(데몬과 같은 이름), 없으면 127.0.0.1:8000·127.0.0.1:8001이다.
   - 게이트 데몬은 소켓에 연결만 해 보고 바로 끊는다(요청을 보내지 않아 감사 로그에 남지 않는다). 소켓 경로를 모르면 "확인할 수 없음".
+  - 게이트 카드의 원본 폴더 수는 gate.mount_change.list_mounts로 센다(파일 수는 세지 않음). 실패해도 상태는 그대로 준다.
   - 마지막 요청 시각은 감사 로그의 마지막 기록에서 구한다. 데몬이 정책 파일을 언제 다시 읽었는지는 알 수 없어서,
     정책 파일을 바꾼 시각만 보여 준다(데몬은 다음 요청 때 바뀐 것을 보고 다시 읽는다).
 """
@@ -37,14 +47,17 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import Counter, OrderedDict
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
+from types import ModuleType
+from typing import Any, Generic, TypeVar
 
-from gate import audit_cli
+from gate import audit_cli, mount_change
 from gate.approval import clean_text, kinds_text
 from gate.detectors import KINDS, PATTERNS, VISIBLE_CHOICES, mask
+from gate.folder_picker import FolderPicker, MacFolderPicker, PickerBusy, PickerError, PickerUnavailable
 from gate.jev_client import LAYA_DEFAULT_MODEL
 from gate.ner_client import DEFAULT_BASE_URL, ENTITY_GROUPS, ENTITY_NAMES, RULE_GROUPS
 from gate.policy import (
@@ -81,6 +94,8 @@ HEALTH_TIMEOUT_SECONDS = 1.5
 AUDIT_LIMIT = 200
 TICKET_SECONDS = 30 * 60
 MAX_TICKETS = 32
+PICK_SECONDS = 5 * 60   # 폴더 선택 창에서 고른 뒤 [연결]까지
+MAX_PICKS = 8
 _MAX_HEALTH_BYTES = 64 * 1024
 _TAIL_BYTES = 64 * 1024
 
@@ -135,11 +150,12 @@ CATEGORIES = ("allow", "mask", "ask", "deny")
 class UiError(Exception):
     """화면에 돌려줄 실패. status는 HTTP 상태, code는 짧은 영문 이름, message는 사용자에게 보여 줄 말."""
 
-    def __init__(self, status: int, code: str, message: str) -> None:
+    def __init__(self, status: int, code: str, message: str, extra: Mapping[str, object] | None = None) -> None:
         super().__init__(message)
         self.status = status
         self.code = code
         self.message = message
+        self.extra = dict(extra or {})  # 응답에 더 실을 것(예: 연결하지 못한 폴더 경로)
 
 
 @dataclass
@@ -329,24 +345,30 @@ def last_record_time(path: Path | None) -> str | None:
 
 # --- 해석 표 ---
 
-class Tickets:
-    """해석 결과(저장할 항목)를 잠깐 들고 있는다. 오래되거나 많으면 버린다."""
+T = TypeVar("T")
 
-    def __init__(self, seconds: float = TICKET_SECONDS, limit: int = MAX_TICKETS) -> None:
+
+class Tickets(Generic[T]):
+    """해석 결과(저장할 항목)나 폴더 선택 창에서 고른 경로를 잠깐 들고 있는다. 오래되거나 많으면 버린다.
+    번호는 secrets로 만든다(화면만 안다)."""
+
+    def __init__(self, seconds: float = TICKET_SECONDS, limit: int = MAX_TICKETS,
+                 clock: Callable[[], float] = time.monotonic) -> None:
         self.seconds, self.limit = seconds, limit
-        self._items: OrderedDict[str, tuple[float, Entry]] = OrderedDict()
+        self._clock = clock
+        self._items: OrderedDict[str, tuple[float, T]] = OrderedDict()
         self._lock = threading.Lock()
 
-    def put(self, entry: Entry) -> str:
+    def put(self, value: T) -> str:
         ticket = secrets.token_urlsafe(16)
         with self._lock:
             self._expire()
-            self._items[ticket] = (time.monotonic(), entry)
+            self._items[ticket] = (self._clock(), value)
             while len(self._items) > self.limit:
                 self._items.popitem(last=False)
         return ticket
 
-    def get(self, ticket: object) -> Entry | None:
+    def get(self, ticket: object) -> T | None:
         if not isinstance(ticket, str):
             return None
         with self._lock:
@@ -354,12 +376,19 @@ class Tickets:
             item = self._items.get(ticket)
         return item[1] if item else None
 
-    def drop(self, ticket: str) -> None:
+    def drop(self, ticket: object) -> None:
+        if not isinstance(ticket, str):
+            return
         with self._lock:
             self._items.pop(ticket, None)
 
+    def __len__(self) -> int:
+        with self._lock:
+            self._expire()
+            return len(self._items)
+
     def _expire(self) -> None:
-        limit = time.monotonic() - self.seconds
+        limit = self._clock() - self.seconds
         for key in [k for k, (at, _) in self._items.items() if at < limit]:
             del self._items[key]
 
@@ -370,12 +399,25 @@ class Tickets:
 class UiApp:
     config: UiConfig
     interpreter: PolicyInterpreter | None = None
-    tickets: Tickets = field(default_factory=Tickets)
+    tickets: Tickets[Entry] = field(default_factory=Tickets)
+    # 바꿔 끼울 수 있는 자리(테스트용). 폴더 관리 함수 묶음은 gate.mount_change와 같은 이름
+    # (MountContext.from_policy, list_mounts, plan_add, plan_remove, plan_unprotect, apply)을 가진 것이면 된다.
+    mount_ops: ModuleType | Any = None
+    picker: FolderPicker | None = None
+    picks: Tickets[str] = field(default_factory=lambda: Tickets(PICK_SECONDS, MAX_PICKS))
     _write: threading.Lock = field(default_factory=threading.Lock)
 
     def __post_init__(self) -> None:
         if self.interpreter is None:
             self.interpreter = make_interpreter()  # 기본은 키워드 Mock(바꾸지 않는다)
+        if self.mount_ops is None:
+            self.mount_ops = mount_change
+        if self.picker is None:
+            self.picker = MacFolderPicker()
+
+    def close(self) -> None:
+        """gate ui를 끌 때: 떠 있는 폴더 선택 창을 닫는다."""
+        self.picker.cancel()
 
     # ----- 읽기 -----
 
@@ -460,7 +502,7 @@ class UiApp:
         gate_state, gate_reason = ("unknown", "") if socket_path is None else probe_socket(socket_path)
         gate = {"state": gate_state, "reason": gate_reason, "socket": str(socket_path) if socket_path else None,
                 "last_request": last_record_time(self.config.audit),
-                "policy_changed_at": _iso_mtime(self.config.policy)}
+                "policy_changed_at": _iso_mtime(self.config.policy), "folders": self._folder_summary()}
 
         jev_backend = policy.jev_backend if policy else None
         laya = {"backend": jev_backend, "address": _address(self.config.jev_url), "model": self.config.jev_model}
@@ -614,6 +656,181 @@ class UiApp:
         except ChangeError as exc:
             raise UiError(500, "write-failed", str(exc)) from exc
         return {"ok": True, "status": "saved", "version": policy.version}
+
+    # ----- 원본 폴더 -----
+
+    def _mount_ctx(self):
+        return self.mount_ops.MountContext.from_policy(self.config.policy, self.config.socket, self.config.audit)
+
+    def mounts(self) -> dict:
+        """원본 폴더 목록. 목록·등록 파일이 잘못되어 있으면 error에 담긴다(list_mounts는 던지지 않는다)."""
+        try:
+            view = self.mount_ops.list_mounts(self._mount_ctx())
+        except mount_change.MountError as exc:
+            raise UiError(409, "mount", str(exc)) from exc
+        return {"ok": True, **mounts_view(view)}
+
+    def _folder_summary(self) -> dict | None:
+        """게이트 카드의 원본 폴더 수. 목록을 구하지 못하면 None(상태 화면은 그대로 보여 준다)."""
+        try:
+            view = self.mount_ops.list_mounts(self._mount_ctx(), count_files=False)
+            folders = tuple(view.folders)
+            error = view.error
+        except Exception:  # noqa: BLE001 - 상태 카드 하나 때문에 상태 전체가 깨지지 않게
+            return None
+        mounts = [f for f in folders if f.kind == "mount"]
+        return {"count": sum(1 for f in folders if f.connected),  # 연결된 폴더(기본 포함, 찾을 수 없는 것도 셈)
+                "base": sum(1 for f in folders if f.kind == "base"),
+                "mounts": sum(1 for f in mounts if f.connected),
+                "protected_only": sum(1 for f in mounts if not f.connected),
+                "missing": sum(1 for f in folders if f.connected and not f.exists),
+                "error": bool(error)}
+
+    def pick_folder(self) -> dict:
+        """맥 폴더 선택 창을 띄우고(사람이 고를 때까지 기다림) 고른 폴더의 추가를 계산한다. 아직 쓰지 않는다."""
+        try:
+            folder = self.picker.pick()
+        except PickerBusy as exc:
+            raise UiError(409, "picker-busy", str(exc)) from exc
+        except PickerUnavailable as exc:
+            raise UiError(501, "picker-unavailable", str(exc)) from exc
+        except PickerError as exc:
+            raise UiError(500, "picker-failed", str(exc)) from exc
+        if folder is None:
+            return {"ok": True, "status": "cancelled"}
+        try:
+            change = self.mount_ops.plan_add(self._mount_ctx(), folder, added_by="ui")
+        except mount_change.MountError as exc:
+            raise UiError(409, "mount", str(exc), {"path": folder}) from exc
+        pick = self.picks.put(folder)
+        return _mount_confirm(change, pick)
+
+    def add_mount(self, pick: object, confirm: object = None) -> dict:
+        """선택 번호로 고른 폴더를 연결한다. 경로는 받지 않는다. 선택 번호는 연결하거나 못 하게 되면 지운다(한 번 쓰기)."""
+        with self._write:  # 같은 선택 번호로 두 번 쓰지 않게 번호 확인부터 잠근다
+            folder = self.picks.get(pick)
+            if folder is None:
+                raise UiError(410, "pick-expired", "폴더를 고른 지 오래되었거나 이미 처리했어요. "
+                                                  "[폴더 추가]를 눌러 다시 골라 주세요.")
+            keep = False
+            try:
+                ctx = self._mount_ctx()
+                change = self.mount_ops.plan_add(ctx, folder, added_by="ui")
+                if not _confirmed(change, confirm):
+                    keep = True  # 확인 값이 없거나 그사이 바뀜: 쓰지 않고 다시 확인받는다
+                    return _mount_confirm(change, pick)
+                result = self.mount_ops.apply(ctx, change)
+            except mount_change.MountError as exc:
+                raise UiError(409, "mount", str(exc), {"path": folder}) from exc
+            finally:
+                if not keep:
+                    self.picks.drop(pick)
+        return mount_saved(result)
+
+    def remove_mount(self, name: object, confirm: object = None) -> dict:
+        """게이트에서 빼기. 직접 읽기 막기는 남긴다(보호만 남음)."""
+        return self._mount_change("remove", name, confirm)
+
+    def unprotect_mount(self, name: object, confirm: object = None) -> dict:
+        """보호도 풀기(느슨해지는 바꿈). 빼 둔(보호만 남은) 폴더만 된다."""
+        return self._mount_change("unprotect", name, confirm)
+
+    def _mount_change(self, op: str, name: object, confirm: object) -> dict:
+        if not isinstance(name, str) or not name:
+            raise UiError(400, "bad-name", "폴더 이름이 올바르지 않아요. 목록을 새로 불러온 뒤 다시 해 주세요.")
+        plan = self.mount_ops.plan_remove if op == "remove" else self.mount_ops.plan_unprotect
+        with self._write:
+            try:
+                ctx = self._mount_ctx()
+                change = plan(ctx, name)
+                if not _confirmed(change, confirm):
+                    return _mount_confirm(change)
+                result = self.mount_ops.apply(ctx, change)
+            except mount_change.MountError as exc:
+                raise UiError(409, "mount", str(exc)) from exc
+        return mount_saved(result)
+
+
+# --- 원본 폴더: 응답 모양과 글 ---
+
+# 쓴 뒤 알려 줄 점(gate.mount_change.Note). 글은 화면 쪽(여기)이 정한다. (op, note) → 글, 없으면 (None, note).
+MOUNT_NOTE_TEXT: dict[tuple[str | None, str], str] = {
+    ("add", "restart_session"): "이미 켜 둔 에이전트 세션은 다시 시작해야 이 폴더를 직접 여는 것이 막혀요.",
+    (None, "restart_session"): "이미 켜 둔 에이전트 세션은 다시 시작해야 바뀐 작업 폴더 설정을 따라요.",
+    (None, "rerun_setup"): "전역 설정에는 아직 반영되지 않았어요. 터미널에서 `gate setup`을 다시 실행하세요.",
+    ("add", "no_workspace"): "등록된 작업 폴더가 없어 직접 열기를 막지 못했어요. "
+                             "`gate workspace init`으로 작업 폴더를 만든 뒤 쓰세요.",
+    (None, "no_workspace"): "등록된 작업 폴더가 없어 작업 폴더 설정은 다시 쓰지 않았어요.",
+}
+
+
+def mount_note_text(op: str, note: str) -> str:
+    return MOUNT_NOTE_TEXT.get((op, note)) or MOUNT_NOTE_TEXT.get((None, note)) or note
+
+
+def _vpath(name: str) -> str:
+    return "/" + name
+
+
+def _confirmed(change, confirm: object) -> bool:
+    return isinstance(confirm, str) and hmac.compare_digest(confirm, change.confirm_token)
+
+
+def mount_preview(change) -> dict:
+    """확인 상자에 보여 줄 바꿈(gate.mount_change.MountChange)."""
+    return {"op": change.op, "name": change.name, "vpath": _vpath(change.name), "path": change.path,
+            "file_count": change.file_count, "file_count_capped": bool(change.file_count_capped),
+            "workspaces": list(change.workspaces), "loosening": bool(change.loosening),
+            "reconnect": bool(change.reconnect)}
+
+
+def _mount_confirm(change, pick: str | None = None) -> dict:
+    payload: dict = {"ok": True, "status": "confirm", "confirm": change.confirm_token, "preview": mount_preview(change)}
+    if pick is not None:
+        payload["pick"] = pick
+    return payload
+
+
+def mount_done_text(change, rewritten: int) -> str:
+    name = change.name
+    if change.op == "add":
+        text = (f"“{name}” 폴더를 {'다시 ' if change.reconnect else ''}연결했어요. "
+                f"에이전트는 이제 게이트에서 {_vpath(name)} 아래로 이 폴더 문서를 읽어요.")
+        if rewritten:
+            text += f" 작업 폴더 설정 {rewritten}곳에서 이 폴더를 직접 열지 못하게 막았어요."
+        return text
+    if change.op == "remove":
+        return (f"“{name}” 폴더를 게이트에서 뺐어요. 에이전트는 이 폴더 문서를 더는 게이트로 읽지 못해요. "
+                "직접 열기 막기는 남겨 뒀어요.")
+    text = f"“{name}” 폴더의 보호를 풀었어요. 에이전트가 이 폴더를 다시 직접 읽을 수 있어요."
+    if rewritten:
+        text += f" 작업 폴더 설정 {rewritten}곳을 다시 썼어요."
+    return text
+
+
+def mount_saved(result) -> dict:
+    """apply 결과(gate.mount_change.MountResult)를 화면 응답으로."""
+    change = result.change
+    rewritten = list(result.rewritten)
+    return {"ok": True, "status": "saved", "op": change.op, "name": change.name, "vpath": _vpath(change.name),
+            "path": change.path, "message": mount_done_text(change, len(rewritten)),
+            "rewritten": rewritten, "rewritten_count": len(rewritten),
+            "notes": [{"code": note, "text": mount_note_text(change.op, note)} for note in result.notes]}
+
+
+def folder_row(row) -> dict:
+    return {"kind": row.kind, "name": row.name, "vpath": row.vpath, "path": row.path,
+            "connected": bool(row.connected), "exists": bool(row.exists), "file_count": row.file_count,
+            "file_count_capped": bool(row.file_count_capped), "added_at": row.added_at, "added_by": row.added_by,
+            "unprotected_workspaces": list(row.unprotected_workspaces)}
+
+
+def mounts_view(view) -> dict:
+    """list_mounts 결과(gate.mount_change.MountsView)를 화면 응답으로."""
+    folders = [folder_row(row) for row in view.folders]
+    return {"folders": folders, "workspaces": [{"path": w.path, "state": w.state} for w in view.workspaces],
+            "global_setup": bool(view.global_setup), "error": view.error, "limit": view.limit,
+            "mount_count": sum(1 for f in folders if f["kind"] == "mount")}
 
 
 def _plan_add(path: Path, entries, entry: Entry, action: str = "add") -> Change:

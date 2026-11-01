@@ -45,6 +45,26 @@
       <div class="cards" id="status-cards"><p class="muted">확인하는 중이에요…</p></div>
     </section>
 
+    <section class="sec" aria-labelledby="h-mounts">
+      <div class="sec-head">
+        <span class="dot" aria-hidden="true"></span>
+        <h2 id="h-mounts">원본 폴더</h2>
+        <span class="rule" aria-hidden="true"></span>
+        <span class="muted small" id="mount-count"></span>
+        <button type="button" class="btn btn-primary" id="mount-add" disabled>폴더 추가</button>
+      </div>
+      <p class="lead small">에이전트가 게이트를 거쳐 읽는 폴더예요. 연결한 폴더 문서는 정책대로 가리거나 물어본 뒤 보여 주고,
+        작업 폴더 설정에서는 직접 열지 못하게 막아요.</p>
+      <p class="muted small" id="mount-add-why" hidden></p>
+      <div class="mount-banners" id="mount-banners"></div>
+      <p class="pick-wait" id="mount-wait" role="status" hidden>
+        <span>폴더 선택 창을 띄웠어요. 이 컴퓨터 화면에서 골라 주세요. 2분 안에 고르지 않으면 창이 닫혀요.</span>
+      </p>
+      <div class="mresult" id="mount-result" role="status" aria-live="polite" tabindex="-1" hidden></div>
+      <div class="card" id="mount-list"><p class="empty">불러오는 중이에요…</p></div>
+      <p class="muted small" id="mount-foot">터미널에서는 <code>gate mount list</code>·<code>add</code>·<code>remove</code>·<code>unprotect</code>로도 관리할 수 있어요.</p>
+    </section>
+
     <section class="sec" aria-labelledby="h-sentence">
       <div class="sec-head">
         <span class="dot" aria-hidden="true"></span>
@@ -143,7 +163,9 @@
 <dialog id="confirm-dialog" class="dialog" aria-labelledby="confirm-title" aria-describedby="confirm-lead">
   <h2 id="confirm-title">정말 느슨하게 바꿀까요?</h2>
   <p id="confirm-lead">이 변경은 정책을 느슨하게 해요(더 많이 보여 주게 돼요).</p>
+  <dl id="confirm-facts" class="kv confirm-facts" hidden></dl>
   <ul id="confirm-list" class="confirm-list"></ul>
+  <div id="confirm-warn" class="warn confirm-warn" hidden></div>
   <div class="row-wrap">
     <button type="button" class="btn btn-danger" id="confirm-yes">느슨하게 바꾸기</button>
     <button type="button" class="btn btn-secondary" id="confirm-no">취소</button>

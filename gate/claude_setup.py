@@ -2,7 +2,11 @@
 
 작업 폴더가 아닌 곳에서 띄운 Claude Code 세션도 원본을 직접 읽지 못하게 한다. 합치는 조각은
 gate.workspace.protection_settings다(작업 폴더 설정과 같은 막기 규칙).
-  - 원본·정책 파일·정책 기록·감사 로그 폴더: Read/Edit deny + 샌드박스 denyRead. 소켓 폴더: Edit deny.
+  - 원본·추가 폴더·정책 파일·폴더 목록(mounts.yaml)·작업 폴더 등록(workspaces.yaml)·정책 기록·감사 로그 폴더:
+    Read/Edit deny + 샌드박스 denyRead. 소켓 폴더: Edit deny.
+  - 추가 폴더(Phase 9)는 정책 파일 옆 mounts.yaml의 모든 항목이다(보호만 남은 것 포함). 목록 파일이 잘못되어 있으면 무엇을
+    막을지 모르므로 멈춘다. 폴더를 새로 연결한 뒤에는 다시 실행해야 그 폴더도 막힌다(빠진 항목만 덧붙인다).
+    보호를 푼 폴더의 규칙은 다시 실행해도 빠지지 않는다(--undo로 되돌린 뒤 다시 설치).
   - 샌드박스: 켬, 시작 못 하면 Claude Code도 시작하지 않음, 샌드박스 밖 재실행 금지. Unix 소켓은 게이트 소켓만 연다.
   - env.GATE_SOCKET
 
@@ -268,7 +272,8 @@ def _fragment(args: argparse.Namespace) -> dict:
     # gate_bin은 사용자 설정에 들어가지 않는다. 경로 확인만 같이 하려고 넘긴다
     paths: GatePaths = resolve_paths(args.source, args.socket, args.policy, args.audit,
                                      workspace._default_gate_bin() or sys.argv[0])
-    return protection_settings(paths)
+    # 정책 파일 옆 mounts.yaml의 모든 항목(보호만 남은 것 포함)도 막는다. 목록 파일이 잘못되었으면 WorkspaceError로 멈춘다
+    return protection_settings(workspace.with_listed_mounts(paths))
 
 
 def run(args: argparse.Namespace) -> int:

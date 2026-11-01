@@ -7,6 +7,10 @@
       "Edit(//path/to/hackathon/gate-data/source/**)",
       "Read(//path/to/hackathon/gate-data/policy.yaml)",
       "Edit(//path/to/hackathon/gate-data/policy.yaml)",
+      "Read(//path/to/hackathon/gate-data/mounts.yaml)",
+      "Edit(//path/to/hackathon/gate-data/mounts.yaml)",
+      "Read(//path/to/hackathon/gate-data/workspaces.yaml)",
+      "Edit(//path/to/hackathon/gate-data/workspaces.yaml)",
       "Read(//path/to/hackathon/gate-data/policy-history)",
       "Read(//path/to/hackathon/gate-data/policy-history/**)",
       "Edit(//path/to/hackathon/gate-data/policy-history)",
@@ -31,6 +35,8 @@
       "denyRead": [
         "/path/to/hackathon/gate-data/source",
         "/path/to/hackathon/gate-data/policy.yaml",
+        "/path/to/hackathon/gate-data/mounts.yaml",
+        "/path/to/hackathon/gate-data/workspaces.yaml",
         "/path/to/hackathon/gate-data/policy-history",
         "/path/to/hackathon/gate-data/audit"
       ]

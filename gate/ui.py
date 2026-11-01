@@ -1,4 +1,4 @@
-"""`gate ui`: 설정 화면. 이 컴퓨터의 브라우저에서 정책을 보고 바꾸고, 감사 기록을 본다 (Phase 8).
+"""`gate ui`: 설정 화면. 이 컴퓨터의 브라우저에서 정책을 보고 바꾸고, 원본 폴더를 연결·빼고, 감사 기록을 본다 (Phase 8·9).
 
 사람이 자기 터미널에서 실행한다. 표준 라이브러리 http.server만 쓴다. 자료와 바꾸기는 gate.ui_api, 정책 쓰기는
 gate.policy_change(`gate policy`와 같은 함수)다. 게이트 데몬·소켓과는 별개 프로세스이고, 사용자 권한으로 정책 파일을 쓴다.
@@ -29,8 +29,14 @@ gate.policy_change(`gate policy`와 같은 함수)다. 게이트 데몬·소켓�
 
 API (gate.ui_api)
   GET  /api/state, /api/status, /api/audit?period=today|7d|all&category=all|allow|mask|ask|deny&q=…
+       /api/mounts                                       원본 폴더 목록 (gate.mount_change.list_mounts)
   POST /api/interpret {sentence} · /api/save {ticket, confirm?} · /api/set {key, value, confirm?}
        /api/remove {number, fingerprint, confirm?} · /api/undo {confirm?} · /api/ner {enable, confirm?}
+       /api/mounts/pick {}                               맥 폴더 선택 창을 띄우고 고를 때까지 기다린다(최대 2분)
+                                                         → {status: confirm, pick, confirm, preview} | {status: cancelled}
+       /api/mounts/add {pick, confirm?}                  경로는 받지 않는다(폴더 선택 창에서 고른 것만, 선택 번호로)
+       /api/mounts/remove {name, confirm?} · /api/mounts/unprotect {name, confirm?}
+       원본 폴더 바꾸기는 늘 확인 값을 받는다. 없거나 틀리면 {status: confirm, confirm, preview}, 맞으면 {status: saved, …}.
   실패는 {"ok": false, "error": 짧은 이름, "message": 사용자에게 보여 줄 말}.
 """
 
@@ -88,8 +94,9 @@ STATIC_TYPES: dict[str, str] = {
     "plant-mark.png": "image/png",
     **{f"fonts/{name}.woff2": "font/woff2" for name in FONTS},
 }
-GET_API = frozenset({"state", "status", "audit"})
-POST_API = frozenset({"interpret", "save", "set", "remove", "undo", "ner"})
+GET_API = frozenset({"state", "status", "audit", "mounts"})
+POST_API = frozenset({"interpret", "save", "set", "remove", "undo", "ner",
+                      "mounts/pick", "mounts/add", "mounts/remove", "mounts/unprotect"})
 
 _DENIED_PAGE = """<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -215,7 +222,7 @@ class _Handler(BaseHTTPRequestHandler):
                 self.server.note(f"요청을 거부했습니다 ({exc.code}, {method})")
             self._send_json(exc.status, {"ok": False, "error": exc.code, "message": exc.message})
         except UiError as exc:
-            self._send_json(exc.status, {"ok": False, "error": exc.code, "message": exc.message})
+            self._send_json(exc.status, {**exc.extra, "ok": False, "error": exc.code, "message": exc.message})
         except Exception as exc:  # 화면 서버가 죽지 않게. 자세한 내용은 터미널에만
             self.server.note(f"처리 중 오류: {type(exc).__name__}: {exc}")
             self._send_json(500, {"ok": False, "error": "internal", "message": "화면 서버에 오류가 났어요. 터미널을 확인해 주세요."})
@@ -300,6 +307,8 @@ class _Handler(BaseHTTPRequestHandler):
             return app.state()
         if name == "status":
             return app.status()
+        if name == "mounts":
+            return app.mounts()
         query = parse_qs(urlsplit(self.path).query)
 
         def one(key: str, default: str) -> str:
@@ -321,7 +330,18 @@ class _Handler(BaseHTTPRequestHandler):
             return app.remove(body.get("number"), body.get("fingerprint"), confirm)
         if name == "undo":
             return app.undo(confirm)
-        return app.ner(body.get("enable"), confirm)
+        if name == "ner":
+            return app.ner(body.get("enable"), confirm)
+        if name == "mounts/pick":
+            return app.pick_folder()
+        if name == "mounts/add":
+            if "path" in body or "folder" in body:  # 화면으로는 폴더 선택 창에서 고른 폴더만 연결한다
+                raise _Reject(400, "path-not-accepted", "화면에서는 폴더 선택 창에서 고른 폴더만 연결할 수 있어요. "
+                                                       "경로로 연결하려면 터미널에서 gate mount add를 쓰세요.")
+            return app.add_mount(body.get("pick"), confirm)
+        if name == "mounts/remove":
+            return app.remove_mount(body.get("name"), confirm)
+        return app.unprotect_mount(body.get("name"), confirm)
 
     def _body(self) -> dict:
         kind = (self.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
@@ -361,7 +381,7 @@ class _Handler(BaseHTTPRequestHandler):
 # --- gate ui 명령 ---
 
 def register(sub: argparse._SubParsersAction) -> None:
-    ui = sub.add_parser("ui", help="설정 화면: 이 컴퓨터의 브라우저에서 정책 보기·바꾸기, 감사 기록 보기 (사람만)")
+    ui = sub.add_parser("ui", help="설정 화면: 이 컴퓨터의 브라우저에서 정책 보기·바꾸기, 원본 폴더 연결, 감사 기록 보기 (사람만)")
     ui.add_argument("--policy", default=os.environ.get(POLICY_ENV), help=f"정책 파일 (기본: ${POLICY_ENV})")
     ui.add_argument("--audit", default=os.environ.get("GATE_AUDIT"), help="감사 로그 파일 (기본: $GATE_AUDIT)")
     ui.add_argument("--port", type=int, default=DEFAULT_PORT, help="포트 (기본 0: 빈 포트를 고름)")
@@ -398,6 +418,7 @@ def run(args: argparse.Namespace, *, stdin: TextIO | None = None, out: TextIO | 
         pass
     finally:
         signal.signal(signal.SIGTERM, previous)
+        server.app.close()  # 떠 있는 폴더 선택 창을 닫는다
         server.shutdown()
         server.server_close()
         print("gate ui: 설정 화면을 껐습니다.", file=out, flush=True)
