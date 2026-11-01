@@ -840,7 +840,7 @@ def s_policy(e: E2E) -> str:
     check(undo.code == 0 and undo.prompts == 0, f"undo(다시 가림) 기대 묻지 않고 저장, 실제 코드 {undo.code}·질문 {undo.prompts}번")
     again = e.read(POLICY_DOC)
     check(again.code == 0 and "[이름]" in again.out and name not in again.out, "undo 뒤에도 이름이 보임")
-    how = "Jev가 남은 이름을 보고 사람 승인 → pty 승인" if after.pending_id else "바로 가림"
+    how = "판단 모델이 남은 이름을 보고 사람 승인 → pty 승인" if after.pending_id else "바로 가림"
     return f"add(pty y·y) → [이름] 사라지고 이름이 보임({how}, 휴대폰은 계속 *) → undo(묻지 않음) → 다시 [이름]"
 
 

@@ -409,7 +409,7 @@ uv run python -m sandbox.bypass --settings 시험.json --workspace $DATA/plain-p
 ## 테스트
 
 ```bash
-uv run pytest                     # 맥: 1896 통과, 1 skip(FUSE), 약 40초 (사람 승인 시간 초과를 실제로 기다림)
+uv run pytest                     # 맥: 1917 통과, 1 skip(FUSE), 약 40초 (사람 승인 시간 초과를 실제로 기다림)
 
 docker build -f sandbox/gate.Dockerfile -t fuse-jev-gate .
 docker run --rm --device /dev/fuse --cap-add SYS_ADMIN fuse-jev-gate pytest -q    # Linux (FUSE 포함): 맥 통과 수 + FUSE 1개
