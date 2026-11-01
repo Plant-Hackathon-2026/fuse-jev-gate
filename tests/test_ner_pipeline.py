@@ -295,10 +295,22 @@ def test_unknown_kind_from_ner_denies(source, tmp_path, label):
     assert "모르는 종류" in verdict.judgment.reason and jev.calls == []
 
 
-def test_non_utf8_bytes_are_kept_and_positions_match(source, tmp_path):
-    inspector, _, ner = make(source, tmp_path, ner=FakeNer())
+def test_unknown_encoding_is_denied_before_ner(source, tmp_path):
+    # 어느 인코딩으로도 풀리지 않는 내용은 NER·Jev에 보내지 않고 차단한다(2026-11-01 사용자 결정)
+    inspector, jev, ner = make(source, tmp_path, ner=FakeNer())
     verdict = inspector.inspect(PEER, "/깨짐.txt")
-    assert verdict.data == b"\xff\xfe " + "[이름]".encode() + b" \x80\n"
+    assert (verdict.judgment.action, verdict.judgment.stage) == ("deny", "encoding")
+    assert ner.texts == [] and jev.calls == []
+
+
+@pytest.mark.parametrize("codec", ["utf-16", "utf-16-be", "cp949"])
+def test_ner_sees_decoded_text_and_kind_names_go_back_in_the_same_encoding(source, tmp_path, codec):
+    (source / "자소서2.txt").write_bytes(INTRO.encode(codec))
+    inspector, jev, ner = make(source, tmp_path, ner=FakeNer())
+    verdict = inspector.inspect(PEER, "/자소서2.txt")
+    assert ner.texts == [INTRO]                       # 0 바이트·깨진 글자 없이 원래 글자
+    assert verdict.data == INTRO_SHOWN.encode(codec)  # 위치가 맞고, 돌려줄 때는 원래 인코딩
+    assert jev.calls[0].text == INTRO_SHOWN
 
 
 # --- IP·내부 주소 규칙 (3e) ---
@@ -377,5 +389,5 @@ def test_ner_result_is_cached_by_content_and_model(source, tmp_path):
 def test_search_sees_ner_masked_content(source, tmp_path):
     inspector, _, _ = make(source, tmp_path, ner=FakeNer())
     result = search(inspector, PEER, "/", "[이름]")
-    assert {m["path"] for m in result["matches"]} == {"/자소서.txt", "/이름만.txt", "/깨짐.txt"}
+    assert {m["path"] for m in result["matches"]} == {"/자소서.txt", "/이름만.txt"}
     assert search(inspector, PEER, "/", "홍길동")["matches"] == []

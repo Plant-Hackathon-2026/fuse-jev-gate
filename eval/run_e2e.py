@@ -44,6 +44,9 @@
              gate mount add(pty, y·y) → 작업 폴더 설정에 막기(Read·Edit 거부 + denyRead) → 데몬을 다시 띄우지 않아도 gate ls /에
              /가계부 → 그 안 문서는 가려지고 .env는 경로 규칙으로 EACCES → 감사 기록에 게이트 안 경로만(실제 경로 없음) →
              gate mount remove(pty, y): 안 보이고 읽으면 ENOENT, 막기는 남음 → gate mount unprotect(pty, y·y): 막기가 빠짐
+  encoding   UTF-16·EUC-KR·바이너리(2026-11-01): UTF-16(BOM) 설정 파일의 비밀번호·토큰이 *로 가려져 UTF-16 그대로 나온다,
+             EUC-KR 상담 문서가 UTF-8과 같이 [이름] 등으로 가려져 EUC-KR 그대로 나온다, 바이너리(PNG)는 판단 없이
+             사람 승인(이유에 '바이너리') → gate approve <id>(pty) → 원본 그대로
   ui         gate ui --no-browser --port 0: 토큰 없이 403, 일회용 주소 재사용 403, 토큰으로 상태 API에 게이트·Laya·NER 연결 정상,
              원본 폴더 목록 API 응답
   audit      gate audit --json 기록이 위에서 본 결과(결정·단계·승인·캐시)와 맞고, 감사 로그(0600)·데몬·화면 로그에 원문과
@@ -140,6 +143,13 @@ MOUNT_NAME = "가계부"
 MOUNT_DOC = f"/{MOUNT_NAME}/상담.txt"
 MOUNT_SAMPLE = SAMPLES["/consult_chat/pii_1.txt"]
 MOUNT_ENV = f"/{MOUNT_NAME}/.env"
+# 인코딩(2026-11-01). 시나리오가 원본 폴더 안 인코딩/에 만든다. 미리 돌려 본 결과(2026-11-01, Laya v3 + NER 재학습판):
+# UTF-16 설정은 가린 뒤 safe 1.00, EUC-KR 상담(consult_chat/pii_1과 같은 글)은 UTF-8과 같은 칸을 가리고 safe 1.00
+ENC_SECRET_DOC = "/인코딩/설정.txt"
+ENC_KOREAN_DOC = "/인코딩/상담.txt"
+ENC_KOREAN_SAMPLE = SAMPLES["/consult_chat/pii_1.txt"]
+ENC_BINARY_DOC = "/인코딩/사진.png"
+ENC_BINARY = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR" + bytes(range(256))
 
 # 가림 표시 → 정책 칸(gate.ner_client.policy_slot). [전화번호]는 휴대폰·일반 전화 중 어느 칸인지 글자만으로 알 수 없어 뺀다.
 LABEL_SLOTS = {"[이름]": "name", "[주소]": "address", "[생년월일]": "birth", "[식별번호]": "student_id", "[소속]": "org",
@@ -953,6 +963,41 @@ def s_mount(e: E2E) -> str:
             f"감사 기록은 게이트 안 경로만, remove → 안 보임·ENOENT·막기 남음, unprotect(y·y) → 막기 빠짐")
 
 
+def s_encoding(e: E2E) -> str:
+    folder = e.source / "인코딩"
+    folder.mkdir(exist_ok=True)
+    utf16 = f"password: {e.secrets[0]}\nAPI_TOKEN={e.secrets[1]}\n".encode("utf-16")
+    (folder / "설정.txt").write_bytes(utf16)
+    korean = (PROJECT_ROOT / ENC_KOREAN_SAMPLE).read_text(encoding="utf-8")
+    (folder / "상담.txt").write_bytes(korean.encode("cp949"))
+    (folder / "사진.png").write_bytes(ENC_BINARY)
+
+    f = e.read(ENC_SECRET_DOC)
+    check(f.code == 0, f"{ENC_SECRET_DOC}: 기대 가림, 실제 종료 코드 {f.code} {_gate_lines(f.err)}")
+    check(f.data.startswith(b"\xff\xfe"), f"{ENC_SECRET_DOC}: UTF-16 BOM이 없음(원래 인코딩으로 돌려주지 않음)")
+    shown = f.data.decode("utf-16")
+    check(not leaks(shown, e.secrets), f"{ENC_SECRET_DOC}: 비밀값이 남음")
+    check(shown.startswith("password: *") and "API_TOKEN=**-***-" in shown, f"{ENC_SECRET_DOC}: 가린 모양이 다름: {shown!r}")
+    check("같은 길이의 *로" in f.notice, f"{ENC_SECRET_DOC}: 안내 줄 {f.notice!r}")
+
+    g = e.read(ENC_KOREAN_DOC)
+    check(g.code == 0, f"{ENC_KOREAN_DOC}: 기대 가림, 실제 종료 코드 {g.code} {_gate_lines(g.err)}")
+    try:
+        text = g.data.decode("cp949")
+    except UnicodeDecodeError:
+        raise Fail(f"{ENC_KOREAN_DOC}: EUC-KR로 읽히지 않음(원래 인코딩으로 돌려주지 않음)") from None
+    values = [m.text for m in e.must_hide.get(ENC_KOREAN_SAMPLE, [])]
+    leaked = leaks(text, values)
+    check("[이름]" in text and not leaked, f"{ENC_KOREAN_DOC}: [이름] {'있음' if '[이름]' in text else '없음'}, 누출 {leaked}")
+
+    b = e.read(ENC_BINARY_DOC, on_pending="approve")
+    check(b.pending_id, f"{ENC_BINARY_DOC}: 기대 사람 승인, 실제 바로 끝남(종료 코드 {b.code}) {_gate_lines(b.err)}")
+    check("바이너리" in b.listing, f"{ENC_BINARY_DOC}: 승인 목록 이유에 '바이너리' 없음: {_short(b.listing)}")
+    check(b.code == 0 and b.data == ENC_BINARY, f"{ENC_BINARY_DOC}: 승인 뒤 원본 그대로 기대, 실제 종료 코드 {b.code}")
+    return (f"UTF-16 설정 비밀값 2개 * 가림·BOM 그대로, EUC-KR 상담 {label_summary(text)}·누출 0/{len(values)}·EUC-KR 그대로, "
+            f"PNG 사람 승인(이유 '바이너리') → 승인 → 원본 {len(ENC_BINARY)}바이트")
+
+
 def s_audit(e: E2E) -> str:
     if not e.expected["main"]:  # --only audit만 돌릴 때도 볼 기록을 만든다
         e.read(ALLOW_DOCS[0])
@@ -1071,6 +1116,7 @@ SCENARIOS: tuple[Scenario, ...] = (
     Scenario("cache", "캐시", _names(CACHE_DOC), s_cache),
     Scenario("ner-down", "NER 서버 응답 없음", _names(NER_DOWN_DOC), s_ner_down),
     Scenario("mount", "원본 폴더 추가·빼기", _names(MOUNT_DOC, MOUNT_ENV), s_mount),
+    Scenario("encoding", "UTF-16·EUC-KR·바이너리", _names(ENC_SECRET_DOC, ENC_KOREAN_DOC, ENC_BINARY_DOC), s_encoding),
     Scenario("ui", "설정 화면", "gate ui", s_ui),
     Scenario("audit", "감사 로그 대조·누출", "audit.jsonl ×2, 데몬·화면 로그", s_audit),  # 마지막: 앞 시나리오의 기록을 모두 본다
 )

@@ -15,7 +15,7 @@ from gate.client import GateClient
 from gate.daemon import GateServer
 from gate.jev_client import MockJevClient
 from gate.pipeline import Inspector
-from gate.policy import Entry, PolicySource, write_entries
+from gate.policy import Entry, PathRule, PolicySource, write_entries
 from gate.protocol import WRITE_OPS, GateError
 from gate.store import PlainStore
 
@@ -61,12 +61,15 @@ def _start(server):
 
 
 @pytest.fixture
-def gate(source, socket_dir):
+def gate(source, socket_dir, tmp_path):
     events = []
     # 이 파일은 소켓·정규식·Jev를 본다. NER은 명시적으로 끈다(기본은 켜짐, tests/test_ner_pipeline.py가 따로 본다).
+    # 바이너리는 사람 승인이 필요하다(gate.encoding). 여기서는 바이트를 그대로 주고받는지 보려고 경로 규칙으로 허용한다.
+    policy_path = tmp_path / "policy.yaml"
+    write_entries(policy_path, [Entry(path_rule=PathRule("binary.bin", "allow"))])
     store = PlainStore(source)
     server = GateServer(socket_dir / "run" / "gate.sock", store, on_request=events.append,
-                        inspector=Inspector(store, ner_factory=lambda p: None))
+                        inspector=Inspector(store, PolicySource(policy_path), ner_factory=lambda p: None))
     _start(server)
     yield server, GateClient(server.socket_path), events
     server.shutdown()
@@ -284,7 +287,8 @@ def test_search_through_socket(judged):
     result = client.search("/", "연락처")
     assert {m["path"] for m in result["matches"]} == {"/연락처.txt"}
     assert result["matches"][0]["text"] == "상담 연락처 ***-****-**** 입니다."
-    assert {s["path"] for s in result["skipped"]} == {"/readme.txt", "/inner"}  # inner는 readme.txt를 가리킨다
+    # inner는 readme.txt를 가리킨다. binary.bin은 바이너리라 사람 승인이 필요하고 search는 묻지 않는다
+    assert {s["path"] for s in result["skipped"]} == {"/readme.txt", "/inner", "/binary.bin"}
     assert client.search("/", "010-1234")["matches"] == []  # 가려진 값은 찾을 수 없다
     with pytest.raises(GateError) as exc:
         client.search("/", "")
