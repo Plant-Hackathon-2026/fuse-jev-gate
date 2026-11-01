@@ -527,6 +527,97 @@ def test_secret_rule_deny_and_credential_paths(source, tmp_path):
     assert inspector.inspect(PEER, "/연락처.txt").judgment.action == "mask"  # 비밀값이 없는 파일은 그대로
 
 
+# --- 2026-11-01: 짧은 키·문장 속 비밀번호·OTP 백업 코드, 남은 비밀번호는 사람 승인 (plans/next-tasks-plan.md 1.4) ---
+
+# 1.4에서 실제 모델로 돌렸을 때 원문으로 나간 셋: 파일 이름 → (내용, 남으면 안 되는 값)
+LEAKED = {
+    "db설정.txt": ("DB_HOST=db.example.com\nDB_USER=app\nDB_PASS=Sup3rS3cret\n", ["Sup3rS3cret"]),
+    "netrc.txt": ("machine api.example.com login bot password Sup3rS3cret\n", ["Sup3rS3cret"]),
+    "백업코드.txt": ("2단계 인증 백업 코드: 8312-4471, 9902-1187\n", ["8312", "4471", "9902", "1187"]),
+    "메모.txt": ("와이파이 비밀번호는 qwer1234! 입니다\n비번 7741 이야\n", ["qwer1234", "7741"]),
+}
+# 정규식이 놓치는 형태(비밀번호 낱말과 값 사이에 다른 말이 있다). 판단 모델이 safe라도 사람에게 묻는다
+LEFTOVER = "게스트 와이파이 비밀번호 알려드려요 Guest2024!\n"
+PROSE_DOC = ("비밀번호를 바꾸세요.\n비밀번호 재설정 안내는 메일로 보냈습니다.\n비밀번호는 8~16자로 설정하세요.\n"
+             "PIN 번호를 입력하세요. OTP 앱을 설치하세요.\npassword reset link\n")
+
+
+@pytest.mark.parametrize("name", LEAKED)
+def test_passwords_that_leaked_in_1_4_are_masked(source, tmp_path, name):
+    text, values = LEAKED[name]
+    (source / name).write_text(text, encoding="utf-8")
+    inspector, jev, _ = make(source, tmp_path)  # 판단 모델 safe 0.99
+    verdict = inspector.inspect(PEER, f"/{name}")
+    j = verdict.judgment
+    assert (j.action, j.stage) == ("mask", "jev")
+    assert set(j.findings) == {"secret"}
+    shown = verdict.data.decode()
+    for value in values:
+        assert value not in shown and value not in jev.calls[0].text and value not in j.reason
+    assert len(verdict.data) == len(text.encode())  # 같은 길이 *
+
+
+def test_leftover_password_asks_a_human_even_if_jev_says_safe(source, tmp_path):
+    (source / "와이파이.txt").write_text(LEFTOVER, encoding="utf-8")
+    inspector, jev, _ = make(source, tmp_path)
+    verdict = inspector.inspect(PEER, "/와이파이.txt")
+    j = verdict.judgment
+    assert (j.action, j.stage, j.jev_label) == ("ask_human", "number", "safe")
+    assert j.reason == "비밀번호처럼 보이는 값이 가려지지 않고 남아 있어 사람에게 묻습니다"
+    assert verdict.data is None and "Guest2024" not in repr(j)
+    assert Blocked(j).message == f"사람 승인이 필요합니다 ({j.reason})"
+    assert len(jev.calls) == 1  # 판단 모델이 deny로 막을 수 있게 그대로 부른다
+
+
+def test_leftover_password_still_denied_by_jev(source, tmp_path):
+    (source / "와이파이.txt").write_text(LEFTOVER, encoding="utf-8")
+    inspector, _, _ = make(source, tmp_path, jev=MockJevClient("fixed", label="highly_sensitive", confidence=0.99))
+    assert inspector.inspect(PEER, "/와이파이.txt").judgment.action == "deny"
+
+
+@pytest.mark.parametrize("rule, action, stage", [("mask", "ask_human", "number"), ("ask_human", "ask_human", "number"),
+                                                 ("deny", "deny", "number")])
+def test_leftover_password_follows_secret_rule(source, tmp_path, rule, action, stage):
+    """비밀값 칸(numbers.secret)이 deny면 판단 모델 없이 차단, mask(기본)·ask_human이면 사람에게 묻는다.
+    numbers 칸에는 allow가 없다(가린 위치를 모르는 값은 가려서 보여 줄 수 없어 mask도 묻는다)."""
+    (source / "와이파이.txt").write_text(LEFTOVER, encoding="utf-8")
+    inspector, jev, _ = make(source, tmp_path, entries=[Entry(settings={"numbers.secret.action": rule})])
+    j = inspector.inspect(PEER, "/와이파이.txt").judgment
+    assert (j.action, j.stage) == (action, stage)
+    assert "비밀번호처럼 보이는 값이 가려지지 않고 남아" in j.reason and "Guest2024" not in j.reason
+    if rule == "deny":
+        assert "비밀값" in j.reason and jev.calls == []
+
+
+def test_prose_about_passwords_is_not_escalated(source, tmp_path):
+    (source / "안내.txt").write_text(PROSE_DOC, encoding="utf-8")
+    inspector, jev, _ = make(source, tmp_path)
+    verdict = inspector.inspect(PEER, "/안내.txt")
+    assert (verdict.judgment.action, verdict.data) == ("allow", PROSE_DOC.encode())
+    assert dict(verdict.judgment.findings) == {}
+
+
+def test_leftover_password_approved_or_denied_by_a_human(source, tmp_path):
+    (source / "와이파이.txt").write_text(LEFTOVER, encoding="utf-8")
+    safe = MockJevClient("fixed", label="safe", confidence=0.99)
+    inspector, channel, _, _ = asking(source, tmp_path, "once", "deny", jev=safe)
+    approved = inspector.inspect(PEER, "/와이파이.txt")
+    assert (approved.judgment.action, approved.judgment.stage, approved.data) == ("allow", "human", LEFTOVER.encode())
+    [req] = channel.requests
+    assert req.reason == "비밀번호처럼 보이는 값이 가려지지 않고 남아 있어 사람에게 묻습니다"
+    assert "Guest2024" not in repr(req)  # 승인 창에 값이 가지 않는다
+    assert inspector.inspect(PEER, "/와이파이.txt").judgment.action == "deny"
+
+
+def test_search_skips_file_with_leftover_password(source, tmp_path):
+    (source / "와이파이.txt").write_text(LEFTOVER, encoding="utf-8")
+    inspector, _, _ = make(source, tmp_path)
+    result = search(inspector, PEER, "/", "와이파이")
+    assert result["matches"] == []
+    [skipped] = [s for s in result["skipped"] if s["path"] == "/와이파이.txt"]
+    assert "Guest2024" not in skipped["message"]
+
+
 # --- Phase 5: 사람 승인 ---
 
 UNSURE = MockJevClient("fixed", label="sensitive", confidence=0.7)  # 임계값 사이 → ask_human

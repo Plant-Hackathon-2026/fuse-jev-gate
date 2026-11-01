@@ -42,6 +42,8 @@
   1. path_action: 경로 규칙. deny·ask_human이면 그 결과, allow면 검사 없이 원본, 맞는 규칙이 없으면 None(검사 계속).
   2. number_action: 정규식이 찾은 종류별 동작 중 가장 엄격한 것. 찾은 게 없으면 None.
   3. slot_action: NER이 찾은 개체의 칸(묶음 또는 번호 종류)별 동작 중 가장 엄격한 것. NER이 꺼져 있거나 찾은 게 없으면 None.
+  3f. 남은 비밀번호(gate.pipeline): 가린 결과에 비밀번호 낱말과 가려지지 않은 비밀번호 같은 값이 남았으면
+     numbers.secret.action이 deny면 deny, 그 밖(mask·ask_human)이면 ask_human. Jev의 safe보다 앞선다.
   4. jev_action: Jev 답과 임계값 두 개(명세 3.4). Jev 오류(None)는 deny.
      NER이 켜져 있고 가린 것(정규식·NER)이 있으면 Jev는 가린 결과를 판단하고, safe면 가린 채 보여 주고 아니면 ask_human이다
      (3c ②, gate.pipeline).
