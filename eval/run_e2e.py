@@ -47,6 +47,8 @@
   encoding   UTF-16·EUC-KR·바이너리(2026-11-01): UTF-16(BOM) 설정 파일의 비밀번호·토큰이 *로 가려져 UTF-16 그대로 나온다,
              EUC-KR 상담 문서가 UTF-8과 같이 [이름] 등으로 가려져 EUC-KR 그대로 나온다, 바이너리(PNG)는 판단 없이
              사람 승인(이유에 '바이너리') → gate approve <id>(pty) → 원본 그대로
+  secret     비밀번호(2026-11-01): DB_PASS=, netrc 줄, OTP 백업 코드, "비밀번호는 …" 문서가 가림이나 사람 승인(거부로 답함)·차단으로
+             끝나고 원문 값이 나오지 않는다. 승인 목록·이유·감사 로그·데몬 로그에도 값이 없다
   ui         gate ui --no-browser --port 0: 토큰 없이 403, 일회용 주소 재사용 403, 토큰으로 상태 API에 게이트·Laya·NER 연결 정상,
              원본 폴더 목록 API 응답
   audit      gate audit --json 기록이 위에서 본 결과(결정·단계·승인·캐시)와 맞고, 감사 로그(0600)·데몬·화면 로그에 원문과
@@ -998,6 +1000,54 @@ def s_encoding(e: E2E) -> str:
             f"PNG 사람 승인(이유 '바이너리') → 승인 → 원본 {len(ENC_BINARY)}바이트")
 
 
+# 비밀번호(2026-11-01, plans/next-tasks-plan.md 1.4). 시나리오가 원본 폴더 안 비밀번호/에 만든다(samples/는 쓰지 않음).
+# 1.4에서 실제 모델로 돌렸을 때 원문이 나간 셋(DB_PASS=, netrc 줄, OTP 백업 코드)과 문장 속 비밀번호. 값은 돌릴 때마다 새로 만든다
+SECRET_DOCS = ("/비밀번호/db설정.txt", "/비밀번호/netrc.txt", "/비밀번호/백업코드.txt", "/비밀번호/메모.txt")
+
+
+def s_secret(e: E2E) -> str:
+    """가림, 사람 승인(거부로 답함), 차단이면 통과. 원문 값이 보이는 결과(허용 등)는 실패. 승인 목록·이유·감사 로그·데몬 로그에도
+    값이 없어야 한다. 가림이면 plant cat 안내 줄이 실제 가림 방식과 맞아야 한다."""
+    folder = e.source / "비밀번호"
+    folder.mkdir(exist_ok=True)
+    db_pw, netrc_pw, memo_pw = (f"Sup3r{secrets.token_hex(4)}S3cret", f"Netrc{secrets.token_hex(4)}9",
+                                f"qwer{secrets.token_hex(3)}!")
+    codes = [f"{secrets.randbelow(9000) + 1000}-{secrets.randbelow(9000) + 1000}" for _ in range(2)]
+    docs = {  # PLANT 안 경로 → (내용, 내용에 남으면 안 되는 값)
+        SECRET_DOCS[0]: (f"DB_HOST=db.example.com\nDB_USER=app\nDB_PASS={db_pw}\n", [db_pw]),
+        SECRET_DOCS[1]: (f"machine api.example.com login bot password {netrc_pw}\n", [netrc_pw]),
+        SECRET_DOCS[2]: (f"2단계 인증 백업 코드: {codes[0]}, {codes[1]}\n", [half for c in codes for half in c.split("-")]),
+        SECRET_DOCS[3]: (f"와이파이 비밀번호는 {memo_pw} 입니다\n", [memo_pw]),
+    }
+    log_values = [db_pw, netrc_pw, memo_pw, *codes]  # 로그에는 시각 숫자가 많아 코드는 통째로 찾는다
+    for vpath, (text, _) in docs.items():
+        (e.source / vpath.lstrip("/")).write_text(text, encoding="utf-8")
+
+    parts = []
+    for vpath, (text, values) in docs.items():
+        name = Path(vpath).name
+        f = e.read(vpath, on_pending="deny")
+        check(not leaks(f.err, values), f"{vpath}: 이유(stderr)에 값이 보임")
+        if f.pending_id is not None:
+            check(not leaks(f.listing, values), f"{vpath}: plant approve 목록에 값이 보임")
+            check(f.code == 1 and "EACCES" in f.err, f"{vpath}: 거부 뒤 기대 EACCES, 실제 종료 코드 {f.code} {_gate_lines(f.err)}")
+            reason = re.search(r"이유: (.*)", f.listing)
+            parts.append(f"{name} 사람 승인('{_short(reason.group(1), 50) if reason else ''}')→거부")
+        elif f.code == 0:
+            leaked = leaks(f.out, values)
+            check(not leaked, f"{vpath}: 원문 비밀번호가 나감 {len(leaked)}/{len(values)} (가림 안내: {f.notice or '없음'})")
+            problem = notice_problem(text, f)
+            check(problem is None, f"{vpath}: {problem}")
+            parts.append(f"{name} 가림({label_summary(f.out)}, * 있음)")
+        else:
+            check("EACCES" in f.err, f"{vpath}: 기대 가림·사람 승인·차단, 실제 종료 코드 {f.code} {_gate_lines(f.err)}")
+            parts.append(f"{name} 차단({_gate_lines(f.err)})")
+    files = [p for p in (e.audit, *e.logs) if p.is_file()]
+    found = [(p.name, v) for p in files for v in log_values if v in p.read_text("utf-8", "replace")]
+    check(not found, f"로그에 비밀번호·코드가 남음: {[name for name, _ in found][:4]}")
+    return "; ".join(parts) + f"; 값 {len(log_values)}개가 감사 로그·데몬 로그 {len(files)}개에 없음"
+
+
 def s_audit(e: E2E) -> str:
     if not e.expected["main"]:  # --only audit만 돌릴 때도 볼 기록을 만든다
         e.read(ALLOW_DOCS[0])
@@ -1117,6 +1167,7 @@ SCENARIOS: tuple[Scenario, ...] = (
     Scenario("ner-down", "NER 서버 응답 없음", _names(NER_DOWN_DOC), s_ner_down),
     Scenario("mount", "원본 폴더 추가·빼기", _names(MOUNT_DOC, MOUNT_ENV), s_mount),
     Scenario("encoding", "UTF-16·EUC-KR·바이너리", _names(ENC_SECRET_DOC, ENC_KOREAN_DOC, ENC_BINARY_DOC), s_encoding),
+    Scenario("secret", "비밀번호·OTP 백업 코드 (1.4 누출 사례)", _names(*SECRET_DOCS), s_secret),
     Scenario("ui", "설정 화면", "plant ui", s_ui),
     Scenario("audit", "감사 로그 대조·누출", "audit.jsonl ×2, 데몬·화면 로그", s_audit),  # 마지막: 앞 시나리오의 기록을 모두 본다
 )

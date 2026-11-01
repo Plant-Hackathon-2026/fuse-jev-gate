@@ -15,6 +15,12 @@
      정규식·규칙 범위와 겹치는 부분은 뺀다(우선순위: 정규식 > 규칙 > NER). 규칙과 NER 개체를 합쳐(겹치지 않는다)
      칸(entities 묶음 또는 numbers 종류)별 동작이 allow인 개체는 그대로 두고, deny면 Jev를 부르지 않고 차단한다.
      NER 실패(서버 없음, 타임아웃, 형식 오류)는 차단이다.
+  3f. 남은 비밀번호(2026-11-01 사용자 결정, ② 보완): 보여 줄 내용(정규식·규칙·NER로 가린 결과)에 비밀번호를 뜻하는 낱말
+     (password·pw·PIN·OTP·비밀번호·비번·암호·백업 코드 등)이 있고 같은 줄 가까이에 가려지지 않은 비밀번호 같은 값이 남았으면
+     (gate.detectors.leftover_secret, 정규식 보강과 같은 기준) Jev의 safe를 믿지 않고 사람에게 묻는다. NER이 가렸든 아니든 같다.
+     실제 모델로 재 보니 NER이 일부를 가리면 Jev가 가린 결과를 safe로 봐서, 정규식이 놓친 비밀번호가 함께 나갔기 때문이다.
+     비밀값 칸(numbers.secret)이 deny면 Jev를 부르지 않고 차단한다. mask·ask_human이면 사람에게 묻는다(값 위치를 확실히 몰라
+     가릴 수 없으므로 mask도 묻는다). numbers 칸에는 allow가 없어 이 확인을 끄는 설정은 없다. 이유에 값은 넣지 않는다.
   4. 캐시 → Jev. 가린 내용과 요청 맥락(요청 프로세스, 실제 경로, 목적, 사용자 맥락 규칙)을 넘긴다.
      max_inspect_bytes보다 크면 나눠 묻고 가장 엄격한 답을 쓴다. Jev 오류·예외·형식 오류는 차단이다.
      - NER이 꺼져 있거나 가린 것이 없으면: 정규식(과 규칙)으로 가린 내용(3b와 같은 흐름). 답은 임계값 두 개로 허용·승인·차단.
@@ -22,7 +28,7 @@
      - NER이 켜져 있고 가린 것(정규식·NER)이 있으면(3c ②, 2026-10-31 사용자 결정): 정규식과 NER로 가린 결과, 즉 에이전트에게
        보여 줄 내용을 묻는다. 안전(safe)이면 가린 채 보여 주고, 아니면 가려지지 않은 정보가 남았다고 보고 사람에게 묻는다.
        NER이 이름을 놓쳐도 Jev가 한 번 더 걸러 내게 하려는 것이다(팀원 v3의 has_pii가 "가려지지 않은 채 남았는가"를 묻는다).
-  5. 가장 엄격한 동작으로 합친다. allow인데 가린 것이 있으면 가린 내용(mask)을 돌려준다.
+  5. 가장 엄격한 동작으로 합친다(3f 포함). allow인데 가린 것이 있으면 가린 내용(mask)을 돌려준다.
   6. ask_human이면 사람에게 묻는다(gate.approval). 승인하면 가린 내용(찾은 게 없으면 원본과 같다)을 돌려주고,
      거부·무응답이면 차단한다. 이미 "이 폴더 허용"을 받았으면 묻지 않는다. 결정한 단계(stage)는 human이다.
      번호 deny·Jev deny로 어차피 막힐 파일은 묻지 않는다(그래서 경로 ask_human도 검사를 먼저 한다).
@@ -49,7 +55,7 @@ from typing import Literal
 
 from gate.approval import AnsweredBy, Approval, ApprovalRequest, Approvals
 from gate.cache import CachedJudgment, CacheKey, JudgmentCache
-from gate.detectors import mask
+from gate.detectors import leftover_secret, mask
 from gate.encoding import decode_content
 from gate.host_rules import find_hosts
 from gate.jev_client import JevClient, JevDecision, JevError, RequestContext, cache_tag, make_client
@@ -75,6 +81,10 @@ Stage = Literal["policy", "path", "encoding", "number", "entity", "jev", "empty"
 JevFactory = Callable[[Policy], JevClient]
 NerFactory = Callable[[Policy], "NerClient | None"]
 MAX_NER_CACHE = 1024
+
+# 3f: 가린 결과에 비밀번호 같은 값이 남았을 때의 이유. 값은 넣지 않는다(승인 창·감사 로그에 그대로 간다)
+LEFTOVER_SECRET_NOTE = "비밀번호처럼 보이는 값이 가려지지 않고 남아 있습니다"
+LEFTOVER_SECRET_REASON = "비밀번호처럼 보이는 값이 가려지지 않고 남아 있어 사람에게 묻습니다"
 
 MAX_SEARCH_FILES = 1000
 MAX_SEARCH_RESULTS = 1000
@@ -273,6 +283,16 @@ class Inspector:
         # 보여 줄 내용은 원래 인코딩으로 되돌린다. 가린 글자(`*`, `[이름]` 등)는 세 인코딩 모두에 있다.
         shown = data if shown_text == text else content.encode(shown_text)
 
+        # 3f(2026-11-01 사용자 결정, ② 보완): 보여 줄 내용에 비밀번호를 뜻하는 낱말과 가려지지 않은 비밀번호 같은 값이
+        # 남았으면(정규식이 놓친 형태) 판단 모델의 safe를 믿지 않는다. NER이 가렸든 아니든 같다. 비밀값 칸(numbers.secret)이
+        # deny면 판단 모델을 부르지 않고 차단, 그 밖(mask·ask_human)이면 사람에게 묻는다(가릴 위치를 확실히 모르므로).
+        by_leftover = None
+        if leftover_secret(shown_text):
+            if policy.number_rule("secret") == "deny":
+                return Verdict(Judgment("deny", f"정책에 따라 {_kind_names({'secret': 1})}이(가) 있는 파일은 차단합니다 "
+                                                f"({LEFTOVER_SECRET_NOTE})", "number", **common))
+            by_leftover = "ask_human"
+
         # 3c ②(2026-10-31 사용자 결정): NER이 켜져 있고 가린 것이 있으면 Jev는 가린 결과(보여 줄 내용)를 판단한다.
         # 안전이면 가린 채로 보여 주고, 아니면(가려지지 않은 정보가 남았다고 보면) 사람에게 묻는다. Jev 오류는 차단 그대로.
         # NER이 꺼져 있으면 규칙으로 가렸어도 3b 흐름이다. Jev는 어느 쪽이든 보여 줄 내용(shown_text)을 본다.
@@ -284,13 +304,15 @@ class Inspector:
         jev_effective = jev.action if jev else None
         if recheck and jev is not None and jev.error is None:
             jev_effective = "allow" if jev.label == "safe" else "ask_human"
-        final = strictest(by_path, by_number, by_entity, jev_effective)
+        final = strictest(by_path, by_number, by_entity, jev_effective, by_leftover)
         if final == "deny":
             reason = jev.error or f"판단 모델 결과({jev.label}, 확신도 {jev.confidence:.2f})에 따라 차단했습니다"
             return Verdict(Judgment("deny", reason, "jev", **common, **jev_info))
         if final == "ask_human":
             if by_path == "ask_human":
                 stage, reason = "path", "경로 규칙에 따라 사람에게 물어봅니다"
+            elif by_leftover == "ask_human":
+                stage, reason = "number", LEFTOVER_SECRET_REASON
             elif jev_effective == "ask_human" and recheck:
                 stage, reason = "jev", (f"가린 뒤에도 판단 모델이 가려지지 않은 정보가 남았다고 판단했습니다"
                                         f"({jev.label}, 확신도 {jev.confidence:.2f})")

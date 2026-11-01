@@ -15,6 +15,7 @@ from gate.detectors import (
     MaskResult,
     check_visible,
     detect,
+    leftover_secret,
     mask,
     mask_bytes,
     same_length_stars,
@@ -516,7 +517,7 @@ def test_secret_values_are_masked(text, expected):
     "password: {{ vault_password }}",
     "password: ''",
     "password: null",
-    "password: |",                    # YAML 블록 (다음 줄 값은 놓친다)
+    "password: |",                    # YAML 블록 표시만 있고 값 줄이 없다
     "def login(password: str) -> None:",
     "password = get_password()",
     "password = os.environ['DB_PASSWORD']",
@@ -575,3 +576,195 @@ def test_config_files_keep_structure():
         "github_token: ****************************************",
         "owner_email: ****@*******.***",
     ]
+
+
+# --- 비밀값 보강 (2026-11-01 사용자 결정: plans/next-tasks-plan.md 1.4 사례) ---
+# 짧은 키, 구분자 없는 문장, OTP·백업·복구 코드. 모든 값은 가짜다.
+
+@pytest.mark.parametrize("text, expected", [
+    # 1.4에서 원문으로 나간 셋
+    ("DB_HOST=db.example.com\nDB_USER=app\nDB_PASS=Sup3rS3cret\n",
+     "DB_HOST=db.example.com\nDB_USER=app\nDB_PASS=***********\n"),
+    ("machine api.example.com login bot password Sup3rS3cret",
+     "machine api.example.com login bot password ***********"),
+    ("2단계 인증 백업 코드: 8312-4471, 9902-1187", "2단계 인증 백업 코드: ****-****, ****-****"),
+    # 문장 속 비밀번호
+    ("비밀번호는 qwer1234! 입니다", "비밀번호는 ********* 입니다"),
+    ("비번 7741 이야", "비번 **** 이야"),
+    ("비번은 7741이야", "비번은 ****이야"),             # 조사·어미가 붙어도 값만
+    ("암호는 S3cret! 이에요", "암호는 ******* 이에요"),
+    ("공유기 암호 → 1q2w3e4r", "공유기 암호 → ********"),
+    ("공유기 암호: 1q2w3e4r", "공유기 암호: ********"),
+    ("와이파이 비밀번호는 \"Guest2024!\" 입니다", "와이파이 비밀번호는 \"**********\" 입니다"),
+    ("비밀번호를 qwer1234로 바꿨어", "비밀번호를 ********로 바꿨어"),
+    ("PW는 hunter2", "PW는 *******"),
+    ("the password is hunter2", "the password is *******"),
+    ("| 비밀번호 | qwer1234 |", "| 비밀번호 | ******** |"),  # 표 칸
+    ("**비밀번호**: qwer1234", "**비밀번호**: ********"),      # 마크다운 굵게
+    ("**password:** hunter2", "**password:** *******"),
+    # 짧은 키·_PASS로 끝나는 키
+    ("pw: hunter2", "pw: *******"),
+    ("pwd=hunter2", "pwd=*******"),
+    ("PIN: 1234", "PIN: ****"),
+    ("passcode: 0000", "passcode: ****"),
+    ("pass: Sup3rS3cret", "pass: ***********"),
+    ("MYSQL_PWD=S3cret!", "MYSQL_PWD=*******"),
+    ("export DB_PASS=Sup3rS3cret", "export DB_PASS=***********"),
+    ("USER_PIN = 9876", "USER_PIN = ****"),
+    ('{"pw": "hunter2", "user": "bob"}', '{"pw": "*******", "user": "bob"}'),
+    # netrc (값 모양과 상관없이), 구분자 없는 password 값
+    ("machine api.example.com\n  login bot\n  password hunter\n", "machine api.example.com\n  login bot\n  password ******\n"),
+    ("passwd Sup3rS3cret", "passwd ***********"),
+    # 계정 / 비밀번호, 명령줄
+    ("admin / P@ssw0rd", "admin / *@******"),           # @는 다른 종류처럼 구분자로 남긴다
+    ("root/1234", "root/****"),
+    ("ID/PW: hong / Abc!2345", "ID/PW: hong / ********"),
+    ("아이디/비밀번호: hong / abcd", "아이디/비밀번호: hong / ****"),
+    ("mysql -uroot -pS3cret mydb", "mysql -uroot -p****** mydb"),
+    ("sshpass -p 'S3cret!' ssh host", "sshpass -p '*******' ssh host"),
+    # OTP·백업·복구·인증 코드
+    ("Backup codes: a1b2c-3d4e5 f6g7h-8i9j0", "Backup codes: *****-***** *****-*****"),
+    ("recovery code: 1234 5678", "recovery code: **** ****"),
+    ("인증 코드는 123456입니다", "인증 코드는 ******입니다"),
+    ("인증번호 482913", "인증번호 ******"),
+    ("OTP: 482913", "OTP: ******"),
+    ("**백업 코드**: 8312-4471", "**백업 코드**: ****-****"),
+])
+def test_strengthened_secret_forms_are_masked(text, expected):
+    result = mask(text)
+    assert result.text == expected
+    assert {f.kind for f in result.findings} == {"secret"}
+    assert byte_len(result.text) == byte_len(text)
+    assert mask(result.text).text == result.text      # 다시 가려도 같다
+    assert not leftover_secret(result.text)           # 가린 뒤에는 남은 비밀번호가 없다
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("백업 코드:\n8312-4471\n9902-1187\n2026-11-01 작성",            # 다음 줄로 이어지는 목록, 날짜에서 멈춤
+     "백업 코드:\n****-****\n****-****\n2026-11-01 작성"),
+    ("복구 코드\n1. 1111-2222\n2. 3333-4444\n", "복구 코드\n1. ****-****\n2. ****-****\n"),
+    ("backup codes:\n- 12345678\n- 87654321\nKeep them safe\n", "backup codes:\n- ********\n- ********\nKeep them safe\n"),
+    ("OTP 백업 코드: 1111-2222, 3333-4444\nSup3r 다음 줄은 코드 목록이 아니다\n",
+     "OTP 백업 코드: ****-****, ****-****\nSup3r 다음 줄은 코드 목록이 아니다\n"),
+])
+def test_code_lists_across_lines(text, expected):
+    assert mask(text).text == expected
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("db:\n  password: |\n    Sup3rS3cret\n    second line\n  host: x\n",
+     "db:\n  password: |\n    ***********\n    ****** ****\n  host: x\n"),
+    ("db:\n  password: >-\n\n    folded\n", "db:\n  password: >-\n\n    ******\n"),
+    ("db:\n  password:\n    Sup3rS3cret\n  host: x\n", "db:\n  password:\n    ***********\n  host: x\n"),
+    ("credentials:\n  user: admin\n  pass: Sup3rS3cret\n", "credentials:\n  user: admin\n  pass: ***********\n"),
+    ("비밀번호:\n  qwer1234\n", "비밀번호:\n  ********\n"),
+])
+def test_yaml_block_values_are_masked(text, expected):
+    assert mask(text).text == expected
+
+
+@pytest.mark.parametrize("text", [
+    "db:\n  password:\n    min_length: 8\n",       # 묶음
+    "db:\n  password:\n    - a1\n",                # 목록
+    "db:\n  password:\nhost: x1234\n",             # 들여 쓰지 않은 다음 키
+    "비밀번호:\n  아래 링크를 참고하세요\n",          # 비밀번호 같은 값이 아니다
+])
+def test_yaml_empty_value_does_not_take_mappings_or_prose(text):
+    assert [f for f in detect(text) if f.kind == "secret"] == []
+
+
+# 일반 문장 속 비밀번호 낱말: 가리지 않고, 남은 비밀번호로도 보지 않는다(사람에게 묻지 않음)
+PROSE = [
+    "비밀번호를 바꾸세요",
+    "비밀번호 재설정 안내",
+    "암호화",
+    "암호화 알고리즘은 AES-256입니다",
+    "pass the test",
+    "PIN 번호를 입력하세요",
+    "password reset link",
+    "OTP 앱을 설치하세요",
+    "비밀번호는 8~16자로 설정하세요",
+    "비밀번호는 영문·숫자를 섞어 8자 이상",
+    "비밀번호 변경일: 2024-01-15",
+    "비밀번호 5회 오류 시 잠금",
+    "비밀번호 최소 8자, 최대 1024자",
+    "비밀번호는 문자로 보내드렸습니다",
+    "인증번호 6자리를 입력하세요",
+    "인증 코드는 5분간 유효합니다",
+    "OTP 2개를 등록했습니다",
+    "OTP v2.3 업데이트",
+    "보안 코드는 카드 뒷면에 있습니다",
+    "Password Manager 2024",
+    "secret santa 2024",
+    "Forgot password? Click here",
+    "password must be at least 8 characters",
+    "Enter your PIN at the ATM",
+    "pin: GPIO13",                           # 하드웨어 설정의 핀 번호
+    "PWD=/Users/hong/project",               # 셸의 현재 폴더
+    "PASS: 12 FAIL: 0",                      # 시험 결과
+    "bypass: true",
+    "compass: north",
+    "password: ${DB_PASSWORD}, port: 5432",
+    "암호 화폐 1234개",
+    "/home/user/2024/report",
+    "비밀번호 변경 링크: https://example.com/reset/2024",
+    "와이파이 암호 방식: WPA2",
+    "비밀번호 작업은 1.4절 사례를 테스트·e2e로 옮긴다",    # 가운뎃점 뒤 낱말
+    "Is the password correct?",                          # 문장 끝 물음표는 기호가 아니다
+    "What's your PIN code?",
+    "numbers.secret.action=deny",                        # 점 이름의 일부
+    "the password *must* be long",                       # 마크다운 강조
+    "DB_PASS=…",                                         # 자리표시
+    "비밀번호@host는 이메일이 아니다",
+]
+
+
+@pytest.mark.parametrize("text", PROSE)
+def test_prose_mentions_of_passwords_are_left_alone(text):
+    assert [f for f in detect(text) if f.kind == "secret"] == []
+    assert not leftover_secret(text)
+
+
+@pytest.mark.parametrize("text", [
+    "password for guests is Guest2024!",                 # 정규식은 바로 뒤 낱말만 본다
+    "비밀번호 알려줄게 qwer1234!",
+    "비밀번호 (게스트용) 알려드릴게요: qwer1234",
+    "OTP backup codes (keep safe): 8312-4471",
+    "PIN for the safe: 4821-77",
+    "secret = [이름] Sup3rS3cret",                       # NER 표시를 지나서도 본다
+])
+def test_leftover_secret_finds_values_the_regex_missed(text):
+    assert leftover_secret(mask(text).text)
+
+
+@pytest.mark.parametrize("text", [
+    "password: ******** (backup2: xyz)",      # 가까이에 가린 값이 있다
+    "DB_PASSWORD=***********\nhost: db01\n",  # 다른 줄
+    "비밀번호: ****, 담당 user1",               # 쉼표 뒤는 다른 항목
+    "pw [연락처]",                              # NER이 값을 가렸다
+    "password\nSup3rS3cret",                  # 다른 줄
+])
+def test_leftover_secret_ignores_masked_or_distant_values(text):
+    assert not leftover_secret(text)
+
+
+def test_leftover_secret_window_is_limited():
+    assert leftover_secret("password a b c Sup3rS3cret")
+    assert not leftover_secret("password a b c d e Sup3rS3cret")  # 다섯 낱말 넘어
+    assert not leftover_secret("password " + "xx " * 15 + "Sup3rS3cret")  # 40자 넘어
+
+
+def test_strengthened_rules_finish_quickly_on_adversarial_input():
+    chunks = [
+        "password " * 20_000, "비밀번호는 " * 20_000, "백업 코드: " + "1234 " * 20_000, "OTP " * 20_000,
+        "machine a login b " * 5_000, "mysql " + "-x " * 20_000, "admin/" * 20_000, "pw: " * 20_000,
+        "a_" * 50_000 + "pass", "db:\n  password: |\n" + "    line\n" * 20_000,
+        "a-" * 50_000 + "passwordx", "a." * 50_000 + "passx", "-" * 200_000,  # 키 글자가 길게 이어진 줄
+        "mysql " * 30_000, "ID/PW: a / " * 20_000, "secret " * 30_000,
+    ]
+    for text in chunks:
+        started = time.perf_counter()
+        result = mask(text)
+        leftover_secret(result.text)
+        assert time.perf_counter() - started < 3.0, text[:30]
+        assert byte_len(result.text) == byte_len(text)

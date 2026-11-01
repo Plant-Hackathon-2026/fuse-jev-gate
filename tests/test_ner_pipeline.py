@@ -391,3 +391,65 @@ def test_search_sees_ner_masked_content(source, tmp_path):
     result = search(inspector, PEER, "/", "[이름]")
     assert {m["path"] for m in result["matches"]} == {"/자소서.txt", "/이름만.txt"}
     assert search(inspector, PEER, "/", "홍길동")["matches"] == []
+
+
+# --- 2026-11-01: 비밀번호 보강과 ② 보완 (plans/next-tasks-plan.md 1.4) ---
+# 실제 모델로 재 보니 NER이 다른 곳을 가리면 판단 모델이 가린 결과를 safe로 봐서, 정규식이 놓친 비밀번호가 함께 나갔다.
+
+# 1.4에서 원문으로 나간 셋 (파일 이름, 내용, NER이 가리는 낱말, 판단 모델 답, 남으면 안 되는 값)
+LEAKED_1_4 = [
+    ("db설정.txt", "DB_HOST=db.example.com\nDB_USER=hong\nDB_PASS=Sup3rS3cret\n", {"hong": "NAME"}, 0.92,
+     ["Sup3rS3cret"]),
+    ("netrc.txt", "machine api.example.com login bot password Sup3rS3cret\n", {"bot": "MESSENGER"}, 0.60,
+     ["Sup3rS3cret"]),
+    ("백업코드.txt", "2단계 인증 백업 코드: 8312-4471, 9902-1187\n", {}, 0.99, ["8312", "4471", "9902", "1187"]),
+]
+
+
+@pytest.mark.parametrize("name, text, words, confidence, values", LEAKED_1_4)
+def test_passwords_that_leaked_with_ner_on_are_masked(source, tmp_path, name, text, words, confidence, values):
+    (source / name).write_text(text, encoding="utf-8")
+    inspector, jev, _ = make(source, tmp_path, jev=MockJevClient("fixed", label="safe", confidence=confidence),
+                             ner=FakeNer(words=words))
+    verdict = inspector.inspect(PEER, f"/{name}")
+    j = verdict.judgment
+    assert j.action == "mask" and j.findings.get("secret")
+    shown = verdict.data.decode()
+    for value in values:
+        assert value not in shown and value not in jev.calls[0].text and value not in repr(j)
+
+
+def test_leftover_password_beside_ner_masking_asks_a_human(source, tmp_path):
+    """NER이 이름을 가리고 판단 모델이 가린 결과를 safe로 봐도, 정규식이 놓친 비밀번호가 남았으면 사람에게 묻는다."""
+    text = "담당자 홍길동\n게스트 와이파이 비밀번호 알려드려요 Guest2024!\n"
+    (source / "와이파이.txt").write_text(text, encoding="utf-8")
+    inspector, jev, _ = make(source, tmp_path, ner=FakeNer())
+    verdict = inspector.inspect(PEER, "/와이파이.txt")
+    j = verdict.judgment
+    assert (j.action, j.stage, j.jev_label) == ("ask_human", "number", "safe")
+    assert j.reason == "비밀번호처럼 보이는 값이 가려지지 않고 남아 있어 사람에게 묻습니다"
+    assert verdict.data is None and "Guest2024" not in repr(j)
+    assert jev.calls[0].text == "담당자 [이름]\n게스트 와이파이 비밀번호 알려드려요 Guest2024!\n"
+
+
+def test_password_partly_masked_by_ner_still_asks_a_human(source, tmp_path):
+    (source / "메모.txt").write_text("비밀번호 알려드림 Sup3rS3cret\n", encoding="utf-8")
+    inspector, _, _ = make(source, tmp_path, ner=FakeNer(words={"Sup3r": "MESSENGER"}))
+    verdict = inspector.inspect(PEER, "/메모.txt")
+    assert (verdict.judgment.action, verdict.judgment.stage) == ("ask_human", "number")
+
+
+def test_value_fully_masked_by_ner_is_not_escalated(source, tmp_path):
+    (source / "메모.txt").write_text("비밀번호 알려드림 Sup3rS3cret\n", encoding="utf-8")
+    inspector, _, _ = make(source, tmp_path, ner=FakeNer(words={"Sup3rS3cret": "MESSENGER"}))
+    verdict = inspector.inspect(PEER, "/메모.txt")
+    assert (verdict.judgment.action, verdict.data.decode()) == ("mask", "비밀번호 알려드림 [연락처]\n")
+
+
+def test_prose_about_passwords_with_ner_on_is_not_escalated(source, tmp_path):
+    text = "홍길동 님, 비밀번호를 바꾸세요.\n비밀번호 재설정 안내는 메일로 보냈습니다. OTP 앱을 설치하세요.\n"
+    (source / "안내.txt").write_text(text, encoding="utf-8")
+    inspector, _, _ = make(source, tmp_path, ner=FakeNer())
+    verdict = inspector.inspect(PEER, "/안내.txt")
+    assert (verdict.judgment.action, verdict.judgment.stage) == ("mask", "jev")
+    assert verdict.data.decode() == text.replace("홍길동", "[이름]")
