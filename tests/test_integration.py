@@ -7,6 +7,7 @@
 """
 
 import errno
+import json
 import shutil
 import subprocess
 import sys
@@ -330,3 +331,92 @@ def test_default_daemon_has_ner_on_and_blocks_without_ner_server(tmp_path, socke
         _, log = daemon.communicate(timeout=10)
     log = log.decode()
     assert "plant: NER 켜짐" in log and "plant policy set ner_backend none" in log
+
+
+# --- 기본 폴더 없음 (2026-11-01 사용자 결정): 폴더를 연결하지 않으면 아무 문서도 읽을 수 없다 ---
+
+def _start(sock, *args):
+    env = {k: v for k, v in os.environ.items() if k not in ("GATE_POLICY", "GATE_AUDIT", "GATE_APPROVE_SOCKET")}
+    daemon = subprocess.Popen([sys.executable, "-m", "gate.cli", "--socket", str(sock), "serve", "--no-dialog", *args],
+                              cwd=ROOT, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    assert _wait(lambda: sock.exists()), "데몬이 소켓을 열지 않았습니다"
+    return daemon
+
+
+def _stop(daemon) -> str:
+    daemon.send_signal(signal.SIGTERM)
+    _, log = daemon.communicate(timeout=10)
+    return log.decode()
+
+
+def test_serve_without_source_shows_only_connected_folders(tmp_path, socket_dir):
+    """--source 없이 띄운 데몬: `/`는 비어 있고 다른 경로는 ENOENT, search는 아무것도 찾지 않는다.
+    폴더를 연결하면(mounts.yaml이 바뀌면) 다시 띄우지 않아도 다음 요청부터 `/<이름>/`으로 보이고 정책대로 검사한다."""
+    from gate.mounts import MountEntry, write_mounts
+
+    data = tmp_path / "gate-data"
+    policy = data / "policy.yaml"
+    write_entries(policy, [Entry(settings={"ner_backend": "none"})])
+    docs = tmp_path / "docs" / "문서함"
+    (docs / "medical_note").mkdir(parents=True)
+    shutil.copyfile(ROOT / "samples" / "medical_note" / "none_1.txt", docs / "medical_note" / "none_1.txt")
+    (docs / ".env").write_text("DB_PASSWORD=hunter2\n", encoding="utf-8")
+    sock = socket_dir / "run" / "gate.sock"
+    daemon = _start(sock, "--policy", str(policy))
+    try:
+        listed = _gate(sock, "ls", "/")
+        assert (listed.returncode, listed.stdout) == (0, b"")
+        assert json.loads(_gate(sock, "stat", "/").stdout)["type"] == "dir"
+        for path in ("/medical_note/none_1.txt", "/문서함/medical_note/none_1.txt", "/.env"):
+            read = _gate(sock, "cat", path)
+            assert read.returncode == 1 and read.stdout == b"" and "(ENOENT)" in read.stderr.decode(), path
+        found = _gate(sock, "search", "운영", "/")
+        assert (found.returncode, found.stdout, found.stderr) == (1, b"", b"")
+
+        write_mounts(data / "mounts.yaml", [MountEntry("문서함", str(docs.resolve()), "2026-11-01T10:00:00+09:00",
+                                                       "terminal", True)])
+        listed = _gate(sock, "ls", "/")
+        assert listed.returncode == 0 and listed.stdout.decode().split() == ["문서함/"]
+        note = (docs / "medical_note" / "none_1.txt").read_bytes()
+        read = _gate(sock, "cat", "/문서함/medical_note/none_1.txt")
+        assert (read.returncode, read.stdout) == (0, note)
+        blocked = _gate(sock, "cat", "/문서함/.env")
+        assert blocked.returncode == 1 and "경로 규칙에 따라 차단했습니다 (EACCES)" in blocked.stderr.decode()
+        found = _gate(sock, "search", "운영", "/")
+        assert found.returncode == 0 and found.stdout.decode().startswith("/문서함/medical_note/none_1.txt:")
+    finally:
+        log = _stop(daemon)
+    assert "아직 연결한 폴더가 없습니다. 지금은 에이전트가 아무 문서도 읽을 수 없습니다." in log
+    assert "plant mount add <폴더>" in log and "plant ui" in log
+    assert "폴더 목록을 다시 읽었습니다. 연결한 폴더 1개: 문서함" in log
+    assert "원본" not in log.split("\n")[0]  # 대기 줄에 원본 폴더를 적지 않는다
+
+
+def test_serve_without_source_and_policy_shows_nothing(tmp_path, socket_dir):
+    sock = socket_dir / "run" / "gate.sock"
+    daemon = _start(sock)
+    try:
+        assert _gate(sock, "ls", "/").stdout == b""
+        assert "(ENOENT)" in _gate(sock, "cat", "/a.txt").stderr.decode()
+    finally:
+        log = _stop(daemon)
+    assert "정책 파일(--policy 또는 GATE_POLICY)을 지정하지 않아 폴더 목록을 읽지 않습니다" in log
+    assert "에이전트가 아무 문서도 읽을 수 없습니다" in log
+
+
+def test_hidden_source_still_serves_that_folder(tmp_path, socket_dir):
+    """e2e·하네스·테스트가 쓰는 숨은 --source: 그 폴더가 `/`이고, 연결한 폴더는 그 옆에 보인다."""
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "회의.txt").write_text("회의는 화요일입니다.\n", encoding="utf-8")
+    policy = tmp_path / "data" / "policy.yaml"
+    write_entries(policy, [Entry(settings={"ner_backend": "none"})])
+    sock = socket_dir / "run" / "gate.sock"
+    daemon = _start(sock, "--source", str(source), "--policy", str(policy))
+    try:
+        assert _gate(sock, "ls", "/").stdout.decode().split() == ["회의.txt"]
+        assert _gate(sock, "cat", "/회의.txt").stdout == "회의는 화요일입니다.\n".encode()
+    finally:
+        log = _stop(daemon)
+    assert "개발용 원본" in log and "아직 연결한 폴더가 없습니다." in log
+    assert "아무 문서도 읽을 수 없습니다" not in log

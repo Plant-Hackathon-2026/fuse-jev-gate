@@ -209,7 +209,32 @@ def test_cli_needs_paths(env, tmp_path, capsys, monkeypatch):
     monkeypatch.delenv("GATE_AUDIT")
     assert cli.main(["setup", "--settings-file", str(tmp_path / "x.json"), "--yes"]) == 1
     err = capsys.readouterr().err
-    assert "--source" in err and "--audit(GATE_AUDIT)" in err and not (tmp_path / "x.json").exists()
+    # --source는 숨은 개발용 옵션이라 필요하다고 하지 않는다(2026-11-01 기본 폴더 없앰)
+    assert "--source" not in err and "--audit(GATE_AUDIT)" in err and not (tmp_path / "x.json").exists()
+
+
+def test_cli_without_source_protects_connected_folders_and_data(env, tmp_path, capsys):
+    """--source 없이: 연결한 폴더(mounts.yaml)와 PLANT 데이터만 막는다. 도움말에 --source가 없다."""
+    root, _ = env
+    book = tmp_path / "docs" / "가계부"
+    book.mkdir(parents=True)
+    write_mounts(root / "policy.yaml", book)
+    settings = tmp_path / "settings.json"
+    assert cli.main(["setup", "--settings-file", str(settings), "--print"]) == 0
+    fragment = json.loads(capsys.readouterr().out)
+    deny_read = fragment["sandbox"]["filesystem"]["denyRead"]
+    real = str(book.resolve())
+    assert real in deny_read and str((root / "policy.yaml").resolve()) in deny_read
+    assert not any(p.endswith("/source") for p in deny_read)
+    assert f"Read(/{real})" in fragment["permissions"]["deny"]
+    assert "--source" not in cli.build_parser()._subparsers._group_actions[0].choices["setup"].format_help()
+
+
+def write_mounts(policy, folder):
+    from gate.mounts import MountEntry, mounts_file_for
+    from gate.mounts import write_mounts as write_list
+    write_list(mounts_file_for(policy), [MountEntry("가계부", str(folder.resolve()), "2026-11-01T10:00:00+09:00",
+                                                    "terminal", True)])
 
 
 def test_cli_writes_through_a_symlinked_settings_file(env, tmp_path):

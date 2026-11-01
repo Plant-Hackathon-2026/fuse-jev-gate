@@ -2,10 +2,11 @@
 에이전트 작업 폴더 설정(workspace init), 설치 때 Claude Code 사용자 설정에 원본 보호 합치기(setup), 감사 로그 보기(audit),
 설정 화면(ui), 원본 폴더 연결 보기·추가·빼기(mount).
 
-원본 폴더 여러 개(Phase 9)
-  - serve는 정책 파일(--policy·GATE_POLICY)이 있으면 그 옆 mounts.yaml의 연결된 폴더를 `/<이름>/`으로 함께 보여 준다
-    (gate.mounts.MountedStore). 기본 폴더(--source)는 `/`다. 목록 파일은 요청마다 바뀌었는지 보고 다시 읽는다.
-    정책 파일 없이 띄우면 기본 폴더만 쓴다.
+원본 폴더 (Phase 9, 2026-11-01 기본 폴더 없앰: plans/mount-ui-plan.md 11절)
+  - serve의 `/`는 빈 읽기 전용 폴더다. 정책 파일(--policy·GATE_POLICY) 옆 mounts.yaml의 연결된 폴더만 `/<이름>/`으로
+    보인다(gate.mounts.MountedStore). 목록 파일은 요청마다 바뀌었는지 보고 다시 읽는다. 폴더를 하나도 연결하지 않았거나
+    정책 파일 없이 띄우면 아무 문서도 읽을 수 없다(`plant ls /`는 비어 있고 다른 경로는 ENOENT).
+  - --source는 e2e·하네스·테스트용 숨은 옵션이다(도움말에 없음). 주면 그 폴더를 `/`에 보여 준다.
   - mount는 소켓을 쓰지 않고 목록 파일과 작업 폴더 설정을 직접 쓴다(gate.mount_cli → gate.mount_change).
 
 소켓 경로는 --socket 또는 GATE_SOCKET, 정책 파일은 --policy 또는 GATE_POLICY로 지정한다.
@@ -52,7 +53,7 @@ from gate.pipeline import Inspector
 from gate.policy import PolicyError, PolicySource
 from gate.protocol import GateError
 from gate.mounts import MountedStore, MountsSource
-from gate.store import PlainStore
+from gate.store import EmptyStore, PlainStore, Store
 
 ANSWER_NAMES = {"once": "이번만 허용", "session": "이 폴더 허용", "deny": "거부"}
 
@@ -114,20 +115,21 @@ def approve_socket_path(gate_socket: str | None, explicit: str | None) -> str | 
     return str(Path(gate_socket).with_name("approve.sock")) if gate_socket else None
 
 
-def _make_store(source: str, policy_path: str | None, socket_path: str | None,
-                audit_path: str | None) -> tuple[PlainStore | MountedStore, MountsSource | None]:
-    """정책 파일이 있으면 그 옆 폴더 목록(mounts.yaml)을 함께 보여 주는 MountedStore, 없으면 기본 폴더만."""
-    base = PlainStore(source)
+def _make_store(source: str | None, policy_path: str | None, socket_path: str | None,
+                audit_path: str | None) -> tuple[Store, MountsSource | None]:
+    """`/`는 빈 폴더(source를 주면 그 폴더)다. 정책 파일이 있으면 그 옆 폴더 목록(mounts.yaml)의 연결한 폴더를
+    `/<이름>/`으로 함께 보여 주는 MountedStore, 없으면 `/`만(source도 없으면 아무것도 보이지 않는다)."""
+    base: PlainStore | EmptyStore = PlainStore(source) if source else EmptyStore()
     if not policy_path:
         return base, None
     mounts = MountsSource(policy_path, source=base.root, socket=socket_path, audit=audit_path, warn=_err)
     return MountedStore(base, mounts), mounts
 
 
-def _serve(socket_path: str, approve_socket: str, source: str, policy_path: str | None, dialog: bool,
+def _serve(socket_path: str, approve_socket: str, source: str | None, policy_path: str | None, dialog: bool,
            audit_path: str | None = None) -> int:
     store, mounts = _make_store(source, policy_path, socket_path, audit_path)
-    base_root = store.root
+    base_root = getattr(store, "root", None)
     try:
         audit = AuditLog(audit_path) if audit_path else None
     except (OSError, ValueError) as exc:
@@ -152,7 +154,7 @@ def _serve(socket_path: str, approve_socket: str, source: str, policy_path: str 
         raise
     threading.Thread(target=approval_server.serve_forever, daemon=True).start()
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
-    print(f"plant: {socket_path} 에서 대기 중 (원본: {base_root})", file=sys.stderr)
+    print(f"plant: {socket_path} 에서 대기 중", file=sys.stderr)
     _announce_mounts(base_root, mounts)
     print(f"plant: 사람 승인: {'맥 대화상자 + ' if channels else ''}터미널(plant approve, 승인 소켓 {approve_socket})",
           file=sys.stderr)
@@ -180,18 +182,32 @@ def _serve(socket_path: str, approve_socket: str, source: str, policy_path: str 
     return 0
 
 
-def _announce_mounts(base_root: Path, mounts: MountsSource | None) -> None:
-    """시작할 때 원본 폴더 구성을 알린다. 목록 파일 오류·뺀 항목 경고는 MountsSource가 먼저 stderr에 쓴다."""
+HOW_TO_CONNECT = "폴더를 연결하려면 설정 화면(plant ui)이나 터미널에서 plant mount add <폴더>를 실행하세요"
+
+
+def _announce_mounts(base_root: Path | None, mounts: MountsSource | None) -> None:
+    """시작할 때 연결한 폴더를 알린다. 목록 파일 오류·뺀 항목 경고는 MountsSource가 먼저 stderr에 쓴다.
+    base_root는 숨은 개발용 --source(보통 None)."""
+    if base_root is not None:
+        _err(f"개발용 원본 {base_root}를 / 에 보여 줍니다 (숨은 옵션 --source)")
+    nothing = "" if base_root is not None else " 지금은 에이전트가 아무 문서도 읽을 수 없습니다."
     if mounts is None:
-        _err(f"원본: 기본 {base_root}만 씁니다 (정책 파일을 지정하지 않아 추가 폴더 목록을 읽지 않습니다)")
+        _err("정책 파일(--policy 또는 GATE_POLICY)을 지정하지 않아 폴더 목록을 읽지 않습니다. "
+             f"연결한 폴더가 없습니다.{nothing}")
+        if base_root is None:
+            _err(f"{HOW_TO_CONNECT}. 정책 파일을 지정해 다시 띄워야 연결한 폴더가 보입니다.")
         return
     state = mounts.current()
     if state.error is not None:
-        _err(f"원본: 기본 {base_root} (폴더 목록 {mounts.mounts_file}이 잘못되어 추가 폴더를 보여 주지 않습니다)")
+        _err(f"폴더 목록 {mounts.mounts_file}이 잘못되어 연결한 폴더를 보여 주지 않습니다")
         return
-    names = "".join(f", /{m.name}" for m in state.mounts)
-    _err(f"원본: 기본 {base_root} + 추가 {len(state.mounts)}개{' (' + names[2:] + ')' if names else ''}"
-         f" · 폴더 목록 {mounts.mounts_file} (바뀌면 다시 띄우지 않아도 다음 요청부터 씁니다)")
+    if not state.mounts:
+        _err(f"아직 연결한 폴더가 없습니다.{nothing}")
+        _err(f"{HOW_TO_CONNECT}. 연결하면 다시 띄우지 않아도 다음 요청부터 보입니다 (폴더 목록 {mounts.mounts_file})")
+        return
+    names = ", ".join(f"/{m.name}" for m in state.mounts)
+    _err(f"연결한 폴더 {len(state.mounts)}개: {names} · 폴더 목록 {mounts.mounts_file} "
+         "(바뀌면 다시 띄우지 않아도 다음 요청부터 씁니다)")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -202,8 +218,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="승인 소켓 경로 (기본: $GATE_APPROVE_SOCKET, 없으면 PLANT 소켓 옆의 approve.sock)")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    serve = sub.add_parser("serve", help="PLANT 데몬을 실행한다")
-    serve.add_argument("--source", required=True, help="원본 폴더")
+    serve = sub.add_parser("serve", help="PLANT 데몬을 실행한다 (연결한 폴더만 보여 준다. 연결은 plant mount·plant ui)")
+    # 개발·시험용 숨은 옵션(e2e·하네스·테스트): 이 폴더를 / 에 보여 준다. 도움말·README·화면에는 나오지 않는다
+    serve.add_argument("--source", default=None, help=argparse.SUPPRESS)
     serve.add_argument("--policy", default=os.environ.get("GATE_POLICY"),
                        help="정책 파일 (기본: $GATE_POLICY, 없으면 기본 정책)")
     serve.add_argument("--no-dialog", action="store_true", help="맥 대화상자를 띄우지 않는다 (터미널 승인만)")

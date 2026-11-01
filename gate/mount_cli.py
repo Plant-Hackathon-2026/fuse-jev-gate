@@ -5,7 +5,8 @@
 다음 요청에서 목록 파일이 바뀐 것을 보고 다시 읽는다(다시 띄우지 않아도 된다).
 
 명령
-  list               이름, 게이트 안 경로, 실제 경로, 상태(기본·연결됨·보호만 남음·찾을 수 없음), 작업 폴더 반영 여부
+  list               이름, 게이트 안 경로, 실제 경로, 상태(연결됨·보호만 남음·찾을 수 없음), 작업 폴더 반영 여부.
+                     연결한 폴더만 보인다(2026-11-01 기본 폴더 없앰. 연결하지 않으면 에이전트는 아무 문서도 읽지 못한다)
   add <폴더>          확인 뒤 연결. 에이전트에게 더 보여 주는 바꿈이라 한 번 더 묻는다
   remove <이름>       확인 뒤 게이트에서 빼기. 작업 폴더 설정의 직접 읽기 막기는 남는다("보호만 남음")
   unprotect <이름>    보호도 풀기(목록에서 지우고 작업 폴더 설정을 다시 씀). 느슨해지는 바꿈이라 한 번 더 묻는다
@@ -158,25 +159,22 @@ def _p(path: str) -> str:
 # --- list ---
 
 def _row_state(row: FolderRow) -> str:
-    if row.kind == "base":
-        return "기본 · 띄울 때 정함" + ("" if row.exists else " · 찾을 수 없음")
     state = "연결됨" if row.connected else "보호만 남음(PLANT에서 뺌, 직접 읽기 막기는 남음)"
     return state + ("" if row.exists else " · 찾을 수 없음")
 
 
 def _show(ctx: MountContext, view: MountsView, out: TextIO) -> None:
     mounts = [r for r in view.folders if r.kind == "mount"]
-    bases = [r for r in view.folders if r.kind == "base"]
     lines = [f"폴더 목록: {_p(str(ctx.mounts_file))}"
-             + ("" if ctx.mounts_file.exists() else " (아직 없음)") + f" · 추가 폴더 {len(mounts)}/{view.limit}개"]
+             + ("" if ctx.mounts_file.exists() else " (아직 없음)") + f" · 폴더 {len(mounts)}/{view.limit}개"]
     if view.error:
         lines += [f"  문제: {view.error}"]
     lines.append("")
-    if not bases:
-        lines.append("  /  기본 폴더: 알 수 없음 (등록된 작업 폴더가 없어요. `plant workspace init`으로 만들면 등록돼요)")
-    for row in [*bases, *mounts]:
-        title = "(기본)" if row.kind == "base" else row.name
-        lines.append(f"  {row.vpath}  {title}  —  {_row_state(row)}")
+    if not any(r.connected for r in mounts):
+        lines.append("  아직 연결한 폴더가 없어요. 연결하지 않으면 에이전트는 아무 문서도 읽지 못해요. "
+                     "`plant mount add <폴더>`나 설정 화면(`plant ui`)에서 연결하세요.")
+    for row in mounts:
+        lines.append(f"  {row.vpath}  {row.name}  —  {_row_state(row)}")
         detail = f"     실제 경로: {_p(row.path)}"
         if row.exists:
             detail += f" · {_count_text(row.file_count, row.file_count_capped)}"

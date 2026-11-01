@@ -143,6 +143,50 @@ def test_cli_init(data, capsys):
     assert "하위 폴더에서 띄우면" in capsys.readouterr().out
 
 
+def test_cli_init_without_source_protects_connected_folders_and_data(tmp_path, capsys):
+    """--source 없이(2026-11-01 기본 폴더 없앰): 연결한 폴더와 PLANT 데이터만 막고, 연결한 폴더가 없으면 연결하라고 알린다."""
+    root = (tmp_path / "gate-data").resolve()
+    args = ["--socket", str(root / "run" / "gate.sock"), "workspace", "init", str(root / "agent-workspace"),
+            "--policy", str(root / "policy.yaml"), "--audit", str(root / "audit" / "audit.jsonl"),
+            "--plant-bin", str(tmp_path / "bin" / "plant")]
+    assert cli.main(args) == 0
+    out = capsys.readouterr().out
+    assert "아직 PLANT에 연결한 폴더가 없습니다" in out and "plant mount add <폴더>" in out
+    settings = json.loads((root / "agent-workspace" / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    assert settings["sandbox"]["filesystem"]["denyRead"] == [
+        str(root / "policy.yaml"), str(root / "mounts.yaml"), str(root / "workspaces.yaml"),
+        str(root / "policy-history"), str(root / "audit")]
+    [record] = read_workspaces(root / "workspaces.yaml")
+    assert record.source is None
+    guide = (root / "agent-workspace" / "CLAUDE.md").read_text(encoding="utf-8")
+    assert "연결한 폴더가 `/폴더이름/`으로 보입니다" in guide and "ls /`가 비어 있으면" in guide
+
+    book = tmp_path / "docs" / "가계부"
+    book.mkdir(parents=True)
+    write_mounts(root / "mounts.yaml", [_entry("가계부", book.resolve())])
+    assert cli.main([*args, "--force"]) == 0
+    assert "아직 PLANT에 연결한 폴더가 없습니다" not in capsys.readouterr().out
+    settings = json.loads((root / "agent-workspace" / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    assert str(book.resolve()) in settings["sandbox"]["filesystem"]["denyRead"]
+
+
+def test_source_option_is_hidden_from_help(monkeypatch):
+    """--source는 e2e·하네스·테스트용 숨은 옵션이다. serve·workspace init·setup 도움말에 나오지 않지만 받기는 한다."""
+    monkeypatch.setenv("COLUMNS", "1000")
+    parser = cli.build_parser()
+    subs = parser._subparsers._group_actions[0].choices
+    helps = {"serve": subs["serve"].format_help(), "setup": subs["setup"].format_help(),
+             "workspace init": subs["workspace"]._subparsers._group_actions[0].choices["init"].format_help(),
+             "": parser.format_help()}
+    for name, text in helps.items():
+        assert "--source" not in text, name
+        assert name == "" or "원본 폴더" not in text, name
+    assert parser.parse_args(["serve", "--source", "/x"]).source == "/x"
+    assert parser.parse_args(["serve"]).source is None
+    assert parser.parse_args(["workspace", "init", "/w"]).source is None
+    assert parser.parse_args(["setup", "--source", "/x"]).source == "/x"
+
+
 def test_cli_init_requires_every_protected_path(data, capsys, monkeypatch):
     root, paths = data
     monkeypatch.delenv("GATE_AUDIT", raising=False)

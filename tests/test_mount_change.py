@@ -16,6 +16,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import yaml
 
 from gate import mount_change as mc
 from gate.mount_change import (
@@ -106,13 +107,35 @@ def test_context_paths(tmp_path, monkeypatch):
 
 
 def test_list_with_nothing_added(env):
+    """기본 폴더 줄은 없다(2026-11-01). 등록에 숨은 --source가 적혀 있어도 목록에는 연결한 폴더만 나온다."""
     view = list_mounts(env.ctx)
-    [base] = view.folders
-    assert (base.kind, base.name, base.vpath, base.path, base.connected, base.exists) == (
-        "base", None, "/", str(env.paths.source), True, True)
-    assert (base.file_count, base.file_count_capped, base.added_at, base.added_by) == (1, False, None, None)
+    assert view.folders == ()
     assert view.workspaces == (WorkspaceStatus(str(env.ws), "ok"),)
     assert (view.global_setup, view.error, view.limit) == (False, None, 20)
+
+
+def test_workspace_without_source_then_add(tmp_path):
+    """--source 없이 등록한 작업 폴더: 등록 파일에 source가 없고, 연결하면 그 작업 폴더 설정에 막기가 들어간다."""
+    root = tmp_path.resolve()
+    data = root / "gate-data"
+    paths = resolve_paths(None, data / "run" / "gate.sock", data / "policy.yaml", data / "audit" / "audit.jsonl",
+                          root / "bin" / "gate")
+    ws = data / "agent-workspace"
+    init_workspace(ws, paths)
+    [record] = read_workspaces(data / "workspaces.yaml")
+    assert record.source is None and "source" not in yaml.safe_load((data / "workspaces.yaml").read_text("utf-8"))["workspaces"][0]
+    settings = ws / ".claude" / "settings.json"
+    assert str(data / "policy.yaml") in json.loads(settings.read_text(encoding="utf-8"))["sandbox"]["filesystem"]["denyRead"]
+    book = root / "docs" / "상담"
+    book.mkdir(parents=True)
+    ctx = MountContext.from_policy(data / "policy.yaml", data / "run" / "gate.sock", data / "audit" / "audit.jsonl")
+    change = plan_add(ctx, book, added_by="terminal")
+    assert change.name == "상담" and change.workspaces == (str(ws),)  # 겹칠 / 폴더가 없어 숫자를 붙이지 않는다
+    result = apply(ctx, change)
+    assert result.rewritten == (str(ws),) and protects(settings, book)
+    [row] = list_mounts(ctx).folders
+    assert (row.kind, row.name, row.vpath, row.path) == ("mount", "상담", "/상담", str(book))
+    assert list_mounts(ctx).workspaces == (WorkspaceStatus(str(ws), "ok"),)
 
 
 def test_list_without_registered_workspace_has_no_base_row(tmp_path):
@@ -123,14 +146,14 @@ def test_list_without_registered_workspace_has_no_base_row(tmp_path):
 
 def test_list_counts_files_without_following_symlinks(env, monkeypatch):
     add(env)
-    row = list_mounts(env.ctx).folders[1]
+    row = list_mounts(env.ctx).folders[0]
     assert (row.file_count, row.file_count_capped) == (3, False)
-    assert list_mounts(env.ctx, count_files=False).folders[1].file_count is None
+    assert list_mounts(env.ctx, count_files=False).folders[0].file_count is None
     monkeypatch.setattr(mc, "MAX_COUNT_FILES", 2)
-    row = list_mounts(env.ctx).folders[1]
+    row = list_mounts(env.ctx).folders[0]
     assert (row.file_count, row.file_count_capped) == (2, True)
     monkeypatch.setattr(mc, "COUNT_SECONDS", -1.0)  # 너무 오래 걸리면 멈춘다
-    assert list_mounts(env.ctx).folders[1].file_count is None
+    assert list_mounts(env.ctx).folders[0].file_count is None
 
 
 def test_list_reports_broken_files_without_raising(env):
@@ -138,7 +161,7 @@ def test_list_reports_broken_files_without_raising(env):
     env.ctx.mounts_file.write_text("version: 1\nmounts: [ {\n", encoding="utf-8")
     view = list_mounts(env.ctx)
     assert "폴더 목록 파일" in view.error and "막아요" in view.error
-    assert [r.kind for r in view.folders] == ["base"]
+    assert view.folders == ()
     env.ctx.mounts_file.unlink()
     env.ctx.workspaces_file.write_text("version: 9\n", encoding="utf-8")
     view = list_mounts(env.ctx)
@@ -177,7 +200,7 @@ def test_add_blocks_the_workspace_before_opening_the_gate(env, monkeypatch):
     assert read_workspaces(env.ctx.workspaces_file)[0].settings_sha256 == sha(env.settings)
     view = list_mounts(env.ctx)
     assert view.workspaces == (WorkspaceStatus(str(env.ws), "ok"),)
-    row = view.folders[1]
+    row = view.folders[0]
     assert (row.kind, row.name, row.vpath, row.connected, row.exists, row.unprotected_workspaces) == (
         "mount", "가계부", "/가계부", True, True, ())
     assert row.added_at and row.added_by == "terminal"
@@ -200,7 +223,7 @@ def test_name_collisions_get_a_number(env):
     third = env.root / "c" / "가계부"
     for folder in (first, second, third):
         folder.mkdir(parents=True)
-    assert plan_add(env.ctx, first, added_by="terminal").name == "상담 2"  # 기본 폴더의 맨 위 항목과 겹친다
+    assert plan_add(env.ctx, first, added_by="terminal").name == "상담 2"  # 숨은 --source 폴더의 맨 위 항목과 겹친다
     add(env, first)
     assert plan_add(env.ctx, second, added_by="terminal").name == "상담 3"
     add(env)
@@ -213,8 +236,8 @@ def test_name_collisions_get_a_number(env):
     ("gate-data/agent-workspace", "에이전트 작업 폴더는"),
     ("gate-data/agent-workspace/.claude", "에이전트 작업 폴더 안의"),
     ("gate-data", "작업 폴더를 감싸는 폴더는 연결할 수 없어요"),
-    ("gate-data/source", "기본 폴더는 이미"),
-    ("gate-data/source/상담", "기본 폴더 안의"),
+    ("gate-data/source", "이미 PLANT로 보이는 폴더예요"),       # 숨은 --source 폴더(사용자 문구에 "기본 폴더" 없음)
+    ("gate-data/source/상담", "이미 PLANT로 보이는 폴더 안의"),
     ("home", "Claude 설정"),
     ("home/.claude", "Claude 설정 폴더"),
     ("bin", "PLANT 프로그램 폴더"),
@@ -254,7 +277,7 @@ def test_add_records_and_blocks_the_on_disk_spelling(env):
     apply(env.ctx, change)
     assert protects(env.settings, folder)
     assert read_mounts(env.ctx.mounts_file)[0].path == str(folder)
-    assert list_mounts(env.ctx).folders[1].exists
+    assert list_mounts(env.ctx).folders[0].exists
 
 
 def test_add_through_a_symlink_records_the_real_path(env):
@@ -393,7 +416,7 @@ def test_list_shows_workspaces_that_do_not_block_a_folder_yet(env):
     write_mounts(env.ctx.mounts_file, [MountEntry("가계부", str(env.book), STAMP, "terminal", True)])  # 화면을 거치지 않음
     view = list_mounts(env.ctx)
     assert view.workspaces == (WorkspaceStatus(str(env.ws), "stale"),)
-    assert view.folders[1].unprotected_workspaces == (str(env.ws),)
+    assert view.folders[0].unprotected_workspaces == (str(env.ws),)
     other = env.root / "사진"
     other.mkdir()
     add(env, other)  # 다음 추가 때 stale인 작업 폴더를 지금 목록으로 다시 쓴다
@@ -421,7 +444,7 @@ def test_remove_keeps_the_protection(env):
     assert result.rewritten == () and result.notes == ()
     assert read_mounts(env.ctx.mounts_file)[0].connected is False
     assert env.settings.read_bytes() == settings_before and protects(env.settings, env.book)  # 직접 읽기 막기는 남음
-    row = list_mounts(env.ctx).folders[1]
+    row = list_mounts(env.ctx).folders[0]
     assert (row.connected, row.exists, row.unprotected_workspaces) == (False, True, ())
     with pytest.raises(GateError) as exc:
         store.read("/가계부/메모.txt")
@@ -458,7 +481,7 @@ def test_unprotect_removes_the_entry_and_the_protection(env):
     assert not protects(env.settings, env.book)  # 보호가 풀렸다
     assert str(env.book) not in env.settings.read_text(encoding="utf-8")
     assert read_workspaces(env.ctx.workspaces_file)[0].settings_sha256 == sha(env.settings)
-    assert [r.kind for r in list_mounts(env.ctx).folders] == ["base"]
+    assert list_mounts(env.ctx).folders == ()
     with pytest.raises(MountError, match="목록에 없어요"):
         plan_unprotect(env.ctx, "가계부")
 

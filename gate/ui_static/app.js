@@ -375,11 +375,12 @@
       nerDesc, [["주소", n.address, true], ["서버", server]], actions));
   }
 
-  // PLANT 카드의 "원본 폴더 N개"(연결된 폴더, 기본 포함. 찾을 수 없는 폴더는 따로 적는다)
+  // PLANT 카드의 "원본 폴더 N개"(연결한 폴더만. 찾을 수 없는 폴더·보호만 남은 폴더는 따로 적는다)
   function folderSummary(f) {
     if (!f) return "확인하지 못했어요";
     if (f.error) return "목록 파일에 문제가 있어요 · 아래 “원본 폴더”를 보세요";
-    var parts = [f.base ? f.count + "개" : "추가 " + f.mounts + "개 · 기본 폴더는 알 수 없음"];
+    if (!f.count && !f.protected_only) return "아직 없어요 · 아래 “원본 폴더”에서 추가해요";
+    var parts = [f.count + "개"];
     if (f.missing) parts.push("찾을 수 없음 " + f.missing + "개");
     if (f.protected_only) parts.push("보호만 남음 " + f.protected_only + "개");
     return parts.join(" · ");
@@ -394,7 +395,7 @@
         h("li", null, "저장소 폴더의 터미널에서 서버를 띄워요. 모델을 불러오는 데 시간이 걸려요.",
           h("pre", { text: "<python> -m nerserve --model-dir <모델 폴더> --host 127.0.0.1 --port " + port })),
         h("li", null, "PLANT를 띄울 때 같은 주소를 알려 줘요.",
-          h("pre", { text: "NER_BASE_URL=http://" + address + " plant serve --source <원본 폴더>" })),
+          h("pre", { text: "NER_BASE_URL=http://" + address + " plant serve" })),
         h("li", { text: "여기서 “다시 확인”을 눌러 서버가 “응답함”이 되면 “켜기”를 눌러요." })));
   }
 
@@ -464,7 +465,16 @@
     var edited = workspaces.filter(function (w) { return w.state === "edited"; });
     var missing = workspaces.filter(function (w) { return w.state === "missing"; });
     var shown = folders.filter(function (f) { return f.connected; }).length;
-    $("mount-count").textContent = "연결된 폴더 " + shown + "개(기본 포함) · 추가한 폴더 " + mounts.mount_count + "/" + mounts.limit;
+    var kept = folders.length - shown;
+    $("mount-count").textContent = "연결된 폴더 " + shown + "개" + (kept ? " · 보호만 남음 " + kept + "개" : "") +
+      " · 최대 " + mounts.limit + "개";
+
+    var why = "";
+    if (mounts.error) why = "목록 파일에 문제가 있어 지금은 폴더를 추가할 수 없어요.";
+    else if (edited.length) why = "손으로 바뀐 작업 폴더 설정을 먼저 다시 만들어야 추가할 수 있어요.";
+    else if (mounts.mount_count >= mounts.limit) {
+      why = "폴더는 " + mounts.limit + "개까지 추가할 수 있어요(보호만 남은 폴더 포함). 쓰지 않는 폴더의 보호를 풀면 자리가 생겨요.";
+    }
 
     if (edited.length) {
       banners.appendChild(mountBanner("error", "작업 폴더 설정이 손으로 바뀌어 있어요. ", [
@@ -486,45 +496,54 @@
         ")을 쓰고 있어요. 폴더를 바꾼 뒤에는 터미널에서 ", h("code", { text: "plant setup" }), "을 다시 실행해야 전역 설정에도 반영돼요."));
     }
 
-    if (!folders.some(function (f) { return f.kind === "base"; })) list.appendChild(unknownBaseRow());
     folders.forEach(function (f) { list.appendChild(folderRow(f, edited.length > 0)); });
-    if (!mounts.mount_count) {
-      list.appendChild(h("p", { class: "empty", text: "아직 추가한 폴더가 없어요. [폴더 추가]로 이 컴퓨터의 폴더를 더 연결할 수 있어요." }));
-    }
-
-    var why = "";
-    if (mounts.error) why = "목록 파일에 문제가 있어 지금은 폴더를 추가할 수 없어요.";
-    else if (edited.length) why = "손으로 바뀐 작업 폴더 설정을 먼저 다시 만들어야 추가할 수 있어요.";
-    else if (mounts.mount_count >= mounts.limit) {
-      why = "폴더는 " + mounts.limit + "개까지 추가할 수 있어요(보호만 남은 폴더 포함). 쓰지 않는 폴더의 보호를 풀면 자리가 생겨요.";
+    if (!folders.length) {
+      // 연결한 폴더가 없으면 에이전트는 아무 문서도 읽지 못한다(사용자 결정, 2026-11-01). 추가 단추를 바로 옆에 둔다.
+      list.appendChild(h("div", { class: "mempty" },
+        h("p", null, h("strong", { text: "아직 연결한 폴더가 없어요. " }),
+          "폴더를 추가해야 에이전트가 문서를 읽을 수 있어요. [폴더 추가]를 누르면 이 컴퓨터에서 폴더를 고를 수 있어요."),
+        h("button", { type: "button", class: "btn btn-primary", text: "폴더 추가", disabled: !!why,
+          "aria-describedby": why ? "mount-add-why" : null, onclick: addFolder })));
+    } else if (!shown) {
+      list.appendChild(h("p", { class: "empty", text: "지금 연결된 폴더가 없어 에이전트가 읽을 수 있는 문서가 없어요. [폴더 추가]로 폴더를 연결해 주세요." }));
     }
     setAddButton(why);
   }
 
-  function unknownBaseRow() {
-    return h("div", { class: "mrow" }, h("div", { class: "mmain" },
-      h("div", { class: "mtitle" }, h("span", { class: "name", text: "기본 폴더" }), h("code", { class: "vpath", text: "/" }), ftag("base", "기본")),
-      h("span", { class: "mpath", text: "알 수 없음" }),
-      h("p", { class: "mdesc", text: "PLANT를 띄울 때 정한 폴더예요. 등록된 작업 폴더가 없어 어느 폴더인지 알 수 없어요." })));
+  // 터미널에 그대로 붙여 넣을 수 있게, 띄어쓰기 같은 글자가 든 경로는 작은따옴표로 감싼다.
+  function shellPath(path) {
+    return /^[\w\/.\-가-힣]+$/.test(path) ? path : "'" + path.replace(/'/g, "'\\''") + "'";
+  }
+
+  // 폴더마다 디스크 경로와 에이전트가 읽는 경로를 이름표와 함께 보여 준다(사용자 결정, 2026-11-01).
+  // 보호만 남은 폴더는 에이전트가 읽을 수 없으니 디스크 경로만 보여 준다.
+  function folderPaths(f) {
+    var dl = h("dl", { class: "mpaths" },
+      h("dt", { text: "디스크 경로" }), h("dd", { class: "mono", text: f.path }));
+    if (f.connected) {
+      dl.appendChild(h("dt", { text: "에이전트가 읽는 경로" }));
+      dl.appendChild(h("dd", null, h("code", { text: f.vpath }), h("span", { class: "sep", text: " · " }),
+        h("code", { text: "plant cat " + shellPath(f.vpath + "/파일이름") })));
+    }
+    return dl;
   }
 
   function folderRow(f, editedWorkspace) {
-    var base = f.kind === "base";
-    var kept = !base && !f.connected;
+    var kept = !f.connected;
     var stale = f.unprotected_workspaces || [];
-    var tags = [base ? ftag("base", "기본") : (f.connected ? ftag("on", "연결됨") : ftag("kept", "보호만 남음"))];
+    var tags = [f.connected ? ftag("on", "연결됨") : ftag("kept", "보호만 남음")];
     if (!f.exists) tags.push(ftag("missing", "찾을 수 없음"));
     if (stale.length) tags.push(ftag("stale", "작업 폴더 설정에 반영 안 됨"));
     var meta = [];
     if (f.exists) meta.push(fileCountText(f.file_count, f.file_count_capped));
-    if (base) meta.push("PLANT를 띄울 때 정함 · 화면에서 뺄 수 없어요");
-    else if (f.added_at) {
-      meta.push("추가 " + when(f.added_at, true) + (f.added_by === "ui" ? " · 화면에서" : (f.added_by === "terminal" ? " · 터미널에서" : "")));
+    if (f.added_at) {
+      meta.push("추가 " + when(f.added_at, true));
+      if (f.added_by === "ui" || f.added_by === "terminal") meta.push(f.added_by === "ui" ? "화면에서" : "터미널에서");
     }
     var desc = kept ? "PLANT에서는 뺐고, 에이전트가 이 폴더를 직접 여는 것만 막고 있어요. 다시 연결하려면 [폴더 추가]에서 같은 폴더를 고르세요."
       : (!f.exists ? "폴더를 찾을 수 없어요. 외장 디스크를 뺐거나 폴더를 옮기거나 지웠을 수 있어요. 그동안 PLANT 목록에는 보이지 않아요." : null);
     var button = null;
-    if (!base && f.connected) {
+    if (f.connected) {
       button = h("button", { type: "button", class: "btn-quiet", "aria-label": "“" + f.name + "” 폴더를 PLANT에서 빼기", text: "빼기",
         onclick: function () { changeMount("remove", f); } });
     } else if (kept) {
@@ -539,10 +558,9 @@
       h("code", { text: "plant workspace init --force" }), "로 다시 만들어 주세요.")) : null;
     return h("div", { class: "mrow" + (kept ? " kept" : "") },
       h("div", { class: "mmain" },
-        h("div", { class: "mtitle" }, h("span", { class: "name", text: base ? "기본 폴더" : f.name }),
-          h("code", { class: "vpath", title: "PLANT 안 경로", text: f.vpath }), tags),
-        h("span", { class: "mpath" }, h("span", { class: "sr-only", text: "실제 경로 " }), f.path),
-        meta.length ? h("div", { class: "mmeta" }, meta.map(function (m) { return h("span", { text: m }); })) : null,
+        h("div", { class: "mtitle" }, h("span", { class: "name", text: f.name }), tags),
+        folderPaths(f),
+        meta.length ? h("p", { class: "mmeta", text: meta.join(" · ") }) : null,
         desc ? h("p", { class: "mdesc", text: desc }) : null),
       button ? h("div", { class: "mside" }, button) : null,
       warn);
@@ -569,11 +587,14 @@
     box.focus();
   }
 
+  // 확인 창의 경로도 목록 줄과 같은 이름표(디스크 경로·에이전트가 읽는 경로)로 보여 준다.
   function mountDialog(p, again) {
-    var facts = [["PLANT 안 이름", p.name + "  (" + p.vpath + ")"], ["실제 경로", p.path, true]];
+    var disk = ["디스크 경로", p.path, true];
     var lead = again ? "그사이 상태가 바뀌어 다시 계산했어요. 바뀐 내용을 보고 다시 확인해 주세요. " : "";
     var places = p.workspaces && p.workspaces.length ? p.workspaces.length + "곳" : "없음";
+    var facts;
     if (p.op === "add") {
+      facts = [disk, ["에이전트가 읽을 경로", p.vpath, true]];
       facts.push(["파일 수", fileCountText(p.file_count, p.file_count_capped)]);
       facts.push(["직접 열기를 막을 작업 폴더", places]);
       var folderName = (p.path.split("/").pop() || "").normalize("NFC");
@@ -582,7 +603,7 @@
         lead: lead + "연결하면 에이전트가 PLANT를 거쳐 이 폴더 문서를 읽을 수 있어요. 정책대로 가리거나 물어봐요. " +
           "동시에 작업 폴더 설정에서 이 폴더를 직접 열지 못하게 막아요.",
         facts: facts,
-        items: folderName && folderName !== p.name.normalize("NFC") ? ["같은 이름이 이미 있어 PLANT 안 이름 뒤에 숫자를 붙였어요."] : [],
+        items: folderName && folderName !== p.name.normalize("NFC") ? ["같은 이름이 이미 있어 에이전트가 읽을 경로의 이름 뒤에 숫자를 붙였어요."] : [],
         warn: p.workspaces && p.workspaces.length ? null
           : "등록된 작업 폴더가 없어 직접 열기는 막지 못해요. 터미널에서 `plant workspace init`으로 작업 폴더를 먼저 만들면 함께 막아요.",
         yes: p.reconnect ? "다시 연결" : "연결"
@@ -592,12 +613,13 @@
       return {
         title: "이 폴더를 PLANT에서 뺄까요?",
         lead: lead + "PLANT에서 이 폴더를 빼요. 에이전트는 이 폴더 문서를 더는 PLANT로 읽지 못해요. 직접 열기 막기는 남겨 둬요.",
-        facts: facts,
+        facts: [disk, ["에이전트가 읽던 경로", p.vpath, true]],
         items: ["뺀 폴더는 “보호만 남음”으로 남아요. 다시 연결하려면 [폴더 추가]에서 같은 폴더를 고르세요."],
         yes: "빼기"
       };
     }
-    facts.push(["다시 쓸 작업 폴더", places]);
+    // 보호만 남은 폴더는 에이전트가 PLANT로 읽지 못하므로 디스크 경로만 보여 준다(목록 줄과 같다).
+    facts = [["이름", p.name], disk, ["다시 쓸 작업 폴더", places]];
     return {
       title: "이 폴더의 보호도 풀까요?",
       lead: lead + "목록에서 이 폴더를 지우고, 작업 폴더 설정의 직접 열기 막기도 풀어요.",
@@ -776,6 +798,25 @@
     return h("div", { class: "lock" }, icon("lock"), h("strong", { text: "늘 전부 가림" }), h("span", { text: "안전 규칙으로 고정" }));
   }
 
+  // 펼친 "규칙 보기"(번호 종류별). 정책을 바꿔 표를 다시 그려도 펼친 채로 둔다.
+  var openRules = {};
+
+  // 이름 옆 [규칙 보기] 단추와, 줄 아래 전체 폭으로 펼쳐지는 규칙 상자(사용자 결정, 2026-11-01).
+  function ruleToggle(row, body) {
+    var open = !!openRules[row.kind];
+    body.hidden = !open;
+    var button = h("button", {
+      type: "button", class: "rule-toggle", "aria-expanded": open ? "true" : "false", "aria-controls": body.id,
+      onclick: function () {
+        var now = button.getAttribute("aria-expanded") !== "true";
+        openRules[row.kind] = now;
+        button.setAttribute("aria-expanded", now ? "true" : "false");
+        body.hidden = !now;
+      }
+    }, h("span", { class: "sr-only", text: row.name + " 찾는 " }), "규칙 보기", h("span", { class: "chev", "aria-hidden": "true" }));
+    return button;
+  }
+
   function numberRow(row) {
     var mine = row.action.mine || row.visible.mine;
     var vis;
@@ -792,7 +833,7 @@
       vis = select;
     }
     var rule = row.rule;
-    var body = h("div", { class: "rule-body" },
+    var body = h("div", { class: "rule-body", id: "rule-" + row.kind, role: "region", "aria-label": row.name + " 찾는 규칙" },
       h("div", { text: rule.text }),
       h("div", { class: "rule-ex" }, h("span", { class: "muted", text: "예" }), h("code", { text: rule.example }),
         h("span", { "aria-hidden": "true", text: "→" }), h("span", { class: "sr-only", text: "지금 설정으로 가리면" }),
@@ -803,10 +844,11 @@
       h("div", { class: "small muted" }, h("strong", { text: "추가로 확인해요" }), " · " + rule.checks),
       rule.lock_reason ? h("div", { class: "rule-lock" }, icon("lock"), h("span", { text: rule.lock_reason })) : null);
     return h("div", { class: "prow" + (mine ? " mine" : "") },
-      h("div", { class: "pname" }, h("span", { class: "name", text: row.name }), mine ? h("span", { class: "mine-tag", text: "내가 바꿈" }) : null),
+      h("div", { class: "pname" }, h("span", { class: "name", text: row.name }), ruleToggle(row, body),
+        mine ? h("span", { class: "mine-tag", text: "내가 바꿈" }) : null),
       seg(row.name + " 처리 방식", row.action.key, row.action.choices, row.action.value),
       h("div", { class: "pvis" }, vis),
-      h("details", { class: "rule-box" }, h("summary", { text: "찾는 규칙 보기" }), body));
+      body);
   }
 
   // host(IP·내부 주소)는 규칙이 찾아 NER을 꺼도 적용된다(row.rule). 그 줄에는 NER 꺼짐 안내를 붙이지 않는다.
@@ -835,7 +877,7 @@
       h("div", { class: "card-head-title" }, h("span", { class: "num num-solid", "aria-hidden": "true", text: "1" }),
         h("h3", null, "패턴으로 찾는 정보 ", h("span", { class: "sub", text: "번호·비밀값" })),
         h("span", { class: "tag", text: "모델 없음 · 정규식" })),
-      h("span", { class: "note-text", text: "형식이 정해진 번호는 늘 찾아서 가려요. 줄마다 “찾는 규칙”을 펼쳐 볼 수 있어요." })));
+      h("span", { class: "note-text", text: "형식이 정해진 번호는 늘 찾아서 가려요. 이름 옆 [규칙 보기]를 누르면 찾는 규칙(정규식)을 볼 수 있어요." })));
     state.numbers.forEach(function (row) { numbers.appendChild(numberRow(row)); });
 
     var nerOn = state.ner_backend === "server";
