@@ -274,8 +274,9 @@ def mask_bytes(
       `encode("utf-8", "surrogateescape")`로 되돌리면 원래 바이트가 그대로 나온다.
     - 돌려주는 Finding의 start·end는 바이트 위치가 아니라 위 방식으로 푼 문자열의 문자 인덱스다.
       바이트 위치가 필요하면 `len(decoded[:start].encode("utf-8", "surrogateescape"))`로 바꾼다.
-    - UTF-8이 아닌 인코딩(EUC-KR 등)은 공식 지원이 아니다. ASCII 숫자·이메일은 그대로 잡히지만
-      한글 키워드가 필요한 계좌는 놓친다. UTF-16은 아무것도 잡지 못한다.
+    - UTF-8이 아닌 인코딩(EUC-KR 등)은 이 함수에서 지원하지 않는다. ASCII 숫자·이메일은 그대로 잡히지만
+      한글 키워드가 필요한 계좌는 놓친다. UTF-16은 아무것도 잡지 못한다. 게이트(gate.pipeline)는 이 함수를 쓰지 않고
+      gate.encoding으로 인코딩을 알아본 글자를 mask에 넘긴다.
     - 파일을 나눠서 부르면 경계에 걸친 번호를 놓친다. 파일 전체를 한 번에 넘기고, 부분 읽기는 결과를 잘라서 쓴다.
     - replacements(NER 개체)는 mask와 같다. 위치는 위 방식으로 푼 문자열의 문자 인덱스이고, 주면 바이트 길이가 달라질 수 있다.
     """

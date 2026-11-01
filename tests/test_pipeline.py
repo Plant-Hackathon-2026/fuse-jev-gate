@@ -314,14 +314,119 @@ def test_large_file_is_judged_in_chunks_and_strictest_wins(source, tmp_path):
     assert "".join(jev.chunks) in "".join(lines)
 
 
-def test_non_utf8_bytes_are_returned_unchanged_and_jev_gets_replacement(source, tmp_path):
+def test_unknown_encoding_is_denied_without_calling_jev(source, tmp_path):
+    # UTF-16 BOM처럼 시작하지만 UTF-8 글 + 잘못된 바이트다. 어느 인코딩으로도 풀리지 않는다(2026-11-01 사용자 결정: 차단).
+    # 예전에는 UTF-8로 보고 깨진 글자를 Jev에 넘겼다
     data = b"\xff\xfe" + "연락처 010-1234-5678".encode() + b"\x80"
     (source / "깨진.txt").write_bytes(data)
     inspector, jev, _ = make(source, tmp_path)
     verdict = inspector.inspect(PEER, "/깨진.txt")
-    assert len(verdict.data) == len(data)
-    assert verdict.data.startswith(b"\xff\xfe") and verdict.data.endswith(b"\x80")
-    assert "�" in jev.calls[0].text
+    assert (verdict.judgment.action, verdict.judgment.stage, verdict.data) == ("deny", "encoding", None)
+    assert "인코딩" in verdict.judgment.reason
+    assert verdict.judgment.content_sha256 is not None and jev.calls == []
+
+
+# --- 인코딩 (2026-11-01 사용자 결정): UTF-16·EUC-KR은 글자로 풀어 검사하고 원래 인코딩으로 돌려준다 ---
+
+SECRETS = "password: hunter2-real\nAPI_TOKEN=sk-live-abcdefghijklmnopqrstuvwx\n"
+SECRETS_SHOWN = "password: *******-****\nAPI_TOKEN=**-****-************************\n"
+
+
+@pytest.mark.parametrize("codec", ["utf-16", "utf-16-le", "utf-16-be"])
+def test_utf16_secrets_are_masked_and_returned_in_utf16(source, tmp_path, codec):
+    # 예전에는 UTF-8로 보고 풀어서 아무것도 잡지 못했고 Jev가 safe면 원문이 그대로 나갔다(plans/next-tasks-plan.md 1.5)
+    data = SECRETS.encode(codec)
+    (source / "설정.txt").write_bytes(data)
+    inspector, jev, _ = make(source, tmp_path)
+    verdict = inspector.inspect(PEER, "/설정.txt")
+    assert verdict.judgment.action == "mask"
+    assert dict(verdict.judgment.findings) == {"secret": 2}
+    assert verdict.judgment.reason.endswith("(UTF-16 파일)")
+    assert verdict.data == SECRETS_SHOWN.encode(codec)        # BOM·바이트 순서 그대로
+    assert jev.calls[0].text == SECRETS_SHOWN                 # Jev는 0 바이트 없는 글자를 본다
+    assert verdict.codec in ("utf-16-le", "utf-16-be")
+
+
+def test_utf16_card_number_is_masked(source, tmp_path):
+    (source / "카드16.txt").write_bytes(WITH_CARD.encode("utf-16"))
+    inspector, _, _ = make(source, tmp_path)
+    verdict = inspector.inspect(PEER, "/카드16.txt")
+    assert verdict.data == "결제 카드 **** **** **** ****\n".encode("utf-16")
+
+
+def test_euc_kr_document_is_checked_and_returned_in_euc_kr(source, tmp_path):
+    doc = "상담 기록\n연락처 010-1234-5678\n비밀번호: 사과나무\n"
+    (source / "상담.txt").write_bytes(doc.encode("cp949"))
+    inspector, jev, _ = make(source, tmp_path)
+    verdict = inspector.inspect(PEER, "/상담.txt")
+    assert dict(verdict.judgment.findings) == {"mobile": 1, "secret": 1}
+    shown = verdict.data.decode("cp949")
+    assert "010" not in shown and "사과나무" not in shown and shown.startswith("상담 기록\n")
+    assert "(EUC-KR 파일)" in verdict.judgment.reason
+    assert "상담 기록" in jev.calls[0].text
+
+
+def test_unmasked_utf16_document_is_returned_unchanged(source, tmp_path):
+    data = PLAIN.encode("utf-16")
+    (source / "회의16.txt").write_bytes(data)
+    inspector, jev, _ = make(source, tmp_path)
+    verdict = inspector.inspect(PEER, "/회의16.txt")
+    assert (verdict.judgment.action, verdict.data) == ("allow", data)
+    assert jev.calls[0].text == PLAIN
+
+
+def test_number_rules_apply_to_utf16(source, tmp_path):
+    (source / "카드16.txt").write_bytes(WITH_CARD.encode("utf-16"))
+    inspector, jev, _ = make(source, tmp_path, entries=[Entry(settings={"numbers.card.action": "deny"})])
+    verdict = inspector.inspect(PEER, "/카드16.txt")
+    assert (verdict.judgment.action, verdict.judgment.stage) == ("deny", "number") and jev.calls == []
+
+
+def test_search_reads_utf16_content(source, tmp_path):
+    (source / "회의16.txt").write_bytes(PLAIN.encode("utf-16"))
+    (source / "연락처16.txt").write_bytes(WITH_PHONE.encode("utf-16-be"))
+    inspector, _, _ = make(source, tmp_path)
+    result = search(inspector, PEER, "/", "안건")
+    assert {(m["path"], m["text"]) for m in result["matches"]} >= {("/회의16.txt", "안건은 예산입니다.")}
+    found = search(inspector, PEER, "/연락처16.txt", "연락처")["matches"]
+    assert [m["text"] for m in found] == ["연락처는 ***-****-****입니다."]
+
+
+BINARY = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR" + bytes(range(256))
+
+
+def test_binary_is_not_judged_and_asks_a_human(source, tmp_path):
+    (source / "사진.png").write_bytes(BINARY)
+    inspector, jev, _ = make(source, tmp_path)
+    verdict = inspector.inspect(PEER, "/사진.png")
+    j = verdict.judgment
+    assert (j.action, j.stage, verdict.data) == ("ask_human", "encoding", None)
+    assert "바이너리" in j.reason and jev.calls == []
+    assert "사람 승인이 필요합니다" in Blocked(j).message
+
+
+def test_binary_approved_returns_original_bytes(source, tmp_path):
+    (source / "사진.png").write_bytes(BINARY)
+    inspector, channel, jev, _ = asking(source, tmp_path, "once")
+    verdict = inspector.inspect(PEER, "/사진.png")
+    assert (verdict.judgment.action, verdict.judgment.approval, verdict.data) == ("allow", "once", BINARY)
+    assert "바이너리" in channel.requests[0].reason and jev.calls == []
+
+
+def test_binary_denied_by_user(source, tmp_path):
+    (source / "사진.png").write_bytes(BINARY)
+    inspector, _, _, _ = asking(source, tmp_path, "deny")
+    verdict = inspector.inspect(PEER, "/사진.png")
+    assert (verdict.judgment.action, verdict.data) == ("deny", None)
+
+
+def test_path_rules_come_before_encoding(source, tmp_path):
+    (source / "공개" / "사진.png").write_bytes(BINARY)
+    (source / "비공개" / "깨진.txt").write_bytes(b"\xff\xfe\x80")
+    inspector, _, _ = make(source, tmp_path, entries=[Entry(path_rule=PathRule("공개/**", "allow")),
+                                                      Entry(path_rule=PathRule("비공개/**", "deny"))])
+    assert inspector.inspect(PEER, "/공개/사진.png").data == BINARY
+    assert inspector.inspect(PEER, "/비공개/깨진.txt").judgment.stage == "path"
 
 
 @pytest.mark.parametrize("text", ["", "a" * 10, "가" * 1000, "😀a" * 700, ("짧은 줄\n" * 400)])
