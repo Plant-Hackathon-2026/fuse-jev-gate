@@ -110,8 +110,8 @@ def test_list_shows_state_paths_counts_and_workspaces(env):
     apply(env.ctx, plan_add(env.ctx, env.book, added_by="terminal"))
     code, out = run(env, "list", tty=False)
     assert code == 0
-    assert "추가 폴더 1/20개" in out
-    assert "/  (기본)  —  기본 · 띄울 때 정함" in out
+    assert "폴더 1/20개" in out
+    assert "기본" not in out and "(기본)" not in out  # 기본 폴더 줄은 없다(2026-11-01)
     assert "/가계부  가계부  —  연결됨" in out and f"실제 경로: {env.book} · 파일 3개" in out and "터미널에서 연결" in out
     assert f"{env.ws}: 지금 목록대로 막고 있어요" in out
     apply(env.ctx, plan_remove(env.ctx, "가계부"))
@@ -128,7 +128,8 @@ def test_list_without_workspace_and_with_problems(tmp_path):
     args = argparse.Namespace(mount_command="list", policy_path=str(data / "policy.yaml"), audit_path=None, socket=None)
     assert mount_cli.run(args, stdin=io.StringIO(), stdout=out) == 0
     text = out.getvalue()
-    assert "기본 폴더: 알 수 없음" in text and "문제: 폴더 목록 파일" in text and "등록 0개" in text
+    assert "기본 폴더" not in text and "문제: 폴더 목록 파일" in text and "등록 0개" in text
+    assert "아직 연결한 폴더가 없어요" in text and "plant mount add <폴더>" in text
 
 
 def test_list_shows_workspaces_that_do_not_block_yet(env):
@@ -256,11 +257,13 @@ def test_workspace_init_reads_the_list(env):
 # --- gate serve가 쓰는 저장소 ---
 
 def test_serve_uses_the_list_only_with_a_policy_file(env, capsys):
+    """숨은 개발용 --source를 준 데몬: 정책 파일이 없으면 그 폴더만, 있으면 연결한 폴더도 함께 보인다."""
     apply(env.ctx, plan_add(env.ctx, env.book, added_by="terminal"))
     store, mounts = cli._make_store(str(env.paths.source), None, str(env.paths.socket), None)
     assert isinstance(store, PlainStore) and mounts is None
     cli._announce_mounts(store.root, mounts)
-    assert f"원본: 기본 {env.paths.source}만 씁니다" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert f"개발용 원본 {env.paths.source}를 / 에 보여 줍니다" in err and "폴더 목록을 읽지 않습니다" in err
     with pytest.raises(GateError):  # 정책 파일 없이 띄우면 목록을 보지 않는다
         store.read("/가계부/메모.txt")
     store, mounts = cli._make_store(str(env.paths.source), str(env.paths.policy), str(env.paths.socket),
@@ -269,8 +272,8 @@ def test_serve_uses_the_list_only_with_a_policy_file(env, capsys):
     assert store.read("/가계부/메모.txt") == "내용\n".encode()
     cli._announce_mounts(store.root, mounts)
     err = capsys.readouterr().err
-    assert f"원본: 기본 {env.paths.source} + 추가 1개 (/가계부)" in err
+    assert "연결한 폴더 1개: /가계부" in err
     env.ctx.mounts_file.write_text("version: 5\n", encoding="utf-8")
     cli._announce_mounts(store.root, mounts)
     err = capsys.readouterr().err
-    assert "폴더 목록 파일 오류. 고칠 때까지 내용 읽기를 모두 차단합니다" in err and "추가 폴더를 보여 주지 않습니다" in err
+    assert "폴더 목록 파일 오류. 고칠 때까지 내용 읽기를 모두 차단합니다" in err and "연결한 폴더를 보여 주지 않습니다" in err

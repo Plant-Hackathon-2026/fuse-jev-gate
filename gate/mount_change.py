@@ -36,6 +36,11 @@
     `gate setup`을 다시 해도 규칙이 빠지지 않아 붙이지 않는다). add·unprotect인데 등록된 작업 폴더 중 설정 파일이 있는
     것(ok·stale)이 없으면 no_workspace.
   - 여러 프로세스(화면·터미널)가 같이 apply하지 않게 정책 파일 옆 `.mounts.lock`을 flock으로 잡는다.
+
+기본 폴더 없앰 (2026-11-01 사용자 결정, plans/mount-ui-plan.md 11절)
+  - list_mounts는 연결한 폴더(mounts.yaml 항목)만 돌려준다. 예전의 기본 폴더 줄(kind=base)은 없다.
+  - 등록에 적힌 source(숨은 개발용 --source)가 있으면 그 폴더와 겹치는 연결은 여전히 막고, 이름 정하기에서도 그 폴더의
+    맨 위 항목과 겹치지 않게 한다. 사용자 문구에는 "기본 폴더"를 쓰지 않는다.
 """
 
 from __future__ import annotations
@@ -142,28 +147,27 @@ class WorkspaceStatus:
 
 @dataclass(frozen=True)
 class FolderRow:
-    """화면·`gate mount list`의 한 줄.
+    """화면·`gate mount list`의 한 줄. 연결한 폴더(mounts.yaml 항목) 하나다.
 
-    kind=base는 기본 폴더(--source)다. 등록된 작업 폴더에 적힌 원본 경로에서 알아낸다(여럿이면 줄도 여럿).
-    base는 name이 None, vpath는 "/", connected는 True, 뺄 수 없다.
+    kind는 늘 mount다(예전 기본 폴더 줄 kind=base는 2026-11-01에 없앴다. 응답 모양을 바꾸지 않으려고 칸은 남긴다).
     """
 
-    kind: Literal["base", "mount"]
-    name: str | None            # 게이트 안 이름(NFC). base는 None
-    vpath: str                  # "/" 또는 "/가계부"
+    kind: Literal["mount"]
+    name: str | None            # 게이트 안 이름(NFC)
+    vpath: str                  # "/가계부" (에이전트가 읽는 경로)
     path: str                   # 실제 경로(심볼릭 링크를 따라간 것)
     connected: bool             # 게이트로 보임. False면 "보호만 남음"(뺐지만 직접 읽기 막기는 남김)
     exists: bool                # 실제 폴더가 지금 있음(외장 디스크를 빼거나 지우면 False → "찾을 수 없음")
     file_count: int | None      # 일반 파일 수(MAX_COUNT_FILES까지). 셀 수 없거나 count_files=False면 None
     file_count_capped: bool     # MAX_COUNT_FILES를 넘음("1만 개 넘음")
-    added_at: str | None        # ISO 8601. base는 None
-    added_by: AddedBy | None    # base는 None
+    added_at: str | None        # ISO 8601
+    added_by: AddedBy | None
     unprotected_workspaces: tuple[str, ...]  # 이 폴더 직접 읽기가 아직 막히지 않은 등록 작업 폴더(stale·edited)
 
 
 @dataclass(frozen=True)
 class MountsView:
-    folders: tuple[FolderRow, ...]          # base 먼저, 그다음 mounts.yaml 순서
+    folders: tuple[FolderRow, ...]          # mounts.yaml 순서(연결한 폴더와 보호만 남은 폴더)
     workspaces: tuple[WorkspaceStatus, ...]
     global_setup: bool                      # 전역 설치 기록(gate.claude_setup.record_path)이 있음
     error: str | None                       # mounts.yaml·workspaces.yaml이 잘못됨(그동안 게이트는 내용 읽기를 모두 막음)
@@ -240,8 +244,8 @@ def _load(ctx: MountContext) -> tuple[tuple[MountEntry, ...], tuple[WorkspaceRec
 def _gate_paths(record: WorkspaceRecord, entries: Iterable[MountEntry]) -> GatePaths:
     """등록에 적힌 경로 + 목록. 추가 폴더는 gate workspace init(with_listed_mounts)과 같게 disk_path로 맞춘다."""
     mounts = tuple(dict.fromkeys(disk_path(e.path) for e in entries))
-    return GatePaths(Path(record.source), Path(record.socket), Path(record.policy), Path(record.audit),
-                     Path(record.gate_bin), mounts)
+    return GatePaths(Path(record.source) if record.source else None, Path(record.socket), Path(record.policy),
+                     Path(record.audit), Path(record.gate_bin), mounts)
 
 
 def _settings_file(record: WorkspaceRecord) -> Path:
@@ -344,9 +348,9 @@ def _count_files(path: str | Path, deadline: float) -> tuple[int | None, bool]:
 
 
 def _base_names(records: Iterable[WorkspaceRecord]) -> list[str]:
-    """기본 폴더(등록된 작업 폴더의 원본) 맨 위 항목 이름."""
+    """기본 폴더(등록에 적힌 숨은 --source. 보통 없음) 맨 위 항목 이름."""
     names: list[str] = []
-    for source in dict.fromkeys(r.source for r in records):
+    for source in dict.fromkeys(r.source for r in records if r.source):
         try:
             names += os.listdir(source)
         except OSError:
@@ -383,11 +387,6 @@ def _list(ctx: MountContext, count_files: bool) -> MountsView:
         return _count_files(path, min(deadline, time.monotonic() + COUNT_SECONDS))
 
     rows: list[FolderRow] = []
-    for source in dict.fromkeys(r.source for r in records):
-        exists = os.path.isdir(source)
-        unprotected = tuple(w.record.path for w in workspaces
-                            if w.record.source == source and w.state == "edited" and not _protects(w.text, source))
-        rows.append(FolderRow("base", None, "/", source, True, exists, *count(source, exists), None, None, unprotected))
     for e in entries:
         exists = _live(e.path)
         unprotected = tuple(w.record.path for w in workspaces

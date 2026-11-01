@@ -231,9 +231,14 @@ select.input { padding-right: 8px; }
 .lock strong { font-size: 14px; }
 .lock span { font-size: 12px; color: var(--ink-2); }
 .lock svg { flex: none; color: var(--forest-700); }
-.rule-box { flex: 1 1 100%; }
-.rule-box summary { cursor: pointer; font-size: 14px; font-weight: 600; color: var(--forest-700); min-height: 44px; display: inline-flex; align-items: center; }
-.rule-body { margin-top: 6px; padding: 16px; background: var(--paper); border: 1px solid var(--stone); display: flex; flex-direction: column; gap: 12px; font-size: 14px; }
+/* 이름 옆 [규칙 보기]: 누르면 줄 아래에 규칙 상자가 전체 폭으로 펼쳐진다 */
+.rule-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 10px; border: 1px solid var(--sage-200); background: var(--white); color: var(--forest-700); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.rule-toggle:hover { border-color: var(--sage-600); background: var(--sage-50); }
+.rule-toggle[aria-expanded="true"] { border-color: var(--sage-600); background: var(--sage-50); }
+.rule-toggle .chev { width: 0; height: 0; border-left: 5px solid currentColor; border-top: 4px solid transparent; border-bottom: 4px solid transparent; transition: transform 0.15s; }
+.rule-toggle[aria-expanded="true"] .chev { transform: rotate(90deg); }
+.prow > .rule-body { flex: 1 1 100%; min-width: 0; }
+.rule-body { padding: 16px; background: var(--paper); border: 1px solid var(--stone); display: flex; flex-direction: column; gap: 12px; font-size: 14px; }
 .rule-ex { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
 .rule-ex code { padding: 2px 8px; background: var(--white); border: 1px solid var(--sage-200); }
 .rule-pat { display: flex; flex-direction: column; gap: 4px; }
@@ -306,15 +311,23 @@ td.t-reason { color: var(--forest-500); }
 .mmain { flex: 1 1 380px; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 .mtitle { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .mtitle .name { font-size: 17px; font-weight: 700; }
-.mtitle .vpath { font-size: 13px; padding: 0 6px; background: var(--paper); border: 1px solid var(--stone); }
-.mpath { font-family: var(--font-mono); font-size: 13px; color: var(--forest-500); word-break: break-all; }
-.mmeta { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: var(--ink-2); }
+/* 디스크 경로 · 에이전트가 읽는 경로 (이름표 + 값 두 줄) */
+/* 이름표 칸은 줄마다 같은 폭(보호만 남은 줄은 이름표가 하나뿐이어도 값이 같은 자리에서 시작) */
+.mpaths { margin: 0; display: grid; grid-template-columns: minmax(136px, max-content) minmax(0, 1fr); gap: 4px 16px; font-size: 13px; align-items: baseline; }
+.mpaths dt { color: var(--ink-2); }
+.mpaths dd { margin: 0; min-width: 0; }
+.mpaths dd.mono { color: var(--forest-500); word-break: break-all; }
+.mpaths code { color: var(--forest-900); word-break: break-all; }
+.mpaths .sep { color: var(--ink-2); margin: 0 4px; }
+.mmeta { font-size: 13px; color: var(--ink-2); }
 .mdesc { font-size: 14px; color: var(--ink-2); }
 .mrow .warn { flex: 1 1 100%; }
 .mrow .warn code { color: inherit; }
 .mside { flex: none; display: flex; align-items: center; gap: 12px; }
+.mempty { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 20px; background: var(--sage-50); }
+.mempty p { flex: 1 1 320px; font-size: 15px; }
+.mempty strong { font-weight: 700; }
 .ftag { display: inline-flex; align-items: center; min-height: 22px; padding: 0 8px; font-size: 12px; font-weight: 700; }
-.ftag-base { border: 1px solid var(--forest-700); color: var(--forest-700); }
 .ftag-on { background: var(--allow-bg); color: var(--allow-fg); }
 .ftag-kept { background: var(--ask-bg); color: var(--ask-fg); }
 .ftag-missing { background: var(--deny-bg); color: var(--deny-fg); }
@@ -341,10 +354,13 @@ td.t-reason { color: var(--forest-500); }
   .understood { padding: 18px 16px; }
   .prow { padding: 14px 16px; }
   .pvis { flex: 1 1 100%; }
+  .rule-body { padding: 12px; }
   .seg { flex-wrap: wrap; }
   .u-key { margin-left: 0; }
   .steps li { border-left: 0; border-top: 1px solid var(--stone); }
   .steps li:first-child { border-top: 0; }
   .mrow { padding: 14px 16px; }
   .mmain { flex-basis: 100%; }
+  .mpaths { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .mpaths dd + dt { margin-top: 6px; }
 }

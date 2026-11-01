@@ -2,9 +2,9 @@
 
 작업 폴더가 아닌 곳에서 띄운 Claude Code 세션도 원본을 직접 읽지 못하게 한다. 합치는 조각은
 gate.workspace.protection_settings다(작업 폴더 설정과 같은 막기 규칙).
-  - 원본·추가 폴더·정책 파일·폴더 목록(mounts.yaml)·작업 폴더 등록(workspaces.yaml)·정책 기록·감사 로그 폴더:
-    Read/Edit deny + 샌드박스 denyRead. 소켓 폴더: Edit deny.
-  - 추가 폴더(Phase 9)는 정책 파일 옆 mounts.yaml의 모든 항목이다(보호만 남은 것 포함). 목록 파일이 잘못되어 있으면 무엇을
+  - 연결한 폴더·정책 파일·폴더 목록(mounts.yaml)·작업 폴더 등록(workspaces.yaml)·정책 기록·감사 로그 폴더:
+    Read/Edit deny + 샌드박스 denyRead. 소켓 폴더: Edit deny. --source는 숨은 개발용 옵션이다(주면 그 폴더도 막는다).
+  - 연결한 폴더(Phase 9)는 정책 파일 옆 mounts.yaml의 모든 항목이다(보호만 남은 것 포함). 목록 파일이 잘못되어 있으면 무엇을
     막을지 모르므로 멈춘다. 폴더를 새로 연결한 뒤에는 다시 실행해야 그 폴더도 막힌다(빠진 항목만 덧붙인다).
     보호를 푼 폴더의 규칙은 다시 실행해도 빠지지 않는다(--undo로 되돌린 뒤 다시 설치).
   - 샌드박스: 켬, 시작 못 하면 Claude Code도 시작하지 않음, 샌드박스 밖 재실행 금지. Unix 소켓은 게이트 소켓만 연다.
@@ -251,8 +251,9 @@ def _ask(question: str) -> bool:
 
 
 def register(sub: argparse._SubParsersAction) -> None:
-    setup = sub.add_parser("setup", help="PLANT 설치: Claude Code 사용자 설정에 원본 보호(샌드박스 + 권한 규칙)를 합친다")
-    setup.add_argument("--source", help="원본 폴더 (--undo가 아니면 필요)")
+    setup = sub.add_parser("setup", help="PLANT 설치: Claude Code 사용자 설정에 연결한 폴더 보호(샌드박스 + 권한 규칙)를 합친다")
+    # 개발·시험용 숨은 옵션(하네스·테스트): 이 폴더도 막는다. 보통은 연결한 폴더(plant mount)만 막는다
+    setup.add_argument("--source", default=None, help=argparse.SUPPRESS)
     setup.add_argument("--policy", default=os.environ.get("GATE_POLICY"), help="정책 파일 (기본: $GATE_POLICY)")
     setup.add_argument("--audit", default=os.environ.get("GATE_AUDIT"), help="감사 로그 파일 (기본: $GATE_AUDIT)")
     setup.add_argument("--settings-file", default=None,
@@ -264,7 +265,7 @@ def register(sub: argparse._SubParsersAction) -> None:
 
 
 def _fragment(args: argparse.Namespace) -> dict:
-    missing = [name for name, value in (("--source", args.source), ("--socket(GATE_SOCKET)", args.socket),
+    missing = [name for name, value in (("--socket(GATE_SOCKET)", args.socket),
                                         ("--policy(GATE_POLICY)", args.policy), ("--audit(GATE_AUDIT)", args.audit))
                if not value]
     if missing:
@@ -309,6 +310,6 @@ def run(args: argparse.Namespace) -> int:
         print("바꾸지 않았습니다.")
         return 1
     print(f"{settings_file}: 적용했습니다." + (f" 원래 파일: {outcome.backup}" if outcome.backup else ""))
-    print("이제 Claude Code는 원본을 직접 읽지 못하고 PLANT로만 읽습니다. 이미 떠 있는 세션은 다시 띄우세요. "
-          "되돌리기: plant setup --undo")
+    print("이제 Claude Code는 연결한 폴더를 직접 읽지 못하고 PLANT로만 읽습니다. 이미 떠 있는 세션은 다시 띄우세요. "
+          "폴더를 새로 연결하면 plant setup을 다시 실행하세요. 되돌리기: plant setup --undo")
     return 0

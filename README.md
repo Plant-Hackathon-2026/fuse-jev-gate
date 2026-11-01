@@ -12,6 +12,7 @@
 - [구조](#구조)
 - [설치](#설치)
 - [빠른 시작](#빠른-시작)
+- [폴더 연결 (plant mount)](#폴더-연결-plant-mount)
 - [Claude Code 연결](#claude-code-연결)
 - [판단 모델 연결 (Laya)](#판단-모델-연결-laya)
 - [이름·주소 가리기 (NER)](#이름주소-가리기-ner)
@@ -27,7 +28,7 @@
 ## 구조
 
 ```
-[원본 폴더]  ← 에이전트 세션은 Claude Code 권한 규칙 + 샌드박스로 직접 못 읽음
+[연결한 폴더]  ← 에이전트 세션은 Claude Code 권한 규칙 + 샌드박스로 직접 못 읽음 (plant mount로 연결)
      ▲ 원본 읽기 (데몬은 샌드박스 밖, 내 계정 권한)
 [PLANT 데몬]  plant serve
      │  경로 규칙 → 인코딩 확인 → 정규식 탐지·가림 → IP·내부 주소 규칙 → NER 가림(기본 켜짐) → 판단 모델(캐시) → 정책 → 사람 승인 → 감사 로그
@@ -39,7 +40,7 @@
              plant audit  → 감사 로그       (에이전트는 셋 다 열 수 없음)
 ```
 
-에이전트는 `plant cat /상담/기록.txt`처럼 PLANT 안 경로로 요청합니다. 데몬은 원본 폴더 밖으로 나가는 경로(`..`, 심볼릭 링크)를 거부합니다. 오류는 `ENOENT`(없음), `EACCES`(차단), `EROFS`(쓰기)로 돌려줍니다.
+에이전트는 `plant cat /상담/기록.txt`처럼 PLANT 안 경로로 요청합니다. 경로의 첫 칸은 내가 연결한 폴더 이름입니다([폴더 연결](#폴더-연결-plant-mount)). **폴더를 하나도 연결하지 않으면 에이전트는 아무 문서도 읽을 수 없습니다**(`plant ls /`가 비어 있음). 데몬은 연결한 폴더 밖으로 나가는 경로(`..`, 심볼릭 링크)를 거부합니다. 오류는 `ENOENT`(없음), `EACCES`(차단), `EROFS`(쓰기)로 돌려줍니다.
 
 ### 판단 순서
 
@@ -73,17 +74,35 @@ cd fuse-jev-gate
 uv sync                    # .venv/bin/plant 가 생깁니다
 ```
 
+**모델 받기.** 판단 모델과 NER 모델은 팀원이 허깅페이스에 올려 두었습니다. 둘 다 공개 저장소라 로그인 없이 받습니다. 모델 없이 Mock으로만 해 볼 때는 건너뜁니다.
+
+| 모델 | 허깅페이스 | 크기 | 라이선스 | 쓰는 곳 |
+|---|---|---|---|---|
+| 판단 모델 Laya v3 | [hae8hae8/laya-pii-ko-v3](https://huggingface.co/hae8hae8/laya-pii-ko-v3) | 약 680MB | Apache-2.0 | [판단 모델 연결 (Laya)](#판단-모델-연결-laya) |
+| NER (xlm-roberta-large) | [hae8hae8/xlmr-pii-ner](https://huggingface.co/hae8hae8/xlmr-pii-ner) | 약 2.3GB | MIT | [이름·주소 가리기 (NER)](#이름주소-가리기-ner) |
+
+```bash
+mkdir -p ~/models
+uvx --from huggingface_hub hf download hae8hae8/laya-pii-ko-v3 --include "laya-pii-ko-v3/*" --local-dir ~/models
+uvx --from huggingface_hub hf download hae8hae8/xlmr-pii-ner --include "xlmr-pii-ner/*" --local-dir ~/models
+```
+
+받고 나면 체크포인트 폴더는 `~/models/laya-pii-ko-v3`와 `~/models/xlmr-pii-ner`입니다. 아래 예시는 이 경로를 씁니다. 모델은 저장소와 에이전트 작업 폴더 밖에 둡니다.
+
 데이터는 저장소와 에이전트 작업 폴더 **밖에** 둡니다. 에이전트가 쓸 수 있는 폴더 안에 두면 폴더 이름을 바꾸는 식으로 경로 기준 차단을 피할 수 있기 때문입니다. 이 저장소에서는 다음 배치를 썼습니다.
 
 ```
 gate-data/
-├── source/            원본 폴더 (에이전트가 읽을 문서)
 ├── policy.yaml        내 정책 (plant policy가 만듦, 없으면 기본값)
 ├── policy-history/    정책 되돌리기 기록
+├── mounts.yaml        연결한 폴더 목록 (plant mount나 설정 화면이 만듦)
+├── workspaces.yaml    등록한 에이전트 작업 폴더 (plant workspace init이 만듦)
 ├── run/               gate.sock, approve.sock
 ├── audit/             audit.jsonl, audit.key
 └── agent-workspace/   에이전트 전용 작업 폴더 (plant workspace init이 만듦)
 ```
+
+에이전트에게 보여 줄 문서 폴더는 원래 있던 자리(예: `~/Documents/가계부`)에 그대로 두고 PLANT에 연결합니다([폴더 연결](#폴더-연결-plant-mount)).
 
 경로는 환경변수로 넘깁니다. `plant` 명령마다 같은 값을 씁니다.
 
@@ -98,48 +117,84 @@ export GATE_SOCKET=$DATA/run/gate.sock GATE_POLICY=$DATA/policy.yaml GATE_AUDIT=
 
 저장소의 합성 샘플(`samples/`)로 PLANT를 직접 돌려 봅니다. 아래 결과는 실제로 돌려서 확인했습니다(판단 모델 Mock, NER 끔, 그 밖은 기본 정책).
 
+PLANT는 **내가 연결한 폴더만** 에이전트에게 보여 줍니다. 데몬을 띄운 뒤 `plant mount add <폴더>`나 [설정 화면](#설정-화면-plant-ui)의 [폴더 추가]로 폴더를 연결합니다. 연결하지 않으면 에이전트는 아무 문서도 읽을 수 없습니다.
+
 NER은 기본으로 켜져 있어서, NER 서버(`nerserve`)가 없으면 데몬이 모든 내용 읽기를 막습니다(`plant cat`마다 `NER 판단에 실패해 차단했습니다: NER 서버에 연결하지 못했습니다`). NER까지 보려면 [이름·주소 가리기 (NER)](#이름주소-가리기-ner)대로 nerserve를 **데몬보다 먼저** 띄웁니다. 모델 없이 해 보려면 아래처럼 데몬을 띄우기 전에 NER을 끕니다(정책을 느슨하게 하는 바꿈이라 한 번 더 묻습니다. `y`로 답합니다).
 
 **터미널 1: 데몬 띄우기**
 
 ```bash
 export DATA=$HOME/plant-demo
-mkdir -p $DATA/source
-cp -R samples/medical_note $DATA/source/
-printf 'DB_PASSWORD=hunter2\n' > $DATA/source/.env
-printf '동네 도서관 휴관 안내\n이번 주 토요일은 휴관합니다.\n문의: 010-1234-5678\n' > $DATA/source/안내문.txt
+mkdir -p $DATA/samples                              # 에이전트에게 보여 줄 문서 폴더(예시)
+cp -R samples/medical_note $DATA/samples/
+printf 'DB_PASSWORD=hunter2\n' > $DATA/samples/.env
+printf '동네 도서관 휴관 안내\n이번 주 토요일은 휴관합니다.\n문의: 010-1234-5678\n' > $DATA/samples/안내문.txt
 
 export GATE_SOCKET=$DATA/run/gate.sock GATE_POLICY=$DATA/policy.yaml GATE_AUDIT=$DATA/audit/audit.jsonl
 .venv/bin/plant policy set ner_backend none         # 모델 없이 해 볼 때만. nerserve를 띄웠으면 이 줄은 뺀다
-.venv/bin/plant serve --source $DATA/source         # 맥 대화상자 없이 터미널로만 답하려면 --no-dialog
+.venv/bin/plant serve                               # 맥 대화상자 없이 터미널로만 답하려면 --no-dialog
 ```
 
-데몬은 요청마다 stderr에 한 줄씩 남깁니다.
+데몬은 아직 연결한 폴더가 없다고 알리고, 그 뒤로는 요청마다 stderr에 한 줄씩 남깁니다.
 
-**터미널 2: 에이전트처럼 읽기** (같은 환경변수, `plant`는 `.venv/bin/plant`)
+```
+plant: /Users/me/plant-demo/run/gate.sock 에서 대기 중
+plant: 아직 연결한 폴더가 없습니다. 지금은 에이전트가 아무 문서도 읽을 수 없습니다.
+plant: 폴더를 연결하려면 설정 화면(plant ui)이나 터미널에서 plant mount add <폴더>를 실행하세요. 연결하면 다시 띄우지 않아도 다음 요청부터 보입니다 (폴더 목록 /Users/me/plant-demo/mounts.yaml)
+...
+```
+
+**터미널 2: 폴더 연결하기** (같은 환경변수, `plant`는 `.venv/bin/plant`)
+
+```console
+$ plant ls /                                     # 아직 연결한 폴더가 없어 비어 있음
+
+$ plant cat /samples/medical_note/none_1.txt     # 연결하기 전에는 없는 파일
+plant: /samples/medical_note/none_1.txt: No such file or directory (ENOENT)
+
+$ plant mount add $DATA/samples                  # 폴더 연결. 내 터미널에서만 되고, y/N을 두 번 묻습니다
+이 폴더를 PLANT에 연결해요:
+  PLANT 안 경로: /samples
+  실제 경로: /Users/me/plant-demo/samples · 파일 11개
+  주의: 등록된 작업 폴더가 없어요. 어느 작업 폴더에서도 이 폴더 직접 읽기가 막히지 않아요.
+연결하면 에이전트가 PLANT를 거쳐 이 폴더 문서를 읽을 수 있어요(정책대로 가리거나 물어봐요). 동시에 작업 폴더 설정에서 이 폴더를 직접 열지 못하게 막아요.
+연결할까요? [y/N] y
+에이전트에게 보이는 문서가 늘어나요. 정말 연결할까요? [y/N] y
+연결했어요: /samples. 실행 중인 PLANT는 다음 요청부터 이 폴더를 보여 줘요(다시 띄우지 않아도 돼요).
+  등록된 작업 폴더가 없어 어느 작업 폴더에서도 이 폴더 직접 읽기가 막히지 않았어요. `plant workspace init`으로 작업 폴더를 만드세요.
+```
+
+데몬은 다시 띄우지 않아도 됩니다. 작업 폴더 주의는 아직 [Claude Code 연결](#claude-code-연결)을 하지 않아서 나옵니다. 나중에 작업 폴더를 만들면 연결한 폴더도 함께 막습니다.
+
+**에이전트처럼 읽기** (터미널 2)
 
 ```console
 $ plant ls /
+samples/
+
+$ plant ls /samples
 .env
 medical_note/
 안내문.txt
 
-$ plant cat /medical_note/none_1.txt             # 허용: 개인정보가 없는 운영 메모
+$ plant cat /samples/medical_note/none_1.txt     # 허용: 개인정보가 없는 운영 메모
 [외래 운영 메모] 내과 외래 / 2026-01-15
 ...
 
-$ plant cat /medical_note/pii_1.txt              # 차단: 판단 모델이 매우 민감하다고 판단
-plant: /medical_note/pii_1.txt: 판단 모델 결과(highly_sensitive, 확신도 0.97)에 따라 차단했습니다 (EACCES)
+$ plant cat /samples/medical_note/pii_1.txt      # 차단: 판단 모델이 매우 민감하다고 판단
+plant: /samples/medical_note/pii_1.txt: 판단 모델 결과(highly_sensitive, 확신도 0.97)에 따라 차단했습니다 (EACCES)
 
-$ plant cat /.env                                # 차단: 경로 규칙
-plant: /.env: 경로 규칙에 따라 차단했습니다 (EACCES)
+$ plant cat /samples/.env                        # 차단: 경로 규칙
+plant: /samples/.env: 경로 규칙에 따라 차단했습니다 (EACCES)
 
-$ plant search 진료 /medical_note                 # 통과한 파일에서만 찾고, 막힌 파일은 건너뜀
-plant: 건너뜀 /medical_note/pii_1.txt: 판단 모델 결과(highly_sensitive, 확신도 0.97)에 따라 차단했습니다 (EACCES)
+$ plant search 진료 /samples/medical_note         # 통과한 파일에서만 찾고, 막힌 파일은 건너뜀
+/samples/medical_note/none_1.txt:6:- 대기 시간이 길다는 민원이 늘어, 다음 달부터 오전 진료를 8시 30분으로 앞당기는 안을 검토 중.
+/samples/medical_note/none_2.txt:1:[진료 참고 메모] 성인 고혈압 첫 진료 때 확인할 것 (내부 교육용)
 ...
-/medical_note/none_2.txt:1:[진료 참고 메모] 성인 고혈압 첫 진료 때 확인할 것 (내부 교육용)
+plant: 건너뜀 /samples/medical_note/pii_1.txt: 판단 모델 결과(highly_sensitive, 확신도 0.97)에 따라 차단했습니다 (EACCES)
+...
 
-$ plant cat /안내문.txt                           # 사람 승인: 답할 때까지 기다림
+$ plant cat /samples/안내문.txt                   # 사람 승인: 답할 때까지 기다림
 ```
 
 **사람 승인하기.** 맥이면 대화상자가 뜹니다(거부·이번만 허용·이 폴더 허용). 터미널 3에서 답해도 됩니다.
@@ -147,7 +202,7 @@ $ plant cat /안내문.txt                           # 사람 승인: 답할 때
 ```console
 $ plant approve                                  # 기다리는 요청 목록
 기다리는 승인 요청 1건
-  [6e5a98] /안내문.txt  (남은 시간 28초)
+  [6e5a98] /samples/안내문.txt  (남은 시간 28초)
      이유: 판단 모델 결과(sensitive, 확신도 0.80)가 확실하지 않습니다
   ...
 $ plant approve 6e5a98                           # 이번만 허용 (--folder면 그 폴더 60분)
@@ -166,38 +221,57 @@ plant: 개인정보 일부를 같은 길이의 *로 가렸습니다 (휴대폰 �
 
 ```console
 $ plant audit --blocked
-2026-10-31 17:34:39  cat     차단       /medical_note/pii_1.txt  — 판단 모델 결과(highly_sensitive, 확신도 0.97)에 따라 차단했습니다 · 찾음: 주민등록번호 1건, 휴대폰 번호 1건 · ...
-2026-10-31 17:34:40  cat     차단       /.env  — 경로 규칙에 따라 차단했습니다 · python3.12 pid 25259
-기록 6건 중 조건에 맞는 2건 · 차단 2
+2026-11-01 12:37:41  cat     차단       /samples/medical_note/pii_1.txt  — 판단 모델 결과(highly_sensitive, 확신도 0.97)에 따라 차단했습니다 · 찾음: 주민등록번호 1건, 휴대폰 번호 1건 · ...
+2026-11-01 12:37:41  cat     차단       /samples/.env  — 경로 규칙에 따라 차단했습니다 · python3.12 pid 8625
+기록 9건 중 조건에 맞는 2건 · 차단 2
 ```
 
-지금 판단 모델은 Mock이라 결과가 키워드 규칙으로 나옵니다. 그래서 번호가 든 문서는 대부분 승인이나 차단으로 끝나고, 가린 내용은 승인한 뒤에 보입니다. 데몬은 `Ctrl-C`로 끕니다. NER을 다시 켜려면 `plant policy set ner_backend server`입니다.
+지금 판단 모델은 Mock이라 결과가 키워드 규칙으로 나옵니다. 그래서 번호가 든 문서는 대부분 승인이나 차단으로 끝나고, 가린 내용은 승인한 뒤에 보입니다. 데몬은 `Ctrl-C`로 끕니다. NER을 다시 켜려면 `plant policy set ner_backend server`, 연결을 빼려면 `plant mount remove samples`입니다.
+
+## 폴더 연결 (plant mount)
+
+PLANT는 내가 연결한 폴더만 에이전트에게 보여 줍니다. 연결한 폴더는 `/<폴더 이름>/`으로 보이고(이름이 겹치면 뒤에 ` 2`, ` 3`을 붙임), 그 안의 문서에는 경로 규칙·가림·사람 승인·감사 로그가 그대로 걸립니다. **폴더를 하나도 연결하지 않으면 에이전트는 아무 문서도 읽을 수 없습니다.** 목록은 정책 파일 옆 `mounts.yaml`이고, 실행 중인 데몬은 다음 요청부터 바뀐 목록을 씁니다(다시 띄우지 않아도 됨).
+
+```bash
+plant mount list                     # 연결한 폴더, 실제 경로, 상태, 작업 폴더 설정에 반영됐는지
+plant mount add ~/Documents/가계부     # 연결 (y/N을 두 번 묻습니다)
+plant mount remove 가계부             # PLANT에서 빼기 (직접 열기 막기는 남김: "보호만 남음")
+plant mount unprotect 가계부          # 보호도 풀기 (느슨해지는 바꿈이라 한 번 더 묻습니다)
+```
+
+- [설정 화면](#설정-화면-plant-ui)의 "원본 폴더"에서도 같은 일을 합니다. [폴더 추가]를 누르면 맥 폴더 선택 창이 뜹니다.
+- 바꾸는 명령은 사람이 자기 터미널에서만 실행할 수 있습니다. 에이전트의 Bash처럼 터미널이 아닌 곳에서는 거부합니다.
+- 연결하면 등록된 에이전트 작업 폴더(`plant workspace init`)의 설정도 자동으로 다시 써서, 에이전트가 그 폴더를 직접 열지 못하게 막습니다. 이미 켜 둔 에이전트 세션은 다시 시작합니다. 전역 설치(`plant setup`)를 썼다면 `plant setup`을 다시 실행합니다.
+- 연결할 수 없는 폴더: 디스크 전체와 시스템 폴더, 에이전트 작업 폴더(와 그것을 감싸는 폴더, 예: 홈 폴더 전체), PLANT 데이터(정책·감사 로그·소켓 폴더 등), PLANT 프로그램 폴더(이 저장소·`.venv`), `~/.claude`, 이미 연결한 폴더와 겹치는 폴더. 최대 20개입니다(보호만 남은 폴더 포함).
+- 정책 파일(`GATE_POLICY` 또는 `--policy`) 없이 띄운 데몬은 목록을 읽지 않아 아무것도 보여 주지 않습니다.
 
 ## Claude Code 연결
 
-PLANT만 띄우면 에이전트는 여전히 원본 폴더를 직접 열 수 있습니다. Claude Code 설정으로 원본 쪽을 막아야 PLANT가 유일한 통로가 됩니다. 방법은 두 가지입니다.
+PLANT만 띄우면 에이전트는 여전히 연결한 폴더를 직접 열 수 있습니다. Claude Code 설정으로 그 폴더를 막아야 PLANT가 유일한 통로가 됩니다. 방법은 두 가지입니다.
 
 ### 1. 에이전트 전용 작업 폴더 (`plant workspace init`)
 
 ```bash
-plant workspace init $DATA/agent-workspace --source $DATA/source
+plant workspace init $DATA/agent-workspace
 cd $DATA/agent-workspace && claude
 ```
 
 - [설치](#설치)의 환경변수 세 개(소켓·정책·감사 로그 경로)가 있어야 합니다. 막을 경로를 정확히 적기 위해서입니다.
 - 폴더에 `.claude/settings.json`(권한 규칙 + 샌드박스)과 `CLAUDE.md`(에이전트에게 `plant` 쓰는 법 안내)를 만듭니다. 내용이 다른 파일이 있으면 멈추고, `--force`로 덮어씁니다. 설정은 손으로 고치지 말고 다시 만듭니다.
+- 연결한 폴더(`mounts.yaml`의 모든 폴더)와 PLANT 데이터를 막습니다. 만든 작업 폴더는 `workspaces.yaml`에 등록되어, 나중에 폴더를 연결하거나 보호를 풀면 PLANT가 이 설정을 자동으로 다시 씁니다. 폴더를 아직 연결하지 않았으면 연결하라고 알려 줍니다.
 - 이 폴더에서 띄운 세션에만 적용됩니다. **하위 폴더에서 띄우면 적용되지 않습니다.** 세션 안에서 `/sandbox`로 샌드박스가 켜졌는지 볼 수 있습니다.
 - 만들어지는 설정의 예: [`sandbox/agent-settings.json`](sandbox/agent-settings.json) (경로는 `/path/to/...`로 바꿔 둠)
 
 ### 2. 설치: 모든 세션에 적용 (`plant setup`)
 
 ```bash
-plant setup --source $DATA/source          # 바뀔 내용을 보여 주고 y/N으로 확인
-plant setup --undo                         # 설치 기록대로 되돌리기
-plant setup --source $DATA/source --print  # 합칠 설정 조각(JSON)만 출력. MDM 관리 설정으로 배포할 때
+plant setup                 # 바뀔 내용을 보여 주고 y/N으로 확인
+plant setup --undo          # 설치 기록대로 되돌리기
+plant setup --print         # 합칠 설정 조각(JSON)만 출력. MDM 관리 설정으로 배포할 때
 ```
 
 - 사용자 설정(`~/.claude/settings.json`)에 같은 막기 규칙을 합칩니다. 원래 파일은 백업하고, 다시 실행해도 결과가 같습니다. `--settings-file`로 대상 파일을 바꿀 수 있습니다.
+- 실행할 때 연결해 둔 폴더를 막습니다. 전역 설정은 자동으로 다시 쓰지 않으므로, 폴더를 새로 연결하면 `plant setup`을 다시 실행합니다.
 - **이 맥의 모든 Claude Code 세션에서 샌드박스가 켜집니다.** 다른 작업(예: Docker를 쓰는 개발)에 영향이 있을 수 있으니, 시험할 때는 `--settings-file 시험.json`으로 만든 뒤 `claude --settings 시험.json`으로 넣어 보세요.
 - 실제 배포는 같은 조각을 MDM 관리 설정으로 내려보낸다고 가정합니다. 관리 설정은 사용자·프로젝트 설정이 덮어쓰지 못합니다.
 
@@ -205,7 +279,7 @@ plant setup --source $DATA/source --print  # 합칠 설정 조각(JSON)만 출�
 
 | 대상 | 방법 |
 |---|---|
-| 원본 폴더, 정책 파일, 정책 기록, 감사 로그(키 포함) | 내장 도구 `Read`·`Edit` 거부 규칙 + 샌드박스 `denyRead` (Bash의 `cat`·`grep -r`·Python 스크립트도 막힘) |
+| 연결한 폴더(보호만 남은 폴더 포함), 정책 파일, 폴더 목록·작업 폴더 등록 파일, 정책 기록, 감사 로그(키 포함) | 내장 도구 `Read`·`Edit` 거부 규칙 + 샌드박스 `denyRead` (Bash의 `cat`·`grep -r`·Python 스크립트도 막힘) |
 | 소켓 폴더 | `Edit` 거부 + 샌드박스 쓰기 제한 (가짜 데몬 띄우기 막기) |
 | 승인 소켓 | 샌드박스 `allowUnixSockets`에 `gate.sock`만 넣음 (에이전트가 스스로 승인하지 못함) |
 | 샌드박스 끄기 | `failIfUnavailable: true`, `allowUnsandboxedCommands: false` |
@@ -213,25 +287,25 @@ plant setup --source $DATA/source --print  # 합칠 설정 조각(JSON)만 출�
 
 ## 판단 모델 연결 (Laya)
 
-기본 판단 모델은 시험용 Mock입니다. 실제 모델로는 팀원이 파인튜닝한 [Laya](https://huggingface.co/convaiinnovations/laya)(Apache-2.0) 체크포인트를 씁니다. Laya는 로컬 서버 `laya-serve`로 띄우고, PLANT 데몬이 그 서버에 묻습니다. 문서는 이 컴퓨터 밖으로 나가지 않습니다.
+기본 판단 모델은 시험용 Mock입니다. 실제 모델로는 [Laya](https://huggingface.co/convaiinnovations/laya)(Apache-2.0)를 팀원이 파인튜닝한 체크포인트 [laya-pii-ko-v3](https://huggingface.co/hae8hae8/laya-pii-ko-v3)를 씁니다. Laya는 로컬 서버 `laya-serve`로 띄우고, PLANT 데몬이 그 서버에 묻습니다. 문서는 이 컴퓨터 밖으로 나가지 않습니다.
 
 1. **laya-serve 설치** (저장소 밖, 약 740MB):
    ```bash
    mkdir -p ~/laya-serve && cd ~/laya-serve
    uv venv --python 3.12 .venv && VIRTUAL_ENV=$PWD/.venv uv pip install "laya[serve]==0.4.18"
    ```
-2. **체크포인트 폴더**를 저장소 밖에 둡니다. 지금 쓰는 것은 팀원 재학습판 v3(`laya-pii-ko-v3`, 약 650MB, 예: `/경로/models/laya-v3`)입니다. 폴더째 씁니다(`model.safetensors`, `questions.json`, `rl_agent_config.json`, `encoder/`, `tokenizer/`).
+2. **체크포인트 받기.** 지금 쓰는 것은 팀원 재학습판 v3([`hae8hae8/laya-pii-ko-v3`](https://huggingface.co/hae8hae8/laya-pii-ko-v3), 약 680MB)입니다. [설치](#설치)의 모델 받기대로 받으면 `~/models/laya-pii-ko-v3`에 생깁니다. 폴더째 씁니다(`model.safetensors`, `questions.json`, `rl_agent_config.json`, `encoder/`, `tokenizer/`).
 3. **laya-serve 실행.** `LAYA_HOST`를 빼면 0.0.0.0(다른 컴퓨터에서도 접속 가능)으로 열리고, `LAYA_MODELS`를 빼면 공식 체크포인트를 모두 내려받습니다. 둘 다 꼭 지정합니다.
    ```bash
    LAYA_HOST=127.0.0.1 LAYA_PORT=8000 \
    LAYA_MODELS=gate-laya LAYA_DEFAULT_MODEL=gate-laya \
-   LAYA_EXTRA_MODELS='{"gate-laya": "/경로/models/laya-v3"}' \
+   LAYA_EXTRA_MODELS='{"gate-laya": "'$HOME'/models/laya-pii-ko-v3"}' \
    HF_HUB_OFFLINE=1 USE_TF=0 ~/laya-serve/.venv/bin/laya-serve
    ```
 4. **데몬에 주소를 알려 주고 백엔드를 바꿉니다.**
    ```bash
-   export JEV_BASE_URL=http://127.0.0.1:8000 JEV_MODEL=gate-laya JEV_MODEL_DIR=/경로/models/laya-v3
-   plant serve --source $DATA/source           # 위 환경변수를 넘겨 띄운다
+   export JEV_BASE_URL=http://127.0.0.1:8000 JEV_MODEL=gate-laya JEV_MODEL_DIR=$HOME/models/laya-pii-ko-v3
+   plant serve                                 # 위 환경변수를 넘겨 띄운다
    plant policy set jev_backend laya            # 내 터미널에서. 되돌리기: plant policy set jev_backend mock
    ```
    NER도 기본으로 켜져 있으므로 데몬을 띄우기 전에 nerserve도 띄웁니다([이름·주소 가리기 (NER)](#이름주소-가리기-ner)).
@@ -252,7 +326,7 @@ plant setup --source $DATA/source --print  # 합칠 설정 조각(JSON)만 출�
 
 ## 이름·주소 가리기 (NER)
 
-정규식은 형식이 있는 번호만 찾습니다. 이름·연락처·소속 같은 말은 팀원이 학습한 NER 모델(재학습판 `xlmr-pii-ner`, xlm-roberta-large, 라벨 6종)로 찾습니다. NER도 Laya처럼 이 컴퓨터 안의 별도 서버(`nerserve`, 이 저장소에 있음)로 띄우고, 데몬은 그 서버에 묻습니다. 데몬에는 torch가 들어가지 않습니다.
+정규식은 형식이 있는 번호만 찾습니다. 이름·연락처·소속 같은 말은 팀원이 학습한 NER 모델(재학습판 [`xlmr-pii-ner`](https://huggingface.co/hae8hae8/xlmr-pii-ner), xlm-roberta-large, 라벨 6종)로 찾습니다. NER도 Laya처럼 이 컴퓨터 안의 별도 서버(`nerserve`, 이 저장소에 있음)로 띄우고, 데몬은 그 서버에 묻습니다. 데몬에는 torch가 들어가지 않습니다.
 
 **NER은 기본으로 켜져 있습니다**(`ner_backend: server`). NER 서버가 응답하지 않으면 안전을 위해 모든 내용 읽기를 막습니다(목록·`stat`은 됨). 그래서 **PLANT 데몬보다 nerserve를 먼저 띄웁니다.** `plant serve`도 시작할 때 이 점을 알려 줍니다. 모델 없이 쓰려면 내 터미널에서 끕니다.
 
@@ -262,16 +336,16 @@ plant policy set ner_backend server   # 다시 켜기
 ```
 
 1. **실행 환경.** torch와 transformers가 필요합니다. 위 laya-serve의 `.venv`에 둘 다 있으므로 그대로 씁니다(설치할 것 없음).
-2. **체크포인트 폴더**(팀원이 공유한 재학습판, 약 2.2GB, 예: `/경로/models/ner-xlmr-pii`)를 저장소 밖에 둡니다. 예전 32종 모델(`models/ner`)은 쓰지 않습니다. 라벨이 달라서 그 모델을 띄우면 모든 읽기가 막힙니다.
+2. **체크포인트 받기.** 팀원 재학습판([`hae8hae8/xlmr-pii-ner`](https://huggingface.co/hae8hae8/xlmr-pii-ner), 약 2.3GB)을 [설치](#설치)의 모델 받기대로 받으면 `~/models/xlmr-pii-ner`에 생깁니다. 예전 32종 모델(`models/ner`)은 쓰지 않습니다. 라벨이 달라서 그 모델을 띄우면 모든 읽기가 막힙니다.
 3. **nerserve 실행** (저장소 루트에서. 127.0.0.1에만 열립니다. 모델을 불러오는 데 시간이 걸립니다):
    ```bash
-   ~/laya-serve/.venv/bin/python -m nerserve --model-dir /경로/models/ner-xlmr-pii --port 8001
+   ~/laya-serve/.venv/bin/python -m nerserve --model-dir ~/models/xlmr-pii-ner --port 8001
    curl -s http://127.0.0.1:8001/health      # "status": "ok"와 labels 6종이 나오면 준비됨
    ```
 4. **데몬 띄우기.** 데몬은 `NER_BASE_URL`(없으면 `http://127.0.0.1:8001`)에 묻습니다. 다른 포트로 띄웠을 때만 정합니다.
    ```bash
    export NER_BASE_URL=http://127.0.0.1:8001   # 기본값과 같으면 생략
-   plant serve --source $DATA/source
+   plant serve
    ```
 
 **찾는 것과 가림 표시.** 서버가 준 라벨을 PLANT가 원문을 보고 나눕니다.
@@ -338,7 +412,7 @@ plant policy undo                                  # 직전 변경 되돌리기 
 
 ## 설정 화면 (plant ui)
 
-터미널 명령 대신 브라우저 화면에서 정책을 보고 바꾸고, 감사 기록을 볼 수 있습니다. 내 터미널에서 실행합니다.
+터미널 명령 대신 브라우저 화면에서 정책을 보고 바꾸고, 폴더를 연결하고, 감사 기록을 볼 수 있습니다. 내 터미널에서 실행합니다.
 
 ```bash
 plant --socket $DATA/run/gate.sock ui --policy $DATA/policy.yaml --audit $DATA/audit/audit.jsonl
@@ -346,7 +420,8 @@ plant --socket $DATA/run/gate.sock ui --policy $DATA/policy.yaml --audit $DATA/a
 # 브라우저를 열지 않고 주소만 보려면 --no-browser, 포트를 정하려면 --port 8765 (기본은 빈 포트)
 ```
 
-- **설정**: 연결 상태(PLANT·판단 모델·NER), 문장으로 정책 바꾸기("이렇게 이해했어요"를 보고 저장), 지금 정책에서 바로 고르기(번호·비밀값 8가지는 줄마다 "찾는 규칙 보기"로 실제 정규식을 볼 수 있음, 이름·주소 같은 정보 9가지. 그중 IP·내부 주소는 규칙으로 찾아 NER을 꺼도 적용), 내가 정한 문장 지우기·되돌리기.
+- **원본 폴더**: 연결한 폴더 목록(폴더마다 디스크 경로와 에이전트가 읽는 경로 `/<이름>`), [폴더 추가](맥 폴더 선택 창에서 고름), [빼기]·[보호도 풀기]. `plant mount`와 같은 코드라 같은 목록 파일을 씁니다. 연결한 폴더가 없으면 에이전트가 아무 문서도 읽을 수 없다고 알려 줍니다.
+- **설정**: 연결 상태(PLANT·판단 모델·NER), 문장으로 정책 바꾸기("이렇게 이해했어요"를 보고 저장), 지금 정책에서 바로 고르기(번호·비밀값 8가지는 이름 옆 [규칙 보기]를 누르면 줄 아래에 실제 정규식이 펼쳐짐, 이름·주소 같은 정보 9가지. 그중 IP·내부 주소는 규칙으로 찾아 NER을 꺼도 적용), 내가 정한 문장 지우기·되돌리기.
 - **감사 기록**: 결과별 건수, 기간·결과·파일 이름으로 거르기.
 - 정책 쓰기는 `plant policy`와 같은 코드라 같은 파일·되돌리기 기록을 남깁니다. 느슨해지는 바꿈은 한 번 더 확인합니다.
 - NER은 기본으로 켜져 있어서, NER 서버가 응답하지 않으면 화면 위에 "모든 파일 읽기를 막고 있어요" 안내가 뜹니다. 화면에는 [끄기]가 없습니다(끄려면 `plant policy set ner_backend none`). [켜기]는 NER 서버가 응답할 때만 누를 수 있습니다(서버를 띄우는 방법은 화면에 안내). 화면은 서버를 띄우지 않습니다.
@@ -398,18 +473,17 @@ $ plant audit --json               # 고른 기록을 JSONL 그대로 (스크립
 ```bash
 uv run python -m sandbox.bypass --out 보고서.md                                        # 작업 폴더 설정 (default 모드)
 uv run python -m sandbox.bypass --mode auto --only W2,W8,W9,W10,W11 --out 보고서.md     # 쓰기 도구 (auto 모드)
-plant setup --source $DATA/source --settings-file 시험.json --yes                      # 전역 설정 시험 파일
-uv run python -m sandbox.bypass --settings 시험.json --workspace $DATA/plain-project --only … --out 보고서.md
+uv run python -m sandbox.bypass --settings 시험.json --workspace $DATA/plain-project --only … --out 보고서.md   # 전역 설정
 ```
 
-전역 설정 시험의 `--workspace`는 프로젝트 설정(`.claude/`)이 없는 빈 폴더여야 합니다. 시험 범위(뺀 시도)는 계획 문서 5절 "6-3 결과"를 봅니다.
+하네스가 시험하는 원본 폴더와 작업 폴더·전역 설정 시험 파일(`시험.json`)을 만드는 법은 [`sandbox/bypass.py`](sandbox/bypass.py) 맨 위 설명에 있습니다. 전역 설정 시험의 `--workspace`는 프로젝트 설정(`.claude/`)이 없는 빈 폴더여야 합니다. 시험 범위(뺀 시도)는 계획 문서 5절 "6-3 결과"를 봅니다.
 
 종료 코드는 0(모두 막힘), 1(뚫림 또는 대조군 실패), 2(판정 불가 있음), 3(시작 전 확인 실패)입니다. 두 개를 동시에 돌리지 않습니다.
 
 ## 테스트
 
 ```bash
-uv run pytest                     # 맥: 1917 통과, 1 skip(FUSE), 약 40초 (사람 승인 시간 초과를 실제로 기다림)
+uv run pytest                     # 맥: 1933 통과, 1 skip(FUSE), 약 40초 (사람 승인 시간 초과를 실제로 기다림)
 
 docker build -f sandbox/gate.Dockerfile -t fuse-jev-gate .
 docker run --rm --device /dev/fuse --cap-add SYS_ADMIN fuse-jev-gate pytest -q    # Linux (FUSE 포함): 맥 통과 수 + FUSE 1개
@@ -431,6 +505,7 @@ uv run python -m eval.run_e2e [--keep] [--only mask,approve]   # 실제 모델 e
 - **IP·내부 주소 규칙은 글자 모양만 봅니다.** 네 칸 버전 번호(`2.0.1.4`)는 IP로 가리고, 내부 단어가 없는 사내 도메인(`git.mycompany.com`)은 놓칩니다.
 - **정책 문장 해석기는 키워드 규칙(Mock)입니다.** 실제 모델(Laya v3)에 zero-shot으로 물어보는 해석기도 만들었지만, v3는 이 질문들을 배우지 않아 쓸 수 없었습니다(모든 문장을 "모름"으로 답함). 키워드 규칙은 평가 세트에서 잘못 저장하는 경우가 드물지만, 표현이 달라지면 알아듣지 못하고 다시 말해 달라고 합니다.
 - **맥락 규칙은 아직 효과가 없습니다.** "병원 기록은 보여주지 마" 같은 문장은 Mock도 Laya도 읽지 않습니다(Laya는 고정 질문 하나만 배웠습니다).
+- **연결하지 않은 폴더는 지키지 않습니다.** PLANT로는 보이지 않지만, 에이전트가 Bash·`Read`로 직접 여는 것까지 막지는 않습니다(샌드박스는 막으라고 적은 폴더만 막음). 지킬 문서가 든 폴더는 PLANT에 연결합니다.
 - **Claude Code 세션만 막습니다.** 다른 에이전트나 프로그램은 원본을 그대로 읽습니다. 모두 막으려면 원본을 별도 계정 소유로 두거나 암호화하는 OS 수준 분리가 필요합니다(다음 확장 후보).
 - **샌드박스 우회는 다루지 않습니다.** 설정 파일 바꾸기, bypass 모드, 샌드박스 밖에서 도는 훅은 MDM 관리 설정으로 막는다고 가정합니다. 관리 설정 없이 사용자 설정만 쓰면 프로젝트 설정이 샌드박스를 풀 수 있습니다.
 - MCP 도구와 세션 간 메시지 도구는 막지 않습니다. MCP 서버는 샌드박스 밖에서 돌아서, 화면 제어나 브라우저 자동화 같은 로컬 MCP가 있으면 원본을 열 수 있습니다.
@@ -438,7 +513,7 @@ uv run python -m eval.run_e2e [--keep] [--only mask,approve]   # 실제 모델 e
 - 정규식은 형식이 정해진 값만 찾습니다. 한글로 쓴 숫자, 키워드 없는 계좌번호, YAML 블록 값이나 목록에 없는 형식의 비밀값은 놓칩니다.
 - 인코딩은 UTF-8·UTF-16·EUC-KR(CP949)만 알아봅니다. 다른 인코딩(UTF-32, Latin-1, Shift-JIS 등), 여러 인코딩이 섞인 파일, ASCII 글자(띄어쓰기·줄바꿈·숫자)가 하나도 없는 UTF-16 파일, 한자가 대부분인 EUC-KR 파일은 차단합니다. 바이너리 파일은 내용을 검사하지 않고 사람에게 묻습니다. 0 바이트가 없고 UTF-8로 읽히는 바이너리는 글로 보고 예전처럼 검사합니다.
 - 사람이 미리 만들어 둔 하드링크나 디스크 다른 곳의 사본은 지키지 못합니다(에이전트가 하드링크를 만드는 것은 막힘).
-- 원본 폴더가 있는지(`stat`)는 샌드박스 안에서도 보입니다. 목록과 내용은 막힙니다.
+- 연결한 폴더가 있는지(`stat`)는 샌드박스 안에서도 보입니다. 목록과 내용은 막힙니다.
 - WebFetch의 `file://`은 우리 설정이 아니라 Claude Code의 사람 확인이나 auto 분류기가 막습니다.
 - 폴더 승인은 데몬 메모리에만 있고, 요청 프로그램 단위라 에이전트 세션을 구분하지 않습니다.
 
@@ -449,7 +524,9 @@ uv run python -m eval.run_e2e [--keep] [--only mask,approve]   # 실제 모델 e
 ```
 gate/
   daemon.py, client.py, protocol.py, peer.py   소켓 서버·클라이언트, 요청자 확인
-  store.py, paths.py                           원본 저장소, PLANT 안 경로 → 실제 경로(탈출 차단)
+  store.py, paths.py                           원본 저장소(빈 `/`·폴더), PLANT 안 경로 → 실제 경로(탈출 차단)
+  mounts.py, mount_change.py, mount_cli.py     연결한 폴더(목록·검사·데몬 저장소), 연결 계산·쓰기, plant mount
+  folder_picker.py                             설정 화면의 맥 폴더 선택 창
   pipeline.py, cache.py                        판단 순서, search, 캐시
   detectors.py                                 정규식 탐지와 같은 길이 가림
   host_rules.py                                IP·내부 주소 규칙

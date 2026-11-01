@@ -944,3 +944,19 @@ def test_product_name_is_plant_in_header_title_and_terminal(make_ui):
     ui._announce(u.server, u.server.app.config, True, out, first=True)
     first = out.getvalue().splitlines()[0]
     assert first.startswith("plant ui: PLANT 설정 화면 http://127.0.0.1:") and "PLANT 소켓" in out.getvalue()
+
+
+def test_rule_toggle_sits_next_to_the_name():
+    """번호·비밀값 줄의 [규칙 보기]는 이름 칸에 있는 단추이고(aria-expanded·aria-controls), 규칙은 줄 아래 전체 폭으로
+    펼쳐진다(사용자 결정, 2026-11-01). 예전의 마지막 칸 <details>("찾는 규칙 보기")는 없다."""
+    files = {p.name: p.read_text(encoding="utf-8") for p in ui.static_files() if p.suffix in (".js", ".css")}
+    js, css = files["app.js"], files["app.css"]
+    row = js.split("function numberRow(row)", 1)[1].split("\n  }\n", 1)[0]
+    assert 'h("div", { class: "pname" }, h("span", { class: "name", text: row.name }), ruleToggle(row, body)' in row
+    assert "details" not in row and "찾는 규칙 보기" not in js and "rule-box" not in js + css
+    toggle = js.split("function ruleToggle(row, body)", 1)[1].split("\n  }\n", 1)[0]
+    for needle in ('type: "button"', '"aria-expanded"', '"aria-controls": body.id', '"규칙 보기"', "body.hidden = !now",
+                   'class: "sr-only", text: row.name + " 찾는 "'):
+        assert needle in toggle, needle
+    assert '"rule-" + row.kind' in row and "이름 옆 [규칙 보기]를 누르면" in js
+    assert ".prow > .rule-body { flex: 1 1 100%;" in css and ".rule-toggle" in css

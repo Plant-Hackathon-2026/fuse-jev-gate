@@ -7,8 +7,8 @@
 막는 것
   | 대상                                          | Read | Edit | 이유                                        |
   |-----------------------------------------------|------|------|---------------------------------------------|
-  | 원본 폴더                                      | deny | deny | 게이트를 거치지 않는 읽기                     |
-  | 추가 폴더(mounts.yaml의 모든 항목, Phase 9)       | deny | deny | 게이트를 거치지 않는 읽기. 보호만 남은 것·지금 없는 폴더도 |
+  | 연결한 폴더(mounts.yaml의 모든 항목, Phase 9)     | deny | deny | 게이트를 거치지 않는 읽기. 보호만 남은 것·지금 없는 폴더도 |
+  | 기본 폴더(숨은 개발용 --source를 줬을 때만)        | deny | deny | 게이트를 거치지 않는 읽기                     |
   | 정책 파일, 정책 기록 폴더                        | deny | deny | 정책 바꾸기·undo로 바꿔 넣기                  |
   | 폴더 목록·작업 폴더 등록(mounts.yaml·workspaces.yaml) | deny | deny | 목록을 바꿔 다른 폴더를 열게 하기          |
   | 감사 로그 폴더(audit.key 포함)                   | deny | deny | 키가 새면 파일 해시로 원문을 맞혀 볼 수 있다   |
@@ -31,7 +31,9 @@
 
 이미 있는 파일은 내용이 같으면 그대로 두고, 다르면 --force 없이는 덮어쓰지 않는다.
 
-추가 폴더(Phase 9, plans/mount-ui-plan.md 4.3)
+연결한 폴더(Phase 9, plans/mount-ui-plan.md 4.3·11절)
+  - --source는 숨은 개발용 옵션이다(2026-11-01 기본 폴더 없앰). 주지 않으면 연결한 폴더와 PLANT 데이터만 막는다.
+    폴더를 나중에 연결하면 gate.mount_change가 등록된 작업 폴더 설정을 다시 쓴다.
   - 정책 파일 옆 mounts.yaml(있으면)의 모든 항목을 막는다(with_listed_mounts). 목록 파일이 잘못되어 있으면 무엇을 막을지
     모르므로 만들지 않는다. 정책 파일 자체가 심볼릭 링크면 받지 않는다(목록·기록 파일을 찾는 폴더와 막는 폴더가 달라진다).
   - 만든 작업 폴더를 정책 파일 옆 workspaces.yaml에 등록한다(같은 경로면 갱신). 설정을 만든 경로와 설정 파일의 SHA-256을
@@ -76,7 +78,7 @@ class WorkspaceError(Exception):
 class GatePaths:
     """작업 폴더 설정에 들어가는 실제 경로. 모두 resolve한 절대 경로다."""
 
-    source: Path
+    source: Path | None   # 기본 폴더(숨은 개발용 --source). 보통 None
     socket: Path
     policy: Path
     audit: Path      # 감사 로그 파일. 그 폴더(audit.key 포함) 전체를 막는다
@@ -109,7 +111,8 @@ class GatePaths:
 
     def protected(self) -> list[Path]:
         """읽기·쓰기를 모두 막는 경로."""
-        return list(_unique([self.source, *self.mounts, self.policy, self.mounts_file, self.workspaces_file,
+        base = [self.source] if self.source is not None else []
+        return list(_unique([*base, *self.mounts, self.policy, self.mounts_file, self.workspaces_file,
                              self.policy_history, self.audit_dir]))
 
 
@@ -122,18 +125,20 @@ def _check_pattern(p: Path) -> None:
         raise WorkspaceError(f"경로에 *, ?, [, ] 가 있으면 규칙에서 패턴으로 읽혀 지원하지 않습니다: {p}")
 
 
-def resolve_paths(source: str | os.PathLike, socket: str | os.PathLike, policy: str | os.PathLike,
+def resolve_paths(source: str | os.PathLike | None, socket: str | os.PathLike, policy: str | os.PathLike,
                   audit: str | os.PathLike, gate_bin: str | os.PathLike,
                   mounts: Iterable[str | os.PathLike] = ()) -> GatePaths:
-    """모든 경로를 resolve한다. 원본 폴더는 있어야 하고, 추가 폴더(mounts)는 없어도 된다(외장 디스크를 뺀 때 등)."""
+    """모든 경로를 resolve한다. source(숨은 개발용 --source, 보통 None)는 주면 있어야 하고, 연결한 폴더(mounts)는
+    없어도 된다(외장 디스크를 뺀 때 등)."""
     if Path(policy).expanduser().is_symlink():
         raise WorkspaceError(f"정책 파일이 심볼릭 링크면 지원하지 않습니다(폴더 목록·기록 파일 위치가 어긋납니다): {policy}")
-    base = [disk_path(p) for p in (source, socket, policy, audit, gate_bin)]
-    paths = GatePaths(*base, mounts=_unique(disk_path(p) for p in mounts))
-    for p in (*base, *paths.mounts):
+    base = [disk_path(p) for p in (socket, policy, audit, gate_bin)]
+    root = disk_path(source) if source is not None else None
+    paths = GatePaths(root, *base, mounts=_unique(disk_path(p) for p in mounts))
+    for p in (*([root] if root is not None else []), *base, *paths.mounts):
         _check_pattern(p)
-    if not paths.source.is_dir():
-        raise WorkspaceError(f"원본 폴더가 없습니다: {paths.source}")
+    if root is not None and not root.is_dir():
+        raise WorkspaceError(f"원본 폴더가 없습니다: {root}")
     return paths
 
 
@@ -154,7 +159,7 @@ def _rule_path(path: Path) -> str:
 
 
 def protection_settings(paths: GatePaths) -> dict:
-    """원본·추가 폴더·정책·목록·등록·기록·감사 로그를 막는 설정(권한 규칙 + 샌드박스 + env).
+    """연결한 폴더(와 숨은 --source)·정책·목록·등록·기록·감사 로그를 막는 설정(권한 규칙 + 샌드박스 + env).
     설치 명령(gate.claude_setup)도 이것을 쓴다."""
     deny = []
     files = paths.protected_files()
@@ -200,7 +205,8 @@ def agent_guide(paths: GatePaths) -> str:
 - 읽기: `{gate} cat <경로> --purpose "읽는 목적"`
 - 찾기: `{gate} search <글자> [경로] [-i]`
 
-- 경로는 `/`로 시작하는 PLANT 안 경로입니다.
+- 경로는 `/`로 시작하는 PLANT 안 경로입니다. 사용자가 PLANT에 연결한 폴더가 `/폴더이름/`으로 보입니다.
+- `{gate} ls /`가 비어 있으면 사용자가 아직 폴더를 연결하지 않은 것입니다. 다른 방법으로 찾지 말고 사용자에게 폴더를 연결해 달라고 알리세요.
 - 개인정보와 비밀값은 가려져 나옵니다. 번호·비밀값은 같은 길이의 `*`(예: `***-****-****`)로, 이름·주소·소속·장소·IP 등은 `[이름]`·`[주소]`·`[IP]` 같은 표시로 바뀝니다. 둘 다 원래 값이 아닙니다.
 - 사용자 승인이 필요한 파일은 사용자가 답할 때까지 잠시 기다립니다.
 - `EACCES`는 정책상 읽을 수 없다는 뜻입니다. 다른 방법으로 읽으려 하지 말고 사용자에게 알리세요.
@@ -239,6 +245,8 @@ def init_workspace(workspace: str | os.PathLike, paths: GatePaths, *, force: boo
     paths = with_listed_mounts(paths)
     check_workspace(root, paths)
     for p in (root, paths.source, paths.socket, paths.policy, paths.audit, paths.gate_bin):
+        if p is None:  # 기본 폴더 없음(보통)
+            continue
         problem = path_problem(str(p))
         if problem is not None:  # 등록 파일에 적을 수 없는 경로면 아무것도 쓰기 전에 멈춘다
             raise WorkspaceError(f"작업 폴더 등록에 쓸 수 없는 경로입니다({problem}): {p!r}")
@@ -259,7 +267,8 @@ def register_workspace(root: Path, paths: GatePaths, settings: str,
     """workspaces.yaml에 작업 폴더를 적는다(같은 경로면 그 자리에서 갱신). settings는 방금 쓴 설정 파일 내용."""
     if records is None:
         records = read_workspaces(paths.workspaces_file)
-    record = WorkspaceRecord(path=str(root), source=str(paths.source), socket=str(paths.socket),
+    record = WorkspaceRecord(path=str(root), source=str(paths.source) if paths.source is not None else None,
+                             socket=str(paths.socket),
                              policy=str(paths.policy), audit=str(paths.audit), gate_bin=str(paths.gate_bin),
                              settings_sha256=sha256_text(settings), registered_at=now_iso())
     key = path_key(root)
@@ -268,6 +277,14 @@ def register_workspace(root: Path, paths: GatePaths, settings: str,
         updated.append(record)
     write_workspaces(paths.workspaces_file, updated)
     return record
+
+
+def _listed(paths: GatePaths) -> bool:
+    """정책 파일 옆 mounts.yaml에 연결된 폴더가 있는가(읽지 못하면 False)."""
+    try:
+        return any(e.connected for e in read_mounts(paths.mounts_file))
+    except MountsFileError:
+        return False
 
 
 def _default_gate_bin() -> str | None:
@@ -291,7 +308,8 @@ def register(sub: argparse._SubParsersAction) -> None:
     ws_sub = ws.add_subparsers(dest="workspace_command", required=True)
     init = ws_sub.add_parser("init", help="작업 폴더에 .claude/settings.json과 CLAUDE.md를 만들고 등록한다")
     init.add_argument("folder", help="에이전트 작업 폴더 (없으면 만든다)")
-    init.add_argument("--source", required=True, help="원본 폴더")
+    # 개발·시험용 숨은 옵션(e2e·하네스·테스트): 이 폴더도 막는다. 보통은 연결한 폴더(plant mount)만 막는다
+    init.add_argument("--source", default=None, help=argparse.SUPPRESS)
     init.add_argument("--policy", default=os.environ.get("GATE_POLICY"), help="정책 파일 (기본: $GATE_POLICY)")
     init.add_argument("--audit", default=os.environ.get("GATE_AUDIT"), help="감사 로그 파일 (기본: $GATE_AUDIT)")
     init.add_argument("--plant-bin", dest="gate_bin", metavar="PLANT_BIN", default=None,
@@ -320,6 +338,9 @@ def run(args: argparse.Namespace) -> int:
     for path, state in written.items():
         print(f"{path}: {state}")
     print(f"{paths.workspaces_file}: 작업 폴더를 등록했습니다 (폴더를 연결하거나 보호를 풀면 이 작업 폴더 설정을 다시 씁니다)")
+    if paths.source is None and not _listed(paths):
+        print("아직 PLANT에 연결한 폴더가 없습니다. 에이전트가 읽을 폴더는 설정 화면(plant ui)이나 "
+              "plant mount add <폴더>로 연결하세요. 연결하면 이 작업 폴더 설정에도 막기가 들어갑니다.")
     folder = next(iter(written)).parent.parent
     print(f"이 폴더에서 Claude Code를 띄우세요: cd {folder} && claude\n"
           "하위 폴더에서 띄우면 이 설정이 적용되지 않습니다. 세션 안에서 /sandbox로 샌드박스가 켜졌는지 볼 수 있습니다.")
