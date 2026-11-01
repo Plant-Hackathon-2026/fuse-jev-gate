@@ -217,7 +217,7 @@ def test_name_collisions_get_a_number(env):
     ("gate-data/source/상담", "기본 폴더 안의"),
     ("home", "Claude 설정"),
     ("home/.claude", "Claude 설정 폴더"),
-    ("bin", "게이트 프로그램 폴더"),
+    ("bin", "PLANT 프로그램 폴더"),
     ("없는 폴더", "찾을 수 없어요"),
     ("docs/가계부/메모.txt", "폴더가 아니에요"),
 ])
@@ -272,7 +272,7 @@ def test_hand_edited_workspace_settings_block_add(env):
     before = snapshot(env.ctx.mounts_file, env.settings, env.ctx.workspaces_file)
     with pytest.raises(MountError) as exc:
         plan_add(env.ctx, env.book, added_by="terminal")
-    assert "손으로 바뀌어" in str(exc.value) and "gate workspace init --force" in str(exc.value)
+    assert "손으로 바뀌어" in str(exc.value) and "plant workspace init --force" in str(exc.value)
     assert snapshot(env.ctx.mounts_file, env.settings, env.ctx.workspaces_file) == before
 
 
@@ -441,13 +441,13 @@ def test_remove_errors(env):
         plan_remove(env.ctx, "가계부")
     add(env)
     apply(env.ctx, plan_remove(env.ctx, "가계부"))
-    with pytest.raises(MountError, match="이미 게이트에서 뺀"):
+    with pytest.raises(MountError, match="이미 PLANT에서 뺀"):
         plan_remove(env.ctx, "가계부")
 
 
 def test_unprotect_removes_the_entry_and_the_protection(env):
     add(env)
-    with pytest.raises(MountError, match="먼저 게이트에서 뺀"):
+    with pytest.raises(MountError, match="먼저 PLANT에서 뺀"):
         plan_unprotect(env.ctx, "가계부")
     apply(env.ctx, plan_remove(env.ctx, "가계부"))
     change = plan_unprotect(env.ctx, "가계부")

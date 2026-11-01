@@ -217,12 +217,12 @@ def _global_setup() -> bool:
 
 def _mounts_problem(ctx: MountContext, exc: Exception) -> str:
     return (f"폴더 목록 파일({ctx.mounts_file})에 문제가 있어요: {exc}. "
-            "고칠 때까지 게이트는 내용 읽기를 모두 막아요. 파일을 고치거나 지우세요.")
+            "고칠 때까지 PLANT는 내용 읽기를 모두 막아요. 파일을 고치거나 지우세요.")
 
 
 def _records_problem(ctx: MountContext, exc: Exception) -> str:
     return (f"작업 폴더 등록 파일({ctx.workspaces_file})에 문제가 있어요: {exc}. "
-            "고칠 때까지 게이트는 내용 읽기를 모두 막아요. 파일을 고치거나 지운 뒤 `gate workspace init --force`로 다시 등록하세요.")
+            "고칠 때까지 PLANT는 내용 읽기를 모두 막아요. 파일을 고치거나 지운 뒤 `plant workspace init --force`로 다시 등록하세요.")
 
 
 def _load(ctx: MountContext) -> tuple[tuple[MountEntry, ...], tuple[WorkspaceRecord, ...]]:
@@ -416,7 +416,7 @@ class _Plan:
 def _find(entries: Sequence[MountEntry], name: object) -> MountEntry | None:
     if not isinstance(name, str):
         return None
-    if name.startswith("/") and "/" not in name[1:]:  # `gate mount remove /가계부`도 받는다
+    if name.startswith("/") and "/" not in name[1:]:  # `plant mount remove /가계부`도 받는다
         name = name[1:]
     key = name_key(name)
     return next((e for e in entries if name_key(e.name) == key), None)
@@ -431,7 +431,7 @@ def _refuse_edited(workspaces: Sequence[_Workspace], op: Op) -> None:
         if w.state == "edited":
             action, again = ("연결하지", "다시 연결하세요") if op == "add" else ("보호를 풀지", "다시 풀어 주세요")
             raise MountError(f"작업 폴더 설정이 손으로 바뀌어 있어 {action} 않았어요: {w.settings}. "
-                             f"`gate workspace init --force`로 다시 만든 뒤 {again}.")
+                             f"`plant workspace init --force`로 다시 만든 뒤 {again}.")
 
 
 def _counted(path: str, count: bool) -> tuple[int | None, bool]:
@@ -473,7 +473,7 @@ def _plan_add(ctx: MountContext, folder: str | Path, added_by: AddedBy, *, count
         name, path = choose_name(real.name, [*_base_names(records), *(e.name for e in entries)]), str(real)
         problem = name_problem(name)
         if problem is not None:
-            raise MountError(f"이 폴더 이름은 게이트 안 이름으로 쓸 수 없어요({problem}).")
+            raise MountError(f"이 폴더 이름은 PLANT 안 이름으로 쓸 수 없어요({problem}).")
         after = (*entries, MountEntry(name, path, stamp, added_by, True))
     workspaces = tuple(_inspect(r, after, entries) for r in records)
     _refuse_edited(workspaces, "add")
@@ -489,7 +489,7 @@ def _plan_remove(ctx: MountContext, name: str, *, count: bool = True) -> _Plan:
     if entry is None:
         raise _unknown_name(name)
     if not entry.connected:
-        raise MountError(f"'{entry.name}'은(는) 이미 게이트에서 뺀 폴더예요(보호만 남음).")
+        raise MountError(f"'{entry.name}'은(는) 이미 PLANT에서 뺀 폴더예요(보호만 남음).")
     after = tuple(replace(e, connected=False) if e is entry else e for e in entries)
     workspaces = tuple(_inspect(r, after, entries) for r in records)
     change = MountChange("remove", entry.name, entry.path, *_counted(entry.path, count), (), loosening=False)
@@ -502,7 +502,7 @@ def _plan_unprotect(ctx: MountContext, name: str, *, count: bool = True) -> _Pla
     if entry is None:
         raise _unknown_name(name)
     if entry.connected:
-        raise MountError(f"'{entry.name}'은(는) 게이트에 연결된 폴더예요. 먼저 게이트에서 뺀 뒤 보호를 풀 수 있어요.")
+        raise MountError(f"'{entry.name}'은(는) PLANT에 연결된 폴더예요. 먼저 PLANT에서 뺀 뒤 보호를 풀 수 있어요.")
     after = tuple(e for e in entries if e is not entry)
     workspaces = tuple(_inspect(r, after, entries) for r in records)
     _refuse_edited(workspaces, "unprotect")
@@ -665,7 +665,7 @@ def apply(ctx: MountContext, change: MountChange) -> MountResult:
             try:
                 _write_list(ctx, plan.after)
             except (OSError, MountsFileError) as exc:
-                raise MountError(f"게이트에서 빼지 못했어요: {_reason(exc)}") from exc
+                raise MountError(f"PLANT에서 빼지 못했어요: {_reason(exc)}") from exc
             rewritten = ()
         else:
             rewritten = _apply_unprotect(ctx, plan)

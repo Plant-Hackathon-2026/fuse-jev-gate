@@ -203,7 +203,7 @@ def test_launch_sets_strict_httponly_session_cookie(make_ui):
     session, cookie = u.launch_with_cookie()
     name, _, rest = cookie.partition("=")
     value, *flags = [part.strip() for part in rest.split(";")]
-    assert name == f"gate_ui_{u.port}"  # 포트마다 이름이 달라 다른 gate ui 실행과 섞이지 않는다
+    assert name == f"gate_ui_{u.port}"  # 포트마다 이름이 달라 다른 plant ui 실행과 섞이지 않는다
     assert value == session
     assert {f.lower() for f in flags} == {"httponly", "samesite=strict", "path=/"}  # 기한 없음: 브라우저 세션 동안만
 
@@ -927,11 +927,20 @@ def test_announce_prints_url_and_does_not_open_browser_with_no_browser(make_ui, 
     assert len(opened) == 1 and opened[0].startswith(u.origin)
 
 
-def test_product_name_lives_in_one_place(make_ui):
+def test_product_name_is_plant_in_header_title_and_terminal(make_ui):
+    """머리글·창 제목·거부 페이지·터미널 안내에는 "PLANT" 하나만 보인다(예전 "게이트 · PLANT")."""
+    assert ui.PRODUCT_NAME == "PLANT" and not hasattr(ui, "PRODUCT_TAG")
     files = {p.name: p.read_text(encoding="utf-8") for p in ui.static_files() if p.suffix in (".html", ".js", ".css")}
-    assert all("PLANT" not in text for text in files.values())  # 화면 파일에는 자리표시만 둔다
-    assert "__PRODUCT_NAME__" in files["index.html"] and "__PRODUCT_TAG__" in files["index.html"]
+    assert "<title>__PRODUCT_NAME__</title>" in files["index.html"]  # 머리글·창 제목은 서버가 채운다
+    assert all("brand-tag" not in text and "__PRODUCT_TAG__" not in text for text in files.values())
     u = make_ui()
     _, _, body = u.raw("GET", u.server.new_launch_url()[len(u.origin):], [("Host", u.host)])
     page = body.decode()
-    assert f"<title>{ui.PRODUCT_NAME} · {ui.PRODUCT_TAG}</title>" in page and "__PRODUCT" not in page
+    assert "<title>PLANT</title>" in page and '<span class="brand-name">PLANT</span></div>' in page
+    assert "__PRODUCT" not in page and "게이트" not in page
+    status, _, denied = u.raw("GET", "/", [("Host", u.host)])  # 열쇠도 쿠키도 없으면 거부 페이지
+    assert status == 403 and "<title>PLANT</title>" in denied.decode() and "<code>plant ui</code>" in denied.decode()
+    out = io.StringIO()
+    ui._announce(u.server, u.server.app.config, True, out, first=True)
+    first = out.getvalue().splitlines()[0]
+    assert first.startswith("plant ui: PLANT 설정 화면 http://127.0.0.1:") and "PLANT 소켓" in out.getvalue()

@@ -231,7 +231,7 @@ def test_rereading_does_not_call_jev_again(source, tmp_path):
     assert len(jev.calls) == 1
     assert (first.judgment.cached, second.judgment.cached) == (False, True)
     assert second.data == first.data
-    other_pid = Peer(pid=9999, uid=501, exe="/usr/local/bin/claude")  # gate cat은 부를 때마다 새 프로세스
+    other_pid = Peer(pid=9999, uid=501, exe="/usr/local/bin/claude")  # plant cat은 부를 때마다 새 프로세스
     assert inspector.inspect(other_pid, "/연락처.txt", "요약").judgment.cached
     assert len(jev.calls) == 1
 
@@ -691,7 +691,7 @@ def test_search_does_not_ask_and_says_how_to_get_approval(source, tmp_path):
     result = search(inspector, PEER, "/", "회의")
     assert result["matches"] == [] and channel.requests == []
     skipped = {s["path"]: s["message"] for s in result["skipped"]}
-    assert skipped["/진료/메모.txt"].endswith("search는 묻지 않습니다. gate cat으로 열면 사용자에게 묻습니다")
+    assert skipped["/진료/메모.txt"].endswith("search는 묻지 않습니다. plant cat으로 열면 사용자에게 묻습니다")
     inspector.inspect(PEER, "/진료/메모.txt")  # 이 폴더 허용
     after = search(inspector, PEER, "/", "회의")
     assert [m["path"] for m in after["matches"]] == ["/진료/메모.txt"]
@@ -703,4 +703,4 @@ def test_without_approvals_ask_human_is_blocked_as_before(source, tmp_path):
     assert (verdict.judgment.action, verdict.judgment.approval) == ("ask_human", None)
     assert Blocked(verdict.judgment).message == "사람 승인이 필요합니다 (판단 모델 결과(sensitive, 확신도 0.70)가 확실하지 않습니다)"
     skipped = search(inspector, PEER, "/회의.txt", "회의")["skipped"]
-    assert "gate cat" not in skipped[0]["message"]
+    assert "plant cat" not in skipped[0]["message"]

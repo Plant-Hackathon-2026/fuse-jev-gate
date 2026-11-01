@@ -60,9 +60,9 @@ from urllib.parse import parse_qs, urlsplit
 from gate.policy_change import POLICY_ENV
 from gate.ui_api import AUDIT_LIMIT, UiApp, UiConfig, UiError
 
-# 제품 이름은 여기 한 곳에만 둔다(머리글·창 제목·터미널 안내). 사용자 결정(2026-10-31): "게이트 · PLANT".
-PRODUCT_NAME = "게이트"
-PRODUCT_TAG = "PLANT"
+# 머리글·창 제목·거부 페이지·터미널 안내의 제품 이름. 사용자 결정(2026-11-01): "PLANT" 하나만 보인다
+# (예전 "게이트 · PLANT"). 화면 문구(app.js·index.html)와 터미널 문구는 "PLANT"를 직접 쓴다(조사는 모음 끝 기준).
+PRODUCT_NAME = "PLANT"
 
 HOST = "127.0.0.1"
 DEFAULT_PORT = 0
@@ -102,9 +102,9 @@ _DENIED_PAGE = """<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title}</title></head>
 <body><main><h1>이 주소로는 열 수 없어요</h1>
-<p>설정 화면은 <code>gate ui</code>가 열어 준 브라우저에서만 열려요. 다른 브라우저에서 열었거나 <code>gate ui</code>를 다시 실행했다면,
-<code>gate ui</code>를 실행한 터미널에서 Enter를 누르면 새 주소로 다시 열어요.</p>
-<p>터미널을 닫았다면 <code>gate ui</code>를 다시 실행해 주세요.</p></main></body></html>
+<p>설정 화면은 <code>plant ui</code>가 열어 준 브라우저에서만 열려요. 다른 브라우저에서 열었거나 <code>plant ui</code>를 다시 실행했다면,
+<code>plant ui</code>를 실행한 터미널에서 Enter를 누르면 새 주소로 다시 열어요.</p>
+<p>터미널을 닫았다면 <code>plant ui</code>를 다시 실행해 주세요.</p></main></body></html>
 """
 
 
@@ -162,7 +162,7 @@ class UiServer(ThreadingHTTPServer):
         return any(hmac.compare_digest(s, candidate) for s in sessions)
 
     def note(self, text: str) -> None:
-        print(f"gate ui: {text}", file=self.log, flush=True)
+        print(f"plant ui: {text}", file=self.log, flush=True)
 
 
 class _Reject(Exception):
@@ -235,7 +235,7 @@ class _Handler(BaseHTTPRequestHandler):
     def _check_token(self) -> None:
         tokens = self.headers.get_all(TOKEN_HEADER) or []
         if len(tokens) != 1 or not self.server.has_session(tokens[0]):
-            raise _Reject(403, "bad-token", "화면 토큰이 없거나 맞지 않아요. 터미널에서 gate ui로 연 창에서만 쓸 수 있어요.")
+            raise _Reject(403, "bad-token", "화면 토큰이 없거나 맞지 않아요. 터미널에서 plant ui로 연 창에서만 쓸 수 있어요.")
 
     def _check_origin(self) -> None:
         origins = self.headers.get_all("Origin") or []
@@ -254,14 +254,12 @@ class _Handler(BaseHTTPRequestHandler):
         else:  # 새로 고침·다시 열기: 이번 실행에서 준 쿠키가 있으면 같은 세션으로 다시 그린다
             session = self._cookie_session()
         if session is None:
-            body = _DENIED_PAGE.format(title=escape(f"{PRODUCT_NAME} · {PRODUCT_TAG}")).encode("utf-8")
+            body = _DENIED_PAGE.format(title=escape(PRODUCT_NAME)).encode("utf-8")
             self.server.note("요청을 거부했습니다 (bad-launch, GET)")
             self._send(403, body, "text/html; charset=utf-8")
             return
         page = self.server.files["index.html"].decode("utf-8")
-        page = (page.replace("__SESSION__", session)
-                .replace("__PRODUCT_NAME__", escape(PRODUCT_NAME))
-                .replace("__PRODUCT_TAG__", escape(PRODUCT_TAG)))
+        page = page.replace("__SESSION__", session).replace("__PRODUCT_NAME__", escape(PRODUCT_NAME))
         self._send(200, page.encode("utf-8"), "text/html; charset=utf-8", extra)
 
     def _cookie_session(self) -> str | None:
@@ -337,7 +335,7 @@ class _Handler(BaseHTTPRequestHandler):
         if name == "mounts/add":
             if "path" in body or "folder" in body:  # 화면으로는 폴더 선택 창에서 고른 폴더만 연결한다
                 raise _Reject(400, "path-not-accepted", "화면에서는 폴더 선택 창에서 고른 폴더만 연결할 수 있어요. "
-                                                       "경로로 연결하려면 터미널에서 gate mount add를 쓰세요.")
+                                                       "경로로 연결하려면 터미널에서 plant mount add를 쓰세요.")
             return app.add_mount(body.get("pick"), confirm)
         if name == "mounts/remove":
             return app.remove_mount(body.get("name"), confirm)
@@ -392,17 +390,17 @@ def run(args: argparse.Namespace, *, stdin: TextIO | None = None, out: TextIO | 
     stdin = sys.stdin if stdin is None else stdin
     out = sys.stdout if out is None else out
     if not args.policy:
-        print(f"gate ui: 정책 파일 경로를 --policy 또는 {POLICY_ENV} 환경변수로 지정하세요 "
+        print(f"plant ui: 정책 파일 경로를 --policy 또는 {POLICY_ENV} 환경변수로 지정하세요 "
               "(예: --policy <hackathon 폴더>/gate-data/policy.yaml).", file=sys.stderr)
         return 1
     if not 0 <= args.port <= 65535:
-        print("gate ui: --port는 0~65535예요.", file=sys.stderr)
+        print("plant ui: --port는 0~65535예요.", file=sys.stderr)
         return 1
     config = UiConfig.from_env(args.policy, args.audit, getattr(args, "socket", None))
     try:
         server = UiServer(UiApp(config), args.port)
     except OSError as exc:
-        print(f"gate ui: {HOST}:{args.port}에서 열 수 없습니다: {exc.strerror or exc}", file=sys.stderr)
+        print(f"plant ui: {HOST}:{args.port}에서 열 수 없습니다: {exc.strerror or exc}", file=sys.stderr)
         return 1
     thread = threading.Thread(target=server.serve_forever, name="gate-ui", daemon=True)
     thread.start()
@@ -421,7 +419,7 @@ def run(args: argparse.Namespace, *, stdin: TextIO | None = None, out: TextIO | 
         server.app.close()  # 떠 있는 폴더 선택 창을 닫는다
         server.shutdown()
         server.server_close()
-        print("gate ui: 설정 화면을 껐습니다.", file=out, flush=True)
+        print("plant ui: 설정 화면을 껐습니다.", file=out, flush=True)
     return 0
 
 
@@ -431,7 +429,7 @@ def _on_term(signum, frame) -> None:
 
 def _announce(server: UiServer, config: UiConfig, no_browser: bool, out: TextIO, *, first: bool) -> None:
     url = server.new_launch_url()
-    print(f"gate ui: {PRODUCT_NAME} · {PRODUCT_TAG} 설정 화면 {url}", file=out, flush=True)
+    print(f"plant ui: {PRODUCT_NAME} 설정 화면 {url}", file=out, flush=True)
     if first:
         lines = [
             "  이 주소는 한 번만 쓸 수 있어요. 한 번 열면 그 브라우저에서는 새로 고치거나 다시 열어도 돼요(이 터미널이 켜져 있는 동안).",
@@ -439,7 +437,7 @@ def _announce(server: UiServer, config: UiConfig, no_browser: bool, out: TextIO,
             "  주소는 이 터미널에만 보여요. 다른 사람이나 AI 에이전트에게 알려 주지 마세요. 끄려면 Ctrl-C.",
             f"  정책 파일: {config.policy}",
             f"  감사 로그: {config.audit or '지정 안 함 (--audit 또는 GATE_AUDIT)'}",
-            f"  게이트 소켓: {config.socket or '지정 안 함 (--socket 또는 GATE_SOCKET, 없으면 게이트 상태를 확인하지 못함)'}",
+            f"  PLANT 소켓: {config.socket or '지정 안 함 (--socket 또는 GATE_SOCKET, 없으면 PLANT 상태를 확인하지 못함)'}",
         ]
         print("\n".join(lines), file=out, flush=True)
     if not no_browser and not webbrowser.open(url):

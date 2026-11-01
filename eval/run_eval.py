@@ -477,7 +477,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m eval.run_eval", description="합성 한국어 샘플로 Jev 판단을 평가한다")
     parser.add_argument("--client", required=True, choices=available_backends(), help="Jev 백엔드 이름")
     parser.add_argument("--labels", type=Path, default=DEFAULT_LABELS, help="라벨 CSV (경로는 프로젝트 루트 기준)")
-    parser.add_argument("--policy", type=Path, help="정책 파일 (gate policy로 만든 것). 주지 않으면 기본 정책")
+    parser.add_argument("--policy", type=Path, help="정책 파일 (plant policy로 만든 것). 주지 않으면 기본 정책")
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS, help="Jev 호출 타임아웃(초)")
     parser.add_argument("--purpose", default=DEFAULT_PURPOSE, help="Jev 질문에 넣을 요청 목적")
     parser.add_argument("--details", action="store_true", help="샘플별 결과도 출력")

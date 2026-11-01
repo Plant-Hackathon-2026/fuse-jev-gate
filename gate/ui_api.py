@@ -590,7 +590,7 @@ class UiApp:
     def set_choice(self, key: object, value: object, confirm: object = None) -> dict:
         if not isinstance(key, str) or not _choosable(key):
             raise UiError(400, "bad-key", "화면에서는 번호·비밀값과 이름·주소 같은 정보의 처리만 고를 수 있어요. "
-                                          "다른 설정은 터미널에서 gate policy set으로 바꿔 주세요.")
+                                          "다른 설정은 터미널에서 plant policy set으로 바꿔 주세요.")
         if not isinstance(value, str):
             raise UiError(400, "bad-value", "고를 수 없는 값이에요.")
         with self._write:
@@ -757,9 +757,9 @@ class UiApp:
 MOUNT_NOTE_TEXT: dict[tuple[str | None, str], str] = {
     ("add", "restart_session"): "이미 켜 둔 에이전트 세션은 다시 시작해야 이 폴더를 직접 여는 것이 막혀요.",
     (None, "restart_session"): "이미 켜 둔 에이전트 세션은 다시 시작해야 바뀐 작업 폴더 설정을 따라요.",
-    (None, "rerun_setup"): "전역 설정에는 아직 반영되지 않았어요. 터미널에서 `gate setup`을 다시 실행하세요.",
+    (None, "rerun_setup"): "전역 설정에는 아직 반영되지 않았어요. 터미널에서 `plant setup`을 다시 실행하세요.",
     ("add", "no_workspace"): "등록된 작업 폴더가 없어 직접 열기를 막지 못했어요. "
-                             "`gate workspace init`으로 작업 폴더를 만든 뒤 쓰세요.",
+                             "`plant workspace init`으로 작업 폴더를 만든 뒤 쓰세요.",
     (None, "no_workspace"): "등록된 작업 폴더가 없어 작업 폴더 설정은 다시 쓰지 않았어요.",
 }
 
@@ -795,12 +795,12 @@ def mount_done_text(change, rewritten: int) -> str:
     name = change.name
     if change.op == "add":
         text = (f"“{name}” 폴더를 {'다시 ' if change.reconnect else ''}연결했어요. "
-                f"에이전트는 이제 게이트에서 {_vpath(name)} 아래로 이 폴더 문서를 읽어요.")
+                f"에이전트는 이제 PLANT에서 {_vpath(name)} 아래로 이 폴더 문서를 읽어요.")
         if rewritten:
             text += f" 작업 폴더 설정 {rewritten}곳에서 이 폴더를 직접 열지 못하게 막았어요."
         return text
     if change.op == "remove":
-        return (f"“{name}” 폴더를 게이트에서 뺐어요. 에이전트는 이 폴더 문서를 더는 게이트로 읽지 못해요. "
+        return (f"“{name}” 폴더를 PLANT에서 뺐어요. 에이전트는 이 폴더 문서를 더는 PLANT로 읽지 못해요. "
                 "직접 열기 막기는 남겨 뒀어요.")
     text = f"“{name}” 폴더의 보호를 풀었어요. 에이전트가 이 폴더를 다시 직접 읽을 수 있어요."
     if rewritten:
@@ -889,7 +889,7 @@ def audit_row(record: Mapping) -> dict | None:
     findings = record.get("findings")
     found = clean_text(kinds_text(findings)) if isinstance(findings, dict) and findings else ""
     if not reason and record.get("errno") == "EACCES":
-        reason = "게이트가 접근을 거부했어요(원본 밖 경로 등)"
+        reason = "PLANT가 접근을 거부했어요(원본 밖 경로 등)"
     approval = record.get("approval")
     return {
         "ts": record.get("ts") if isinstance(record.get("ts"), str) else None,

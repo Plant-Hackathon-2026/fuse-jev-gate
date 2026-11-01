@@ -138,7 +138,7 @@ def test_not_mac_is_unavailable(tmp_path):
     picker = MacFolderPicker(fake_osascript(tmp_path, "printf '/tmp/a/\\n'"), system=lambda: "Linux")
     with pytest.raises(PickerUnavailable) as info:
         picker.pick()
-    assert str(info.value) == UNAVAILABLE_MESSAGE and "gate mount add" in UNAVAILABLE_MESSAGE
+    assert str(info.value) == UNAVAILABLE_MESSAGE and "plant mount add" in UNAVAILABLE_MESSAGE
 
 
 def test_missing_osascript_is_unavailable(tmp_path):

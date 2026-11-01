@@ -376,9 +376,9 @@ def write_private(path: Path, data: bytes, mode: int = 0o600) -> None:
         raise
 
 
-_MOUNTS_HEADER = ("# gate 폴더 목록. `gate mount`나 설정 화면(gate ui)으로 바꾼다(직접 고치지 않아도 된다).\n"
-                  "# connected: false는 게이트에서 뺐지만 작업 폴더 설정의 직접 읽기 막기는 남은 폴더다.\n")
-_WORKSPACES_HEADER = ("# gate 작업 폴더 등록. `gate workspace init`이 적는다. 폴더를 연결·보호 해제하면\n"
+_MOUNTS_HEADER = ("# PLANT 폴더 목록. `plant mount`나 설정 화면(plant ui)으로 바꾼다(직접 고치지 않아도 된다).\n"
+                  "# connected: false는 PLANT에서 뺐지만 작업 폴더 설정의 직접 읽기 막기는 남은 폴더다.\n")
+_WORKSPACES_HEADER = ("# PLANT 작업 폴더 등록. `plant workspace init`이 적는다. 폴더를 연결·보호 해제하면\n"
                       "# 여기 적힌 작업 폴더의 .claude/settings.json을 지금 목록으로 다시 쓴다.\n")
 
 
@@ -531,17 +531,17 @@ def refusal(path: Path, guard: Guard, *, require_dir: bool = True) -> Refusal | 
     for what, p in guard.gate_data:
         rel = relation(path, p)
         if rel in ("same", "inside"):
-            return Refusal(f"게이트 데이터({what})는 연결할 수 없어요.", what)
+            return Refusal(f"PLANT 데이터({what})는 연결할 수 없어요.", what)
         if rel == "contains":
-            return Refusal(f"게이트 데이터({what})를 담은 폴더는 연결할 수 없어요. 게이트가 자기 설정을 내주게 돼요.", what)
+            return Refusal(f"PLANT 데이터({what})를 담은 폴더는 연결할 수 없어요. PLANT가 자기 설정을 내주게 돼요.", what)
     for p in guard.programs:
         rel = relation(path, p)
         if rel in ("same", "inside"):
-            return Refusal("게이트 프로그램 폴더는 연결할 수 없어요. 막으면 에이전트가 gate를 실행하지 못해요.",
-                           "게이트 프로그램 폴더")
+            return Refusal("PLANT 프로그램 폴더는 연결할 수 없어요. 막으면 에이전트가 plant를 실행하지 못해요.",
+                           "PLANT 프로그램 폴더")
         if rel == "contains":
-            return Refusal("게이트 프로그램 폴더를 담은 폴더는 연결할 수 없어요. 막으면 에이전트가 gate를 실행하지 못해요.",
-                           "게이트 프로그램 폴더")
+            return Refusal("PLANT 프로그램 폴더를 담은 폴더는 연결할 수 없어요. 막으면 에이전트가 plant를 실행하지 못해요.",
+                           "PLANT 프로그램 폴더")
     for p in guard.claude:
         rel = relation(path, p)
         if rel in ("same", "inside"):
@@ -551,9 +551,9 @@ def refusal(path: Path, guard: Guard, *, require_dir: bool = True) -> Refusal | 
     for base in guard.bases:
         rel = relation(path, base)
         if rel == "same":
-            return Refusal("기본 폴더는 이미 게이트에 연결되어 있어요.", "기본 폴더")
+            return Refusal("기본 폴더는 이미 PLANT에 연결되어 있어요.", "기본 폴더")
         if rel == "inside":
-            return Refusal("기본 폴더 안의 폴더는 이미 게이트로 보여요.", "기본 폴더")
+            return Refusal("기본 폴더 안의 폴더는 이미 PLANT로 보여요.", "기본 폴더")
         if rel == "contains":
             return Refusal("기본 폴더를 감싸는 폴더는 연결할 수 없어요. 연결이 겹쳐요.", "기본 폴더")
     for m in guard.mounts:
@@ -651,7 +651,7 @@ class MountsSource:
         if state.error is not None:
             warnings.append(f"폴더 목록 파일 오류. 고칠 때까지 내용 읽기를 모두 차단합니다: {state.error}")
         for entry, brief in state.excluded:
-            warnings.append(f"폴더 목록의 '{entry.name}'({entry.path})은(는) 게이트에 연결하지 않습니다 "
+            warnings.append(f"폴더 목록의 '{entry.name}'({entry.path})은(는) PLANT에 연결하지 않습니다 "
                             f"(연결할 수 없는 폴더: {brief})")
         if state.mounts:
             try:

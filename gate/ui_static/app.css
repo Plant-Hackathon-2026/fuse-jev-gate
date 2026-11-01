@@ -1,4 +1,4 @@
-/* 게이트 설정 화면. 색·모양은 plans/ui-plan.md 3절(팀 Plant 로고 기준). 외부 요청 없음: 글꼴은 이 서버가 준다.
+/* PLANT 설정 화면. 색·모양은 plans/ui-plan.md 3절(팀 Plant 로고 기준). 외부 요청 없음: 글꼴은 이 서버가 준다.
    글꼴: 영문·숫자 Outfit, 고정폭 JetBrains Mono (둘 다 OFL, fonts/OFL-*.txt). 한글은 시스템 글꼴. */
 
 @font-face { font-family: "Outfit"; font-style: normal; font-display: swap; font-weight: 400;
@@ -74,7 +74,6 @@ a:hover { color: var(--forest-900); }
 .brand img { display: block; width: 44px; height: 44px; }
 .brand-text { display: flex; flex-direction: column; line-height: 1.25; }
 .brand-name { font-size: 18px; font-weight: 700; }
-.brand-tag { font-size: 12px; font-weight: 600; letter-spacing: 0.08em; color: var(--ink-2); }
 .tabs { display: flex; gap: 4px; align-self: stretch; }
 .tabs a { display: flex; align-items: center; padding: 0 14px; min-height: 44px; font-weight: 500; color: var(--ink-2); text-decoration: none; border-bottom: 3px solid transparent; }
 .tabs a[aria-current="page"] { font-weight: 700; color: var(--forest-900); border-bottom-color: var(--forest-700); }

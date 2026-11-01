@@ -60,7 +60,7 @@ def test_path_sentence_gives_set_path_hint_without_saving():
     result = interpret("공개 폴더는 그냥 보여줘", keyword())
     assert result.outcome == "path"
     assert result.entry is None and not result.saveable
-    assert "gate policy set path" in result.message
+    assert "plant policy set path" in result.message
 
 
 def test_unknown_sentence_asks_again():

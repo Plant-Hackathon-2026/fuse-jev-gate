@@ -234,7 +234,7 @@ def test_write_then_read_round_trip(tmp_path):
     assert load_policy(path).version == policy.version
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
     text = path.read_text(encoding="utf-8")
-    assert text.startswith("# gate 정책 파일")
+    assert text.startswith("# PLANT 정책 파일")
     assert "카드번호 있는 파일은 거부" in text  # 한글을 그대로 쓴다
     assert not [p for p in path.parent.iterdir() if p.name.startswith(".policy-")]  # 임시 파일이 남지 않는다
 

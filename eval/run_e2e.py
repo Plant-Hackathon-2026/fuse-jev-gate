@@ -157,7 +157,7 @@ LABEL_SLOTS = {"[이름]": "name", "[주소]": "address", "[생년월일]": "bir
                "[내부 주소]": "host"}
 LABEL_RE = re.compile("|".join(re.escape(t) for t in sorted(set(MASK_TEXT.values()), key=len, reverse=True)))
 PENDING_LINE = re.compile(r"^\s*\[([^\]\s]+)\]\s+(\S+)\s+\(남은 시간", re.MULTILINE)
-SKIPPED_LINE = re.compile(r"^gate: 건너뜀 (\S+): (.*) \((\w+)\)$")
+SKIPPED_LINE = re.compile(r"^plant: 건너뜀 (\S+): (.*) \((\w+)\)$")
 UI_URL = re.compile(r"http://127\.0\.0\.1:(\d+)/\?launch=(\S+)")
 SESSION_META = re.compile(r'<meta name="gate-session" content="([^"]+)"')
 PROMPT = "[y/N]".encode("utf-8")
@@ -185,8 +185,8 @@ def _short(text: str, limit: int = 160) -> str:
 
 
 def _gate_lines(text: str) -> str:
-    """stderr에서 gate:로 시작하는 줄만 (실패 근거용)."""
-    return _short(" / ".join(line for line in text.splitlines() if line.startswith("gate")) or text)
+    """stderr에서 plant:로 시작하는 줄만 (실패 근거용)."""
+    return _short(" / ".join(line for line in text.splitlines() if line.startswith("plant")) or text)
 
 
 # --- 프로세스 ---
@@ -375,7 +375,7 @@ def preflight(settings: Settings, wait: float, gate_bin: list[str]) -> list[str]
     """시작 전 확인. 문제가 있으면 이유 목록(종료 코드 3)."""
     problems = []
     if not Path(gate_bin[0]).exists():
-        problems.append(f"gate 실행 파일이 없습니다: {gate_bin[0]} (uv sync)")
+        problems.append(f"plant 실행 파일이 없습니다: {gate_bin[0]} (uv sync)")
     if not settings.jev_model_dir:
         problems.append("JEV_MODEL_DIR이 없고 저장소 위 폴더에서 models/laya-v3도 찾지 못했습니다")
     elif not (Path(settings.jev_model_dir) / "questions.json").is_file():
@@ -486,13 +486,13 @@ class E2E:
             r = subprocess.run(self.cmd(*args), env=dict(env or self.env), stdin=subprocess.DEVNULL,
                                capture_output=True, timeout=timeout)
         except subprocess.TimeoutExpired as exc:
-            raise Fail(f"gate {' '.join(args)}가 {timeout:g}초 안에 끝나지 않음") from exc
+            raise Fail(f"plant {' '.join(args)}가 {timeout:g}초 안에 끝나지 않음") from exc
         return Done(r.returncode, r.stdout.decode("utf-8", "replace"), r.stderr.decode("utf-8", "replace"))
 
     def human(self, *args: str, answers: Sequence[str] = ()) -> PtyDone:
         """사람 역할: 의사 터미널에서 돌린다."""
         done = run_pty(self.cmd(*args), self.env, answers)
-        check(done.code is not None, f"gate {' '.join(args)}가 끝나지 않음: {_short(done.out)}")
+        check(done.code is not None, f"plant {' '.join(args)}가 끝나지 않음: {_short(done.out)}")
         return done
 
     def start(self, *args: str, env: Mapping[str, str] | None = None, log: Path | None = None) -> subprocess.Popen:
@@ -545,7 +545,7 @@ class E2E:
         try:
             while proc.poll() is None:
                 if time.monotonic() > deadline:
-                    raise Fail(f"gate cat {vpath}가 {COMMAND_TIMEOUT:g}초 안에 끝나지 않음")
+                    raise Fail(f"plant cat {vpath}가 {COMMAND_TIMEOUT:g}초 안에 끝나지 않음")
                 if flow_pending is None:
                     listed = self.gate("approve", env=env)
                     found = [m.group(1) for m in PENDING_LINE.finditer(listed.out) if m.group(2) == vpath]
@@ -577,7 +577,7 @@ class E2E:
     def audit_records(self, audit: Path | None = None) -> list[dict]:
         args = ["audit", "--json", "-n", "0"] + (["--audit", str(audit)] if audit else [])
         r = self.gate(*args)
-        check(r.code == 0, f"gate audit --json 실패: {_gate_lines(r.err)}")
+        check(r.code == 0, f"plant audit --json 실패: {_gate_lines(r.err)}")
         return [json.loads(line) for line in r.out.splitlines() if line.strip()]
 
     # 정책
@@ -661,16 +661,16 @@ def match_records(expected: Sequence[dict], records: Sequence[dict]) -> tuple[in
 
 def s_ls(e: E2E) -> str:
     r = e.gate("ls", "/")
-    check(r.code == 0, f"gate ls / 종료 코드 {r.code}: {_gate_lines(r.err)}")
+    check(r.code == 0, f"plant ls / 종료 코드 {r.code}: {_gate_lines(r.err)}")
     names = {line for line in r.out.splitlines() if line}
     want = {".env", "consult_chat/", "medical_note/", "서버설정.txt", "안내문.txt"}
     check(want <= names, f"목록 기대 {sorted(want)}, 없음 {sorted(want - names)}")
     e.expected["main"].append({"op": "ls", "path": "/", "decision": "ok"})
     sub = e.gate("ls", "/medical_note")
-    check(sub.code == 0 and len(sub.out.split()) == 6, f"gate ls /medical_note 기대 6개, 실제 {sub.out.split()}")
+    check(sub.code == 0 and len(sub.out.split()) == 6, f"plant ls /medical_note 기대 6개, 실제 {sub.out.split()}")
     e.expected["main"].append({"op": "ls", "path": "/medical_note", "decision": "ok"})
     st = e.gate("stat", CACHE_DOC)
-    check(st.code == 0, f"gate stat 종료 코드 {st.code}: {_gate_lines(st.err)}")
+    check(st.code == 0, f"plant stat 종료 코드 {st.code}: {_gate_lines(st.err)}")
     info = json.loads(st.out)
     size = len(e.original(CACHE_DOC))
     check(info.get("type") == "file" and info.get("size") == size, f"stat 기대 file·{size}바이트, 실제 {info}")
@@ -755,10 +755,10 @@ def s_path(e: E2E) -> str:
 def s_approve(e: E2E) -> str:
     f = e.read(APPROVE_DOC, on_pending="approve")
     check(f.pending_id, f"기대 사람 승인, 실제 바로 끝남(종료 코드 {f.code}) {_gate_lines(f.err)}")
-    check("이유:" in f.listing, f"gate approve 목록에 이유 없음: {_short(f.listing)}")
-    check(f.notty_refused, "터미널 없이 gate approve <id>가 거부되지 않음")
+    check("이유:" in f.listing, f"plant approve 목록에 이유 없음: {_short(f.listing)}")
+    check(f.notty_refused, "터미널 없이 plant approve <id>가 거부되지 않음")
     check(f.answer is not None and f.answer.code == 0 and "이번만 허용" in f.answer.out,
-          f"gate approve <id>(pty) 실패: {_short(f.answer.out if f.answer else '')}")
+          f"plant approve <id>(pty) 실패: {_short(f.answer.out if f.answer else '')}")
     check(f.code == 0, f"승인 뒤 기대 내용, 실제 종료 코드 {f.code} {_gate_lines(f.err)}")
     check(LABEL_RE.search(f.out), "승인 뒤 내용에 가림 표시가 없음")
     leaked = leaks(f.out, e.hidden_values(APPROVE_DOC))
@@ -772,7 +772,7 @@ def s_deny(e: E2E) -> str:
     f = e.read(DENY_DOC, on_pending="deny")
     check(f.pending_id, f"기대 사람 승인, 실제 바로 끝남(종료 코드 {f.code}) {_gate_lines(f.err)}")
     check(f.answer is not None and f.answer.code == 0 and "거부" in f.answer.out,
-          f"gate deny <id>(pty) 실패: {_short(f.answer.out if f.answer else '')}")
+          f"plant deny <id>(pty) 실패: {_short(f.answer.out if f.answer else '')}")
     check(f.code == 1 and "EACCES" in f.err and "사용자가 거부했습니다" in f.err,
           f"기대 EACCES(사용자가 거부), 실제 종료 코드 {f.code} {_gate_lines(f.err)}")
     check(not f.data, "거부인데 내용이 나옴")
@@ -796,7 +796,7 @@ def s_timeout(e: E2E) -> str:
 def s_search(e: E2E) -> str:
     r = e.gate("search", SEARCH_WORD, "/")
     e.expected["main"].append({"op": "search", "path": "/", "decision": "ok"})
-    check(r.code == 0, f"gate search 종료 코드 {r.code}: {_gate_lines(r.err)}")
+    check(r.code == 0, f"plant search 종료 코드 {r.code}: {_gate_lines(r.err)}")
     found: dict[str, int] = Counter()
     for line in r.out.splitlines():
         path, _, rest = line.partition(":")
@@ -872,10 +872,10 @@ def s_ner_down(e: E2E) -> str:
     try:
         listed = e.gate("ls", "/", env=env)
         check(listed.code == 0 and ".env" in listed.out.split(),
-              f"gate ls 기대 목록, 실제 코드 {listed.code} {_gate_lines(listed.err)}")
+              f"plant ls 기대 목록, 실제 코드 {listed.code} {_gate_lines(listed.err)}")
         e.expected["ner-down"].append({"op": "ls", "path": "/", "decision": "ok"})
         st = e.gate("stat", NER_DOWN_DOC, env=env)
-        check(st.code == 0, f"gate stat 기대 성공, 실제 코드 {st.code} {_gate_lines(st.err)}")
+        check(st.code == 0, f"plant stat 기대 성공, 실제 코드 {st.code} {_gate_lines(st.err)}")
         e.expected["ner-down"].append({"op": "stat", "path": NER_DOWN_DOC, "decision": "ok"})
         f = e.read(NER_DOWN_DOC, env=env, record="ner-down")
         check(f.code == 1 and "EACCES" in f.err and "NER" in f.err,
@@ -904,7 +904,7 @@ def s_mount(e: E2E) -> str:
     mounts_file = e.root / "mounts.yaml"
     workspace = e.root / "ws"
     r = e.gate("workspace", "init", str(workspace), "--source", str(e.source))
-    check(r.code == 0, f"gate workspace init 실패: {_short(r.out + r.err)}")
+    check(r.code == 0, f"plant workspace init 실패: {_short(r.out + r.err)}")
     settings_file = workspace / ".claude" / "settings.json"
 
     def protected() -> tuple[bool, bool]:
@@ -916,17 +916,17 @@ def s_mount(e: E2E) -> str:
     check(protected() == (False, False), "연결 전인데 작업 폴더 설정에 이 폴더 막기가 있음")
     r = e.gate("mount", "add", str(folder))
     check(r.code == 1 and "터미널" in r.out + r.err and not mounts_file.exists(),
-          f"터미널 없이 gate mount add 기대 거부, 실제 종료 코드 {r.code} {_short(r.out + r.err)}")
+          f"터미널 없이 plant mount add 기대 거부, 실제 종료 코드 {r.code} {_short(r.out + r.err)}")
 
     added = e.human("mount", "add", str(folder), answers=("y", "y"))
     check(added.code == 0 and added.prompts == 2 and f"연결했어요: /{MOUNT_NAME}" in added.out,
-          f"gate mount add(pty) 기대 질문 2번·연결, 실제 종료 코드 {added.code} 질문 {added.prompts} {_short(added.out)}")
+          f"plant mount add(pty) 기대 질문 2번·연결, 실제 종료 코드 {added.code} 질문 {added.prompts} {_short(added.out)}")
     check("다시 시작" in added.out, f"세션 다시 시작 안내가 없음: {_short(added.out)}")
     check(protected() == (True, True), f"연결 뒤 작업 폴더 설정에 막기 기대 (규칙, denyRead) 둘 다, 실제 {protected()}")
 
     listed = e.gate("ls", "/")
     check(listed.code == 0 and f"{MOUNT_NAME}/" in listed.out.split(),
-          f"데몬을 다시 띄우지 않고 gate ls /에 {MOUNT_NAME}/ 기대, 실제 {listed.out.split()}")
+          f"데몬을 다시 띄우지 않고 plant ls /에 {MOUNT_NAME}/ 기대, 실제 {listed.out.split()}")
     e.expected["main"].append({"op": "ls", "path": "/", "decision": "ok"})
     f = e.read(MOUNT_DOC)
     check(f.code == 0 and "[이름]" in f.out, f"{MOUNT_DOC}: 기대 가림, 실제 종료 코드 {f.code} {_gate_lines(f.err)}")
@@ -939,16 +939,16 @@ def s_mount(e: E2E) -> str:
     e.expected["main"][-1]["stage"] = "path"
     records = [rec for rec in e.audit_records() if str(rec.get("path", "")).startswith(f"/{MOUNT_NAME}")]
     check({rec.get("path") for rec in records} >= {MOUNT_DOC, MOUNT_ENV},
-          f"감사 기록에 게이트 안 경로 기대 {MOUNT_DOC}·{MOUNT_ENV}, 실제 {sorted({rec.get('path') for rec in records})}")
+          f"감사 기록에 PLANT 안 경로 기대 {MOUNT_DOC}·{MOUNT_ENV}, 실제 {sorted({rec.get('path') for rec in records})}")
     check(real not in e.audit.read_text(encoding="utf-8"), "감사 로그에 추가 폴더의 실제 경로가 남음")
     shown = e.gate("mount", "list")
     check(shown.code == 0 and f"/{MOUNT_NAME}" in shown.out and "연결됨" in shown.out,
-          f"gate mount list에 연결됨 기대: {_short(shown.out)}")
+          f"plant mount list에 연결됨 기대: {_short(shown.out)}")
 
     removed = e.human("mount", "remove", MOUNT_NAME, answers=("y",))
-    check(removed.code == 0 and "보호만 남아" in removed.out, f"gate mount remove(pty) 실패: {_short(removed.out)}")
+    check(removed.code == 0 and "보호만 남아" in removed.out, f"plant mount remove(pty) 실패: {_short(removed.out)}")
     listed = e.gate("ls", "/")
-    check(listed.code == 0 and f"{MOUNT_NAME}/" not in listed.out.split(), f"뺀 뒤에도 gate ls /에 보임: {listed.out.split()}")
+    check(listed.code == 0 and f"{MOUNT_NAME}/" not in listed.out.split(), f"뺀 뒤에도 plant ls /에 보임: {listed.out.split()}")
     e.expected["main"].append({"op": "ls", "path": "/", "decision": "ok"})
     gone = e.read(MOUNT_DOC, record=None)
     check(gone.code == 1 and "ENOENT" in gone.err, f"뺀 뒤 읽기 기대 ENOENT, 실제 종료 코드 {gone.code} {_gate_lines(gone.err)}")
@@ -956,11 +956,11 @@ def s_mount(e: E2E) -> str:
 
     freed = e.human("mount", "unprotect", MOUNT_NAME, answers=("y", "y"))
     check(freed.code == 0 and freed.prompts == 2 and "보호를 풀었어요" in freed.out,
-          f"gate mount unprotect(pty) 기대 질문 2번·풂, 실제 종료 코드 {freed.code} 질문 {freed.prompts} {_short(freed.out)}")
+          f"plant mount unprotect(pty) 기대 질문 2번·풂, 실제 종료 코드 {freed.code} 질문 {freed.prompts} {_short(freed.out)}")
     check(protected() == (False, False), f"보호를 푼 뒤에도 막기가 남음: {protected()}")
     return (f"작업 폴더 등록, 터미널 없이 add 거부, add(pty y·y) → 막기(규칙 4줄 + denyRead)·세션 다시 시작 안내, "
             f"다시 띄우지 않고 ls에 /{MOUNT_NAME}, {Path(MOUNT_DOC).name} {label_summary(f.out)}·누출 0, .env 경로 규칙 EACCES, "
-            f"감사 기록은 게이트 안 경로만, remove → 안 보임·ENOENT·막기 남음, unprotect(y·y) → 막기 빠짐")
+            f"감사 기록은 PLANT 안 경로만, remove → 안 보임·ENOENT·막기 남음, unprotect(y·y) → 막기 빠짐")
 
 
 def s_encoding(e: E2E) -> str:
@@ -1010,7 +1010,7 @@ def s_audit(e: E2E) -> str:
         records = e.audit_records(log)
         matched, problems = match_records(e.expected[name], records)
         check(not problems, f"{name} 감사 로그: " + "; ".join(problems[:4]))
-        notes.append(f"{'게이트' if name == 'main' else 'NER 끊긴 데몬'} 기록 {len(records)}건 중 기대 {matched}건 일치")
+        notes.append(f"{'PLANT' if name == 'main' else 'NER 끊긴 데몬'} 기록 {len(records)}건 중 기대 {matched}건 일치")
     for log in (e.audit, e.audit2):
         if log.is_file():  # README "감사 로그": 파일 0600, 폴더 0700
             modes = (oct(log.stat().st_mode & 0o777), oct(log.parent.stat().st_mode & 0o777))
@@ -1049,7 +1049,7 @@ def s_ui(e: E2E) -> str:
     threading.Thread(target=watch, daemon=True).start()
     try:
         ready.wait(START_TIMEOUT)
-        check(found, f"gate ui가 {START_TIMEOUT:g}초 안에 주소를 내지 않음 (종료 코드 {proc.poll()})")
+        check(found, f"plant ui가 {START_TIMEOUT:g}초 안에 주소를 내지 않음 (종료 코드 {proc.poll()})")
         port, launch = found[0].group(1), found[0].group(2)
         base = f"http://127.0.0.1:{port}"
         status, _, body = http_get(f"{base}/api/status")
@@ -1069,7 +1069,7 @@ def s_ui(e: E2E) -> str:
         data = json.loads(body)
         state = (data.get("gate", {}).get("state"), data.get("laya", {}).get("state"), data.get("ner", {}).get("state"))
         check(data.get("ok") and data.get("policy_ok") and state == ("on", "connected", "connected"),
-              f"상태 기대 게이트 on·Laya connected·NER connected, 실제 {state} (policy_ok {data.get('policy_ok')}, "
+              f"상태 기대 PLANT on·Laya connected·NER connected, 실제 {state} (policy_ok {data.get('policy_ok')}, "
               f"Laya {data.get('laya', {}).get('reason')}, NER {data.get('ner', {}).get('reason')})")
         check(data["laya"].get("backend") == "laya" and data["ner"].get("enabled") is True,
               f"정책 기대 laya·NER 켬, 실제 {data['laya'].get('backend')}·{data['ner'].get('enabled')}")
@@ -1080,7 +1080,7 @@ def s_ui(e: E2E) -> str:
         mounts = json.loads(body) if status == 200 else {}
         check(mounts.get("ok") and mounts.get("error") is None and isinstance(mounts.get("folders"), list),
               f"원본 폴더 API 기대 200·오류 없음, 실제 {status} {_short(body, 80)}")
-        return (f"토큰 없음·틀린 토큰 403, 일회용 주소 재사용 403, 토큰으로 상태: 게이트 on·Laya connected"
+        return (f"토큰 없음·틀린 토큰 403, 일회용 주소 재사용 403, 토큰으로 상태: PLANT on·Laya connected"
                 f"({data['laya'].get('model')})·NER connected, 감사 기록 {audit.get('total')}건 보임, "
                 f"원본 폴더 {len(mounts['folders'])}줄")
     finally:
@@ -1117,7 +1117,7 @@ SCENARIOS: tuple[Scenario, ...] = (
     Scenario("ner-down", "NER 서버 응답 없음", _names(NER_DOWN_DOC), s_ner_down),
     Scenario("mount", "원본 폴더 추가·빼기", _names(MOUNT_DOC, MOUNT_ENV), s_mount),
     Scenario("encoding", "UTF-16·EUC-KR·바이너리", _names(ENC_SECRET_DOC, ENC_KOREAN_DOC, ENC_BINARY_DOC), s_encoding),
-    Scenario("ui", "설정 화면", "gate ui", s_ui),
+    Scenario("ui", "설정 화면", "plant ui", s_ui),
     Scenario("audit", "감사 로그 대조·누출", "audit.jsonl ×2, 데몬·화면 로그", s_audit),  # 마지막: 앞 시나리오의 기록을 모두 본다
 )
 
@@ -1179,13 +1179,13 @@ def _on_term(signum, frame) -> None:
 
 
 def gate_command() -> list[str]:
-    """지금 파이썬 옆의 gate(uv sync가 만든 .venv/bin/gate)."""
-    return [str(Path(sys.executable).with_name("gate"))]
+    """지금 파이썬 옆의 plant(uv sync가 만든 .venv/bin/plant)."""
+    return [str(Path(sys.executable).with_name("plant"))]
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m eval.run_e2e",
-                                     description="실제 Laya·NER 서버로 게이트 데몬·CLI·승인·감사 로그·설정 화면을 엮어 시험한다")
+                                     description="실제 Laya·NER 서버로 PLANT 데몬·CLI·승인·감사 로그·설정 화면을 엮어 시험한다")
     parser.add_argument("--keep", action="store_true", help="끝난 뒤 임시 폴더를 지우지 않고 경로를 알린다")
     parser.add_argument("--only", help=f"돌릴 시나리오 (쉼표로 구분): {', '.join(s.id for s in SCENARIOS)}")
     parser.add_argument("--wait", type=float, default=DEFAULT_WAIT_SECONDS, help="서버 /health를 기다릴 최대 초 (기본 300)")

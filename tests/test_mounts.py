@@ -299,13 +299,13 @@ def layout(tmp_path):
     ("gate-data/agent-workspace", "에이전트 작업 폴더는 연결할 수 없어요"),
     ("gate-data/agent-workspace/sub", "에이전트 작업 폴더 안의 폴더는"),
     ("gate-data", "작업 폴더를 감싸는 폴더는 연결할 수 없어요. 에이전트가 자기 작업 폴더를 못 읽게 돼요."),
-    ("gate-data/audit", "게이트 데이터(감사 로그 폴더)"),
-    ("GATE-DATA/Audit", "게이트 데이터(감사 로그 폴더)"),  # 대소문자만 다르게 써도
-    ("gate-data/run", "게이트 데이터(소켓 폴더)"),
-    ("gate-data/policy-history", "게이트 데이터(정책 기록 폴더)"),
-    ("venv", "게이트 프로그램 폴더는"),
-    ("venv/lib", "게이트 프로그램 폴더는"),
-    ("gate-data/source", "기본 폴더는 이미 게이트에 연결되어 있어요"),
+    ("gate-data/audit", "PLANT 데이터(감사 로그 폴더)"),
+    ("GATE-DATA/Audit", "PLANT 데이터(감사 로그 폴더)"),  # 대소문자만 다르게 써도
+    ("gate-data/run", "PLANT 데이터(소켓 폴더)"),
+    ("gate-data/policy-history", "PLANT 데이터(정책 기록 폴더)"),
+    ("venv", "PLANT 프로그램 폴더는"),
+    ("venv/lib", "PLANT 프로그램 폴더는"),
+    ("gate-data/source", "기본 폴더는 이미 PLANT에 연결되어 있어요"),
     ("gate-data/source/상담", "기본 폴더 안의 폴더는"),
     ("가계부", "이미 연결된 폴더예요."),
     ("가계부/2026", "이미 연결된 폴더 '가계부' 안의 폴더예요"),
@@ -328,7 +328,7 @@ def test_folders_that_contain_gate_data_or_the_base_are_refused(tmp_path):
     root = tmp_path.resolve()
     guard = build_guard(policy=root / "data" / "policy.yaml", sources=[root / "src" / "inner"],
                         audits=[root / "logs" / "audit.jsonl"], sockets=[root / "sock" / "gate.sock"])
-    assert "게이트 데이터(정책 파일)를 담은" in refusal(root / "data", guard, require_dir=False).message
+    assert "PLANT 데이터(정책 파일)를 담은" in refusal(root / "data", guard, require_dir=False).message
     assert "감사 로그 폴더" in refusal(root / "logs", guard, require_dir=False).message
     assert "소켓 폴더" in refusal(root / "sock" / "x", guard, require_dir=False).message
     assert "기본 폴더를 감싸는" in refusal(root / "src", guard, require_dir=False).message
@@ -337,8 +337,8 @@ def test_folders_that_contain_gate_data_or_the_base_are_refused(tmp_path):
 def test_gate_program_folders_are_refused():
     guard = build_guard(policy="/nowhere/gate-data/policy.yaml")
     for folder in (PROJECT_ROOT, PROJECT_ROOT / "gate", Path(sys.prefix).resolve(), Path(sys.base_prefix).resolve()):
-        assert "게이트 프로그램 폴더" in refusal(folder, guard, require_dir=False).message
-    assert "게이트 프로그램 폴더를 담은" in refusal(PROJECT_ROOT.parent, guard, require_dir=False).message
+        assert "PLANT 프로그램 폴더" in refusal(folder, guard, require_dir=False).message
+    assert "PLANT 프로그램 폴더를 담은" in refusal(PROJECT_ROOT.parent, guard, require_dir=False).message
 
 
 def test_claude_config_is_refused(home, tmp_path, monkeypatch):

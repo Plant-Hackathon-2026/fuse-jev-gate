@@ -29,9 +29,9 @@ class _SocketClient:
                 with sock.makefile("rb") as reader:
                     line = reader.readline()
         except (FileNotFoundError, ConnectionRefusedError) as exc:
-            raise GateError(errno.ECONNREFUSED, f"게이트 데몬에 연결할 수 없습니다: {self.socket_path}") from exc
+            raise GateError(errno.ECONNREFUSED, f"PLANT 데몬에 연결할 수 없습니다: {self.socket_path}") from exc
         if not line:
-            raise GateError(errno.EIO, "게이트 데몬이 응답 없이 연결을 끊었습니다")
+            raise GateError(errno.EIO, "PLANT 데몬이 응답 없이 연결을 끊었습니다")
         response = decode(line)
         if not response.get("ok"):
             raise GateError.from_response(response)

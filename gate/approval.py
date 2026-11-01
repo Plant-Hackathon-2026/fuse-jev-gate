@@ -41,7 +41,7 @@ Approval = Literal["once", "session", "remembered", "deny", "timeout"]  # 판단
 AnsweredBy = Literal["dialog", "terminal"]
 ANSWERS: tuple[Answer, ...] = ("once", "session", "deny")
 
-DIALOG_TITLE = "파일 접근 게이트"
+DIALOG_TITLE = "PLANT 파일 접근 확인"
 DIALOG_BUTTONS: dict[Answer, str] = {"deny": "거부", "once": "이번만 허용", "session": "이 폴더 허용"}
 _BUTTON_ANSWERS = {label: answer for answer, label in DIALOG_BUTTONS.items()}
 _MAX_FIELD_CHARS = 200

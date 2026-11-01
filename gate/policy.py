@@ -447,7 +447,7 @@ def load_policy(path: str | os.PathLike | None) -> Policy:
 
 def dump_entries(entries: Sequence[Entry]) -> str:
     header = (
-        "# gate 정책 파일. `gate policy` 명령으로 바꾼다(직접 고치지 않아도 된다).\n"
+        "# PLANT 정책 파일. `plant policy` 명령으로 바꾼다(직접 고치지 않아도 된다).\n"
         "# 여기 없는 설정은 기본값을 쓴다. 기본값과 설정 키 설명은 fuse-jev-gate/config/policy.yaml에 있다.\n"
     )
     body = {"version": POLICY_FILE_VERSION, "entries": [entry.to_dict() for entry in entries]}

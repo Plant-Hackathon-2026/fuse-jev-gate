@@ -230,7 +230,7 @@ def undo(settings_file: Path, confirm: Callable[[str], bool]) -> Outcome:
     if record is None:
         raise SetupError(f"설치 기록이 없습니다: {record_path(settings_file)}")
     changes: list[Change] = record["changes"]
-    if not confirm(f"{settings_file}에서 게이트 설치로 바뀐 것을 되돌립니다:\n{_summary(changes)}"):
+    if not confirm(f"{settings_file}에서 PLANT 설치로 바뀐 것을 되돌립니다:\n{_summary(changes)}"):
         return Outcome(changes, applied=False)
     current = read_settings(settings_file)
     kept = revert(current, changes)
@@ -251,7 +251,7 @@ def _ask(question: str) -> bool:
 
 
 def register(sub: argparse._SubParsersAction) -> None:
-    setup = sub.add_parser("setup", help="게이트 설치: Claude Code 사용자 설정에 원본 보호(샌드박스 + 권한 규칙)를 합친다")
+    setup = sub.add_parser("setup", help="PLANT 설치: Claude Code 사용자 설정에 원본 보호(샌드박스 + 권한 규칙)를 합친다")
     setup.add_argument("--source", help="원본 폴더 (--undo가 아니면 필요)")
     setup.add_argument("--policy", default=os.environ.get("GATE_POLICY"), help="정책 파일 (기본: $GATE_POLICY)")
     setup.add_argument("--audit", default=os.environ.get("GATE_AUDIT"), help="감사 로그 파일 (기본: $GATE_AUDIT)")
@@ -288,7 +288,7 @@ def run(args: argparse.Namespace) -> int:
             if not outcome.applied:
                 print("되돌리지 않았습니다.")
                 return 1
-            print(f"{settings_file}: 게이트 설치를 되돌렸습니다.")
+            print(f"{settings_file}: PLANT 설치를 되돌렸습니다.")
             for line in outcome.kept:
                 print(f"  {line}")
             return 0
@@ -300,7 +300,7 @@ def run(args: argparse.Namespace) -> int:
             raise SetupError("설정을 바꾸기 전에 확인이 필요합니다. 터미널에서 실행하거나 --yes를 붙이세요")
         outcome = install(settings_file, fragment, confirm)
     except (SetupError, WorkspaceError, OSError) as exc:
-        print(f"gate: {exc}", file=sys.stderr)
+        print(f"plant: {exc}", file=sys.stderr)
         return 1
     if not outcome.changes:
         print(f"{settings_file}: 이미 적용되어 있습니다.")
@@ -309,6 +309,6 @@ def run(args: argparse.Namespace) -> int:
         print("바꾸지 않았습니다.")
         return 1
     print(f"{settings_file}: 적용했습니다." + (f" 원래 파일: {outcome.backup}" if outcome.backup else ""))
-    print("이제 Claude Code는 원본을 직접 읽지 못하고 gate로만 읽습니다. 이미 떠 있는 세션은 다시 띄우세요. "
-          "되돌리기: gate setup --undo")
+    print("이제 Claude Code는 원본을 직접 읽지 못하고 PLANT로만 읽습니다. 이미 떠 있는 세션은 다시 띄우세요. "
+          "되돌리기: plant setup --undo")
     return 0

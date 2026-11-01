@@ -112,7 +112,7 @@ class _Handler(socketserver.StreamRequestHandler):
                 if len(line) > MAX_LINE_BYTES:
                     raise GateError(errno.E2BIG, "요청이 너무 깁니다")
                 if peer.uid != self.server.allowed_uid:
-                    raise GateError(errno.EACCES, "게이트 소유자와 다른 사용자입니다")
+                    raise GateError(errno.EACCES, "PLANT 소유자와 다른 사용자입니다")
                 request = decode(line)
                 result, judgment = handle_request(self.server.store, self.server.inspector, peer, request)
                 response = {"ok": True, **result}
@@ -200,7 +200,7 @@ class _ApprovalHandler(socketserver.StreamRequestHandler):
                 if len(line) > MAX_LINE_BYTES:
                     raise GateError(errno.E2BIG, "요청이 너무 깁니다")
                 if peer.uid != self.server.allowed_uid:
-                    raise GateError(errno.EACCES, "게이트 소유자와 다른 사용자입니다")
+                    raise GateError(errno.EACCES, "PLANT 소유자와 다른 사용자입니다")
                 request = decode(line)
                 response = {"ok": True, **handle_approval_request(self.server.approvals, request)}
                 if request.get("op") == "answer":
@@ -245,4 +245,4 @@ def _prepare_socket_path(path: Path) -> None:
         except OSError:
             path.unlink()  # 이전 데몬이 남긴 소켓
             return
-    raise RuntimeError(f"게이트 데몬이 이미 실행 중입니다: {path}")
+    raise RuntimeError(f"PLANT 데몬이 이미 실행 중입니다: {path}")

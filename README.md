@@ -1,11 +1,11 @@
-# fuse-jev-gate — AI 에이전트 파일 접근 게이트
+# PLANT — AI 에이전트의 파일 읽기를 지키는 도구
 
-내 컴퓨터에서 AI 에이전트(Claude Code)를 쓸 때, 에이전트가 원본 문서를 **게이트를 거쳐서만** 읽게 하는 도구입니다. 게이트는 파일마다 허용·가림·사람 승인·차단 중 하나로 답합니다. 주민등록번호·전화번호·비밀번호 같은 값은 같은 길이의 `*`로, 이름·소속·주소·IP 같은 값은 `[이름]`·`[IP]`처럼 종류 이름으로 가려서 돌려줍니다.
+내 컴퓨터에서 AI 에이전트(Claude Code)를 쓸 때, 에이전트가 원본 문서를 **PLANT를 거쳐서만** 읽게 하는 도구입니다. PLANT는 에이전트와 원본 파일 사이에서 관문(게이트) 역할을 하며, 파일마다 허용·가림·사람 승인·차단 중 하나로 답합니다. 주민등록번호·전화번호·비밀번호 같은 값은 같은 길이의 `*`로, 이름·소속·주소·IP 같은 값은 `[이름]`·`[IP]`처럼 종류 이름으로 가려서 돌려줍니다.
 
 - 대상: 개발자가 아닌 일반 사용자가 자기 컴퓨터에서 에이전트를 쓰는 경우입니다. 정책을 따로 정하지 않아도 기본값으로 안전하게 동작합니다.
 - 상태: 해커톤 프로젝트입니다. 맥(Apple Silicon, macOS 26)에서 만들고 시험했습니다. **판단 모델은 기본이 Mock(키워드 규칙)이고, 실제 모델로 팀원이 파인튜닝한 Laya를 붙일 수 있습니다**([판단 모델 연결](#판단-모델-연결-laya), [알려진 한계](#알려진-한계)).
-- **이름·연락처 등을 찾는 NER은 기본으로 켜져 있습니다.** NER 서버(`nerserve`)를 먼저 띄우지 않으면 게이트가 모든 내용 읽기를 막습니다. 모델 없이 쓰려면 `gate policy set ner_backend none`으로 끕니다([이름·주소 가리기 (NER)](#이름주소-가리기-ner)).
-- 이름의 FUSE는 처음 설계(FUSE 마운트)에서 왔습니다. 지금은 1Password처럼 데몬과 Unix 소켓을 쓰는 구조입니다. 바꾼 이유는 [`plans/implementation-plan.md`](plans/implementation-plan.md) 1절에 있습니다.
+- **이름·연락처 등을 찾는 NER은 기본으로 켜져 있습니다.** NER 서버(`nerserve`)를 먼저 띄우지 않으면 PLANT가 모든 내용 읽기를 막습니다. 모델 없이 쓰려면 `plant policy set ner_backend none`으로 끕니다([이름·주소 가리기 (NER)](#이름주소-가리기-ner)).
+- 저장소 이름 `fuse-jev-gate`의 FUSE는 처음 설계(FUSE 마운트)에서 왔습니다. 지금은 1Password처럼 데몬과 Unix 소켓을 쓰는 구조입니다. 바꾼 이유는 [`plans/implementation-plan.md`](plans/implementation-plan.md) 1절에 있습니다.
 
 ## 목차
 
@@ -16,7 +16,7 @@
 - [판단 모델 연결 (Laya)](#판단-모델-연결-laya)
 - [이름·주소 가리기 (NER)](#이름주소-가리기-ner)
 - [정책 바꾸기](#정책-바꾸기)
-- [설정 화면 (gate ui)](#설정-화면-gate-ui)
+- [설정 화면 (plant ui)](#설정-화면-plant-ui)
 - [사람 승인](#사람-승인)
 - [감사 로그](#감사-로그)
 - [우회 시험 하네스](#우회-시험-하네스)
@@ -29,21 +29,21 @@
 ```
 [원본 폴더]  ← 에이전트 세션은 Claude Code 권한 규칙 + 샌드박스로 직접 못 읽음
      ▲ 원본 읽기 (데몬은 샌드박스 밖, 내 계정 권한)
-[게이트 데몬]  gate serve
+[PLANT 데몬]  plant serve
      │  경로 규칙 → 인코딩 확인 → 정규식 탐지·가림 → IP·내부 주소 규칙 → NER 가림(기본 켜짐) → 판단 모델(캐시) → 정책 → 사람 승인 → 감사 로그
      ▲ Unix 소켓 gate.sock (요청자 PID·UID 확인)
-     └── gate CLI    Claude Code가 Bash로 실행 (샌드박스 안에서 이 소켓 하나만 열 수 있음)
+     └── plant CLI   Claude Code가 Bash로 실행 (샌드박스 안에서 이 소켓 하나만 열 수 있음)
 [Claude Code]  에이전트 세션
 
-[내 터미널]  gate policy → 정책 파일        gate approve / deny → 승인 소켓 approve.sock
-             gate audit  → 감사 로그        (에이전트는 셋 다 열 수 없음)
+[내 터미널]  plant policy → 정책 파일       plant approve / deny → 승인 소켓 approve.sock
+             plant audit  → 감사 로그       (에이전트는 셋 다 열 수 없음)
 ```
 
-에이전트는 `gate cat /상담/기록.txt`처럼 게이트 안 경로로 요청합니다. 데몬은 원본 폴더 밖으로 나가는 경로(`..`, 심볼릭 링크)를 거부합니다. 오류는 `ENOENT`(없음), `EACCES`(차단), `EROFS`(쓰기)로 돌려줍니다.
+에이전트는 `plant cat /상담/기록.txt`처럼 PLANT 안 경로로 요청합니다. 데몬은 원본 폴더 밖으로 나가는 경로(`..`, 심볼릭 링크)를 거부합니다. 오류는 `ENOENT`(없음), `EACCES`(차단), `EROFS`(쓰기)로 돌려줍니다.
 
 ### 판단 순서
 
-`gate cat` 요청 하나는 다음 순서로 판단합니다. 가장 엄격한 결과를 따릅니다.
+`plant cat` 요청 하나는 다음 순서로 판단합니다. 가장 엄격한 결과를 따릅니다.
 
 1. **정책 파일 확인.** 정책 파일이 잘못되어 있으면 고칠 때까지 내용 읽기를 모두 막습니다.
 2. **경로 규칙.** `*.env`, `*.pem`, `*.key`, `id_rsa*`, `.netrc`, `.aws/credentials` 같은 파일은 내용을 보지 않고 거부합니다.
@@ -70,7 +70,7 @@
 ```bash
 git clone https://github.com/Plant-Hackathon-2026/fuse-jev-gate.git
 cd fuse-jev-gate
-uv sync                    # .venv/bin/gate 가 생깁니다
+uv sync                    # .venv/bin/plant 가 생깁니다
 ```
 
 데이터는 저장소와 에이전트 작업 폴더 **밖에** 둡니다. 에이전트가 쓸 수 있는 폴더 안에 두면 폴더 이름을 바꾸는 식으로 경로 기준 차단을 피할 수 있기 때문입니다. 이 저장소에서는 다음 배치를 썼습니다.
@@ -78,14 +78,14 @@ uv sync                    # .venv/bin/gate 가 생깁니다
 ```
 gate-data/
 ├── source/            원본 폴더 (에이전트가 읽을 문서)
-├── policy.yaml        내 정책 (gate policy가 만듦, 없으면 기본값)
+├── policy.yaml        내 정책 (plant policy가 만듦, 없으면 기본값)
 ├── policy-history/    정책 되돌리기 기록
 ├── run/               gate.sock, approve.sock
 ├── audit/             audit.jsonl, audit.key
-└── agent-workspace/   에이전트 전용 작업 폴더 (gate workspace init이 만듦)
+└── agent-workspace/   에이전트 전용 작업 폴더 (plant workspace init이 만듦)
 ```
 
-경로는 환경변수로 넘깁니다. `gate` 명령마다 같은 값을 씁니다.
+경로는 환경변수로 넘깁니다. `plant` 명령마다 같은 값을 씁니다.
 
 ```bash
 export DATA=$HOME/gate-data
@@ -96,61 +96,61 @@ export GATE_SOCKET=$DATA/run/gate.sock GATE_POLICY=$DATA/policy.yaml GATE_AUDIT=
 
 ## 빠른 시작
 
-저장소의 합성 샘플(`samples/`)로 게이트를 직접 돌려 봅니다. 아래 결과는 실제로 돌려서 확인했습니다(판단 모델 Mock, NER 끔, 그 밖은 기본 정책).
+저장소의 합성 샘플(`samples/`)로 PLANT를 직접 돌려 봅니다. 아래 결과는 실제로 돌려서 확인했습니다(판단 모델 Mock, NER 끔, 그 밖은 기본 정책).
 
-NER은 기본으로 켜져 있어서, NER 서버(`nerserve`)가 없으면 데몬이 모든 내용 읽기를 막습니다(`gate cat`마다 `NER 판단에 실패해 차단했습니다: NER 서버에 연결하지 못했습니다`). NER까지 보려면 [이름·주소 가리기 (NER)](#이름주소-가리기-ner)대로 nerserve를 **데몬보다 먼저** 띄웁니다. 모델 없이 해 보려면 아래처럼 데몬을 띄우기 전에 NER을 끕니다(정책을 느슨하게 하는 바꿈이라 한 번 더 묻습니다. `y`로 답합니다).
+NER은 기본으로 켜져 있어서, NER 서버(`nerserve`)가 없으면 데몬이 모든 내용 읽기를 막습니다(`plant cat`마다 `NER 판단에 실패해 차단했습니다: NER 서버에 연결하지 못했습니다`). NER까지 보려면 [이름·주소 가리기 (NER)](#이름주소-가리기-ner)대로 nerserve를 **데몬보다 먼저** 띄웁니다. 모델 없이 해 보려면 아래처럼 데몬을 띄우기 전에 NER을 끕니다(정책을 느슨하게 하는 바꿈이라 한 번 더 묻습니다. `y`로 답합니다).
 
 **터미널 1: 데몬 띄우기**
 
 ```bash
-export DATA=$HOME/gate-demo
+export DATA=$HOME/plant-demo
 mkdir -p $DATA/source
 cp -R samples/medical_note $DATA/source/
 printf 'DB_PASSWORD=hunter2\n' > $DATA/source/.env
 printf '동네 도서관 휴관 안내\n이번 주 토요일은 휴관합니다.\n문의: 010-1234-5678\n' > $DATA/source/안내문.txt
 
 export GATE_SOCKET=$DATA/run/gate.sock GATE_POLICY=$DATA/policy.yaml GATE_AUDIT=$DATA/audit/audit.jsonl
-.venv/bin/gate policy set ner_backend none          # 모델 없이 해 볼 때만. nerserve를 띄웠으면 이 줄은 뺀다
-.venv/bin/gate serve --source $DATA/source          # 맥 대화상자 없이 터미널로만 답하려면 --no-dialog
+.venv/bin/plant policy set ner_backend none         # 모델 없이 해 볼 때만. nerserve를 띄웠으면 이 줄은 뺀다
+.venv/bin/plant serve --source $DATA/source         # 맥 대화상자 없이 터미널로만 답하려면 --no-dialog
 ```
 
 데몬은 요청마다 stderr에 한 줄씩 남깁니다.
 
-**터미널 2: 에이전트처럼 읽기** (같은 환경변수, `gate`는 `.venv/bin/gate`)
+**터미널 2: 에이전트처럼 읽기** (같은 환경변수, `plant`는 `.venv/bin/plant`)
 
 ```console
-$ gate ls /
+$ plant ls /
 .env
 medical_note/
 안내문.txt
 
-$ gate cat /medical_note/none_1.txt              # 허용: 개인정보가 없는 운영 메모
+$ plant cat /medical_note/none_1.txt             # 허용: 개인정보가 없는 운영 메모
 [외래 운영 메모] 내과 외래 / 2026-01-15
 ...
 
-$ gate cat /medical_note/pii_1.txt               # 차단: 판단 모델이 매우 민감하다고 판단
-gate: /medical_note/pii_1.txt: 판단 모델 결과(highly_sensitive, 확신도 0.97)에 따라 차단했습니다 (EACCES)
+$ plant cat /medical_note/pii_1.txt              # 차단: 판단 모델이 매우 민감하다고 판단
+plant: /medical_note/pii_1.txt: 판단 모델 결과(highly_sensitive, 확신도 0.97)에 따라 차단했습니다 (EACCES)
 
-$ gate cat /.env                                 # 차단: 경로 규칙
-gate: /.env: 경로 규칙에 따라 차단했습니다 (EACCES)
+$ plant cat /.env                                # 차단: 경로 규칙
+plant: /.env: 경로 규칙에 따라 차단했습니다 (EACCES)
 
-$ gate search 진료 /medical_note                  # 통과한 파일에서만 찾고, 막힌 파일은 건너뜀
-gate: 건너뜀 /medical_note/pii_1.txt: 판단 모델 결과(highly_sensitive, 확신도 0.97)에 따라 차단했습니다 (EACCES)
+$ plant search 진료 /medical_note                 # 통과한 파일에서만 찾고, 막힌 파일은 건너뜀
+plant: 건너뜀 /medical_note/pii_1.txt: 판단 모델 결과(highly_sensitive, 확신도 0.97)에 따라 차단했습니다 (EACCES)
 ...
 /medical_note/none_2.txt:1:[진료 참고 메모] 성인 고혈압 첫 진료 때 확인할 것 (내부 교육용)
 
-$ gate cat /안내문.txt                            # 사람 승인: 답할 때까지 기다림
+$ plant cat /안내문.txt                           # 사람 승인: 답할 때까지 기다림
 ```
 
 **사람 승인하기.** 맥이면 대화상자가 뜹니다(거부·이번만 허용·이 폴더 허용). 터미널 3에서 답해도 됩니다.
 
 ```console
-$ gate approve                                   # 기다리는 요청 목록
+$ plant approve                                  # 기다리는 요청 목록
 기다리는 승인 요청 1건
   [6e5a98] /안내문.txt  (남은 시간 28초)
      이유: 판단 모델 결과(sensitive, 확신도 0.80)가 확실하지 않습니다
   ...
-$ gate approve 6e5a98                            # 이번만 허용 (--folder면 그 폴더 60분)
+$ plant approve 6e5a98                           # 이번만 허용 (--folder면 그 폴더 60분)
 ```
 
 허용하면 터미널 2에 번호를 가린 내용이 나옵니다.
@@ -159,42 +159,42 @@ $ gate approve 6e5a98                            # 이번만 허용 (--folder면
 동네 도서관 휴관 안내
 이번 주 토요일은 휴관합니다.
 문의: ***-****-****
-gate: 개인정보 일부를 같은 길이의 *로 가렸습니다 (휴대폰 번호 1건)
+plant: 개인정보 일부를 같은 길이의 *로 가렸습니다 (휴대폰 번호 1건)
 ```
 
 **기록 보기.**
 
 ```console
-$ gate audit --blocked
+$ plant audit --blocked
 2026-10-31 17:34:39  cat     차단       /medical_note/pii_1.txt  — 판단 모델 결과(highly_sensitive, 확신도 0.97)에 따라 차단했습니다 · 찾음: 주민등록번호 1건, 휴대폰 번호 1건 · ...
 2026-10-31 17:34:40  cat     차단       /.env  — 경로 규칙에 따라 차단했습니다 · python3.12 pid 25259
 기록 6건 중 조건에 맞는 2건 · 차단 2
 ```
 
-지금 판단 모델은 Mock이라 결과가 키워드 규칙으로 나옵니다. 그래서 번호가 든 문서는 대부분 승인이나 차단으로 끝나고, 가린 내용은 승인한 뒤에 보입니다. 데몬은 `Ctrl-C`로 끕니다. NER을 다시 켜려면 `gate policy set ner_backend server`입니다.
+지금 판단 모델은 Mock이라 결과가 키워드 규칙으로 나옵니다. 그래서 번호가 든 문서는 대부분 승인이나 차단으로 끝나고, 가린 내용은 승인한 뒤에 보입니다. 데몬은 `Ctrl-C`로 끕니다. NER을 다시 켜려면 `plant policy set ner_backend server`입니다.
 
 ## Claude Code 연결
 
-게이트만 띄우면 에이전트는 여전히 원본 폴더를 직접 열 수 있습니다. Claude Code 설정으로 원본 쪽을 막아야 게이트가 유일한 통로가 됩니다. 방법은 두 가지입니다.
+PLANT만 띄우면 에이전트는 여전히 원본 폴더를 직접 열 수 있습니다. Claude Code 설정으로 원본 쪽을 막아야 PLANT가 유일한 통로가 됩니다. 방법은 두 가지입니다.
 
-### 1. 에이전트 전용 작업 폴더 (`gate workspace init`)
+### 1. 에이전트 전용 작업 폴더 (`plant workspace init`)
 
 ```bash
-gate workspace init $DATA/agent-workspace --source $DATA/source
+plant workspace init $DATA/agent-workspace --source $DATA/source
 cd $DATA/agent-workspace && claude
 ```
 
 - [설치](#설치)의 환경변수 세 개(소켓·정책·감사 로그 경로)가 있어야 합니다. 막을 경로를 정확히 적기 위해서입니다.
-- 폴더에 `.claude/settings.json`(권한 규칙 + 샌드박스)과 `CLAUDE.md`(에이전트에게 `gate` 쓰는 법 안내)를 만듭니다. 내용이 다른 파일이 있으면 멈추고, `--force`로 덮어씁니다. 설정은 손으로 고치지 말고 다시 만듭니다.
+- 폴더에 `.claude/settings.json`(권한 규칙 + 샌드박스)과 `CLAUDE.md`(에이전트에게 `plant` 쓰는 법 안내)를 만듭니다. 내용이 다른 파일이 있으면 멈추고, `--force`로 덮어씁니다. 설정은 손으로 고치지 말고 다시 만듭니다.
 - 이 폴더에서 띄운 세션에만 적용됩니다. **하위 폴더에서 띄우면 적용되지 않습니다.** 세션 안에서 `/sandbox`로 샌드박스가 켜졌는지 볼 수 있습니다.
 - 만들어지는 설정의 예: [`sandbox/agent-settings.json`](sandbox/agent-settings.json) (경로는 `/path/to/...`로 바꿔 둠)
 
-### 2. 설치: 모든 세션에 적용 (`gate setup`)
+### 2. 설치: 모든 세션에 적용 (`plant setup`)
 
 ```bash
-gate setup --source $DATA/source           # 바뀔 내용을 보여 주고 y/N으로 확인
-gate setup --undo                          # 설치 기록대로 되돌리기
-gate setup --source $DATA/source --print   # 합칠 설정 조각(JSON)만 출력. MDM 관리 설정으로 배포할 때
+plant setup --source $DATA/source          # 바뀔 내용을 보여 주고 y/N으로 확인
+plant setup --undo                         # 설치 기록대로 되돌리기
+plant setup --source $DATA/source --print  # 합칠 설정 조각(JSON)만 출력. MDM 관리 설정으로 배포할 때
 ```
 
 - 사용자 설정(`~/.claude/settings.json`)에 같은 막기 규칙을 합칩니다. 원래 파일은 백업하고, 다시 실행해도 결과가 같습니다. `--settings-file`로 대상 파일을 바꿀 수 있습니다.
@@ -209,11 +209,11 @@ gate setup --source $DATA/source --print   # 합칠 설정 조각(JSON)만 출�
 | 소켓 폴더 | `Edit` 거부 + 샌드박스 쓰기 제한 (가짜 데몬 띄우기 막기) |
 | 승인 소켓 | 샌드박스 `allowUnixSockets`에 `gate.sock`만 넣음 (에이전트가 스스로 승인하지 못함) |
 | 샌드박스 끄기 | `failIfUnavailable: true`, `allowUnsandboxedCommands: false` |
-| Claude 설정 파일·MCP 정의 수정, bypass 모드 | 작업 폴더 설정에만 넣음(`gate setup`에는 없음). MDM이 없을 때를 위한 방어 |
+| Claude 설정 파일·MCP 정의 수정, bypass 모드 | 작업 폴더 설정에만 넣음(`plant setup`에는 없음). MDM이 없을 때를 위한 방어 |
 
 ## 판단 모델 연결 (Laya)
 
-기본 판단 모델은 시험용 Mock입니다. 실제 모델로는 팀원이 파인튜닝한 [Laya](https://huggingface.co/convaiinnovations/laya)(Apache-2.0) 체크포인트를 씁니다. Laya는 로컬 서버 `laya-serve`로 띄우고, 게이트 데몬이 그 서버에 묻습니다. 문서는 이 컴퓨터 밖으로 나가지 않습니다.
+기본 판단 모델은 시험용 Mock입니다. 실제 모델로는 팀원이 파인튜닝한 [Laya](https://huggingface.co/convaiinnovations/laya)(Apache-2.0) 체크포인트를 씁니다. Laya는 로컬 서버 `laya-serve`로 띄우고, PLANT 데몬이 그 서버에 묻습니다. 문서는 이 컴퓨터 밖으로 나가지 않습니다.
 
 1. **laya-serve 설치** (저장소 밖, 약 740MB):
    ```bash
@@ -231,8 +231,8 @@ gate setup --source $DATA/source --print   # 합칠 설정 조각(JSON)만 출�
 4. **데몬에 주소를 알려 주고 백엔드를 바꿉니다.**
    ```bash
    export JEV_BASE_URL=http://127.0.0.1:8000 JEV_MODEL=gate-laya JEV_MODEL_DIR=/경로/models/laya-v3
-   gate serve --source $DATA/source           # 위 환경변수를 넘겨 띄운다
-   gate policy set jev_backend laya            # 내 터미널에서. 되돌리기: gate policy set jev_backend mock
+   plant serve --source $DATA/source           # 위 환경변수를 넘겨 띄운다
+   plant policy set jev_backend laya            # 내 터미널에서. 되돌리기: plant policy set jev_backend mock
    ```
    NER도 기본으로 켜져 있으므로 데몬을 띄우기 전에 nerserve도 띄웁니다([이름·주소 가리기 (NER)](#이름주소-가리기-ner)).
 
@@ -245,7 +245,7 @@ gate setup --source $DATA/source --print   # 합칠 설정 조각(JSON)만 출�
 | `JEV_QUESTION` | 질문이 여러 개인 체크포인트에서 쓸 질문 ID. 기본은 질문이 하나면 그것, 여럿이면 `has_pii` |
 
 - 설정 이름(`jev_backend`, `jev_timeout_seconds`, `JEV_BASE_URL` 등)에는 판단 모델의 예전 이름 jev가 남아 있습니다. 적을 때는 이 이름 그대로 씁니다.
-- v3에는 질문이 9개 있습니다. 게이트는 그중 `has_pii`("특정 개인을 식별하거나 식별에 도움이 되는 정보가 가려지지 않은 채 포함되어 있는가?") 하나만 묻고 예/아니오 확률 p를 받습니다. 기본 정책으로는 p ≤ 0.05면 허용, p ≥ 0.95면 차단, 그 사이는 사람에게 묻습니다. 이전 체크포인트(질문 하나)도 그대로 쓸 수 있습니다.
+- v3에는 질문이 9개 있습니다. PLANT는 그중 `has_pii`("특정 개인을 식별하거나 식별에 도움이 되는 정보가 가려지지 않은 채 포함되어 있는가?") 하나만 묻고 예/아니오 확률 p를 받습니다. 기본 정책으로는 p ≤ 0.05면 허용, p ≥ 0.95면 차단, 그 사이는 사람에게 묻습니다. 이전 체크포인트(질문 하나)도 그대로 쓸 수 있습니다.
 - 문서는 450자 안팎 조각으로 나눠 묻고 가장 높은 p를 씁니다. laya-serve가 꺼져 있거나 답이 이상하면 차단합니다.
 - **체크포인트 바꾸기:** 새 폴더로 바꾸고 laya-serve를 다시 띄운 뒤 `uv run python -m eval.run_eval --client laya`로 샘플 36개를 다시 평가합니다. 데몬은 다시 띄우지 않아도 됩니다.
 - v3 평가(샘플 36개): 민감 문서는 모두 잡았고(미탐 0/24), 개인정보가 없는 문서 12개 중 2개를 민감으로 봤습니다(이전 체크포인트는 6개). 자세한 내용은 [`eval/README.md`](eval/README.md)에 있습니다.
@@ -254,11 +254,11 @@ gate setup --source $DATA/source --print   # 합칠 설정 조각(JSON)만 출�
 
 정규식은 형식이 있는 번호만 찾습니다. 이름·연락처·소속 같은 말은 팀원이 학습한 NER 모델(재학습판 `xlmr-pii-ner`, xlm-roberta-large, 라벨 6종)로 찾습니다. NER도 Laya처럼 이 컴퓨터 안의 별도 서버(`nerserve`, 이 저장소에 있음)로 띄우고, 데몬은 그 서버에 묻습니다. 데몬에는 torch가 들어가지 않습니다.
 
-**NER은 기본으로 켜져 있습니다**(`ner_backend: server`). NER 서버가 응답하지 않으면 안전을 위해 모든 내용 읽기를 막습니다(목록·`stat`은 됨). 그래서 **게이트 데몬보다 nerserve를 먼저 띄웁니다.** `gate serve`도 시작할 때 이 점을 알려 줍니다. 모델 없이 쓰려면 내 터미널에서 끕니다.
+**NER은 기본으로 켜져 있습니다**(`ner_backend: server`). NER 서버가 응답하지 않으면 안전을 위해 모든 내용 읽기를 막습니다(목록·`stat`은 됨). 그래서 **PLANT 데몬보다 nerserve를 먼저 띄웁니다.** `plant serve`도 시작할 때 이 점을 알려 줍니다. 모델 없이 쓰려면 내 터미널에서 끕니다.
 
 ```bash
-gate policy set ner_backend none      # 끄기 (정책을 느슨하게 하는 바꿈이라 한 번 더 묻습니다)
-gate policy set ner_backend server    # 다시 켜기
+plant policy set ner_backend none     # 끄기 (정책을 느슨하게 하는 바꿈이라 한 번 더 묻습니다)
+plant policy set ner_backend server   # 다시 켜기
 ```
 
 1. **실행 환경.** torch와 transformers가 필요합니다. 위 laya-serve의 `.venv`에 둘 다 있으므로 그대로 씁니다(설치할 것 없음).
@@ -271,10 +271,10 @@ gate policy set ner_backend server    # 다시 켜기
 4. **데몬 띄우기.** 데몬은 `NER_BASE_URL`(없으면 `http://127.0.0.1:8001`)에 묻습니다. 다른 포트로 띄웠을 때만 정합니다.
    ```bash
    export NER_BASE_URL=http://127.0.0.1:8001   # 기본값과 같으면 생략
-   gate serve --source $DATA/source
+   plant serve --source $DATA/source
    ```
 
-**찾는 것과 가림 표시.** 서버가 준 라벨을 게이트가 원문을 보고 나눕니다.
+**찾는 것과 가림 표시.** 서버가 준 라벨을 PLANT가 원문을 보고 나눕니다.
 
 | NER 라벨 | 나누는 기준 | 가림 표시 | 정책 칸 |
 |---|---|---|---|
@@ -295,10 +295,10 @@ gate policy set ner_backend server    # 다시 켜기
 - 같은 곳을 여럿이 찾으면 정규식 > 규칙 > NER 순서로 따릅니다. 정규식이 찾은 번호는 같은 길이 `*`, 규칙·NER이 찾은 것은 종류 이름으로 가립니다.
 - **가린 것이 있으면 판단 모델이 가린 결과(에이전트에게 보여 줄 내용)를 한 번 더 봅니다.** 가려지지 않은 개인정보가 없다고 하면 가린 채 보여 주고, 남아 있다고 하면 사람에게 묻습니다(승인하면 가린 결과를 보여 줌). NER이 이름을 놓쳐도 판단 모델이 다시 걸러 냅니다. 가린 것이 없으면 지금처럼 판단 모델 결과(허용·승인·거부)를 따릅니다.
 - NER 서버가 꺼져 있거나, 답이 이상하거나, 모르는 라벨(예전 32종 모델 등)이 오면 그 파일은 차단합니다.
-- 가리면 내용 길이가 원본과 달라집니다(`gate stat` 크기는 원본 그대로).
+- 가리면 내용 길이가 원본과 달라집니다(`plant stat` 크기는 원본 그대로).
 - NER을 끄면 이름 등은 가리지 않고, IP·내부 주소 규칙 말고는 판단 모델 결과(허용·승인·거부)를 그대로 따릅니다.
 
-**종류별 기본값** (`gate policy set entities.<묶음>.action allow|mask|ask_human|deny`)
+**종류별 기본값** (`plant policy set entities.<묶음>.action allow|mask|ask_human|deny`)
 
 | 묶음 | 무엇 | 기본 |
 |---|---|---|
@@ -310,23 +310,23 @@ gate policy set ner_backend server    # 다시 켜기
 | `host` | IP·내부 주소 (규칙으로 찾음, NER을 꺼도 적용) | 가림 |
 | `plain` | 나이 | 그대로 보여 줌 |
 
-NER이 찾은 전화번호·이메일은 번호 칸(`numbers.mobile` 등)을 따릅니다. 날짜·사건·시간·연도·직함·과목은 새 모델이 찾지 않아 묶음에서 뺐습니다(2026-11-01). 예전 정책 파일의 `entities.date.action`·`entities.event.action`은 읽히지만 효과가 없고(`gate policy show`에 "지금은 찾지 않음"으로 보임), 새로 지정할 수 없습니다.
+NER이 찾은 전화번호·이메일은 번호 칸(`numbers.mobile` 등)을 따릅니다. 날짜·사건·시간·연도·직함·과목은 새 모델이 찾지 않아 묶음에서 뺐습니다(2026-11-01). 예전 정책 파일의 `entities.date.action`·`entities.event.action`은 읽히지만 효과가 없고(`plant policy show`에 "지금은 찾지 않음"으로 보임), 새로 지정할 수 없습니다.
 
 ## 정책 바꾸기
 
 정책은 **사람이 자기 터미널에서만** 바꿉니다. 아무것도 정하지 않으면 기본값으로 동작합니다. 데몬은 요청마다 정책 파일이 바뀌었는지 보고 다시 읽으므로 재시작할 필요가 없습니다.
 
 ```bash
-gate policy show                                   # 내가 정한 항목과 지금 적용 중인 정책
-gate policy add "주민번호는 생년월일까지만 보여줘"      # 문장 → "이렇게 이해했어요" → y/N
-gate policy add "비밀번호가 있는 파일은 거부해줘"
-gate policy add "이름은 가려줘"                       # NER 묶음 (entities.name.action = mask)
-gate policy add "학번이 있는 파일은 물어보고 보여줘"
-gate policy add "병원 기록은 보여주지 마"               # 맥락 규칙 (판단 모델 질문에 그대로 넣음)
-gate policy set numbers.email.action deny          # 문장 해석 없이 바로 지정
-gate policy set path "가계부/**" deny               # 경로 규칙 (allow | ask_human | deny)
-gate policy remove 2                               # show의 번호로 지우기
-gate policy undo                                   # 직전 변경 되돌리기 (최근 20개)
+plant policy show                                  # 내가 정한 항목과 지금 적용 중인 정책
+plant policy add "주민번호는 생년월일까지만 보여줘"     # 문장 → "이렇게 이해했어요" → y/N
+plant policy add "비밀번호가 있는 파일은 거부해줘"
+plant policy add "이름은 가려줘"                      # NER 묶음 (entities.name.action = mask)
+plant policy add "학번이 있는 파일은 물어보고 보여줘"
+plant policy add "병원 기록은 보여주지 마"              # 맥락 규칙 (판단 모델 질문에 그대로 넣음)
+plant policy set numbers.email.action deny         # 문장 해석 없이 바로 지정
+plant policy set path "가계부/**" deny              # 경로 규칙 (allow | ask_human | deny)
+plant policy remove 2                              # show의 번호로 지우기
+plant policy undo                                  # 직전 변경 되돌리기 (최근 20개)
 ```
 
 - 더 엄격하게 바꾸면 바로 저장하고, 완화하면 한 번 더 묻습니다. 맥락 규칙은 더 막는 쪽만 받습니다.
@@ -334,24 +334,24 @@ gate policy undo                                   # 직전 변경 되돌리기 
 - 사람 승인 대기 시간(`approval.timeout_seconds`, 기본 30초)과 폴더 승인 기억 시간(`approval.session_minutes`, 기본 60분)도 바꿀 수 있습니다.
 - 기본값 전체와 설명: [`config/policy.yaml`](config/policy.yaml)
 - NER 묶음 문장은 한 번에 한 가지만 말합니다("이름이랑 주소는 가려줘"는 다시 말해 달라고 합니다). `plain` 묶음은 나이 하나입니다. 날짜·사건·시간·연도·직함·과목에 대한 문장("날짜는 가려줘")은 "지금은 따로 찾지 않아요"라고 답하고 저장하지 않습니다. NER이 꺼져 있으면 저장은 하되 효과가 없다고 알려 줍니다(IP·내부 주소는 규칙이라 NER을 꺼도 적용).
-- 문장 해석기도 지금은 Mock(키워드 규칙)입니다. 예시와 다른 표현은 못 알아들을 수 있습니다. 그때는 `gate policy set`을 씁니다. 해석기 평가는 [`eval/README.md`](eval/README.md) "정책 문장 해석 평가"에 있습니다.
+- 문장 해석기도 지금은 Mock(키워드 규칙)입니다. 예시와 다른 표현은 못 알아들을 수 있습니다. 그때는 `plant policy set`을 씁니다. 해석기 평가는 [`eval/README.md`](eval/README.md) "정책 문장 해석 평가"에 있습니다.
 
-## 설정 화면 (gate ui)
+## 설정 화면 (plant ui)
 
 터미널 명령 대신 브라우저 화면에서 정책을 보고 바꾸고, 감사 기록을 볼 수 있습니다. 내 터미널에서 실행합니다.
 
 ```bash
-gate --socket $DATA/run/gate.sock ui --policy $DATA/policy.yaml --audit $DATA/audit/audit.jsonl
-# GATE_SOCKET·GATE_POLICY·GATE_AUDIT를 정해 두었으면: gate ui
+plant --socket $DATA/run/gate.sock ui --policy $DATA/policy.yaml --audit $DATA/audit/audit.jsonl
+# GATE_SOCKET·GATE_POLICY·GATE_AUDIT를 정해 두었으면: plant ui
 # 브라우저를 열지 않고 주소만 보려면 --no-browser, 포트를 정하려면 --port 8765 (기본은 빈 포트)
 ```
 
-- **설정**: 연결 상태(게이트·판단 모델·NER), 문장으로 정책 바꾸기("이렇게 이해했어요"를 보고 저장), 지금 정책에서 바로 고르기(번호·비밀값 8가지는 줄마다 "찾는 규칙 보기"로 실제 정규식을 볼 수 있음, 이름·주소 같은 정보 9가지. 그중 IP·내부 주소는 규칙으로 찾아 NER을 꺼도 적용), 내가 정한 문장 지우기·되돌리기.
+- **설정**: 연결 상태(PLANT·판단 모델·NER), 문장으로 정책 바꾸기("이렇게 이해했어요"를 보고 저장), 지금 정책에서 바로 고르기(번호·비밀값 8가지는 줄마다 "찾는 규칙 보기"로 실제 정규식을 볼 수 있음, 이름·주소 같은 정보 9가지. 그중 IP·내부 주소는 규칙으로 찾아 NER을 꺼도 적용), 내가 정한 문장 지우기·되돌리기.
 - **감사 기록**: 결과별 건수, 기간·결과·파일 이름으로 거르기.
-- 정책 쓰기는 `gate policy`와 같은 코드라 같은 파일·되돌리기 기록을 남깁니다. 느슨해지는 바꿈은 한 번 더 확인합니다.
+- 정책 쓰기는 `plant policy`와 같은 코드라 같은 파일·되돌리기 기록을 남깁니다. 느슨해지는 바꿈은 한 번 더 확인합니다.
 - NER은 기본으로 켜져 있어서, NER 서버가 응답하지 않으면 화면 위에 "모든 파일 읽기를 막고 있어요" 안내가 뜹니다. [끄기]는 서버 없이도 됩니다(느슨해지는 바꿈이라 한 번 더 확인). [켜기]는 NER 서버가 응답할 때만 누를 수 있습니다(서버를 띄우는 방법은 화면에 안내). 화면은 서버를 띄우지 않습니다.
 - **안전**: 127.0.0.1에만 열리고, 실행할 때마다 한 번만 쓸 수 있는 주소를 만듭니다. 그 주소로 연 브라우저만 쓸 수 있고, 다른 사이트나 에이전트가 보낸 요청은 막습니다(Host·Origin·토큰 검사). 화면은 외부로 요청을 보내지 않습니다(글꼴·로고도 이 서버가 줌).
-- 한 번 연 브라우저에서는 새로 고치거나 탭을 닫았다 다시 열어도 됩니다(`gate ui`가 켜져 있는 동안). 다른 브라우저에서 열려면 `gate ui` 터미널에서 Enter를 눌러 새 주소를 만듭니다. 끄려면 Ctrl-C.
+- 한 번 연 브라우저에서는 새로 고치거나 탭을 닫았다 다시 열어도 됩니다(`plant ui`가 켜져 있는 동안). 다른 브라우저에서 열려면 `plant ui` 터미널에서 Enter를 눌러 새 주소를 만듭니다. 끄려면 Ctrl-C.
 - 화면의 판단 모델·NER 주소는 이 터미널의 `JEV_BASE_URL`·`NER_BASE_URL`(없으면 `127.0.0.1:8000`·`127.0.0.1:8001`)입니다. 데몬과 같게 맞춥니다.
 - 보안 조건과 시험은 [`plans/ui-plan.md`](plans/ui-plan.md) 5·8절. 글꼴은 Outfit·JetBrains Mono(OFL, `gate/ui_static/fonts/`)이고 한글은 시스템 글꼴입니다.
 
@@ -359,46 +359,46 @@ gate --socket $DATA/run/gate.sock ui --policy $DATA/policy.yaml --audit $DATA/au
 
 판단 모델의 확신도가 애매하거나, 내가 경로·번호 종류에 `ask_human`을 정한 파일이면 사람에게 묻습니다.
 
-- **맥 대화상자**: 거부 · 이번만 허용 · 이 폴더 허용. `gate serve --no-dialog`로 끕니다.
-- **터미널**: `gate approve`(목록), `gate approve <id> [--folder]`, `gate deny <id>`. 답하는 명령은 실제 터미널에서만 받습니다.
-- 먼저 온 답을 씁니다. 30초 안에 답이 없으면 차단합니다. 그동안 요청한 `gate cat`은 기다립니다.
+- **맥 대화상자**: 거부 · 이번만 허용 · 이 폴더 허용. `plant serve --no-dialog`로 끕니다.
+- **터미널**: `plant approve`(목록), `plant approve <id> [--folder]`, `plant deny <id>`. 답하는 명령은 실제 터미널에서만 받습니다.
+- 먼저 온 답을 씁니다. 30초 안에 답이 없으면 차단합니다. 그동안 요청한 `plant cat`은 기다립니다.
 - 허용해도 가린 정보(정규식이 가린 번호·비밀값, NER·규칙이 가린 이름·소속·IP 등)는 가린 채로 보여 줍니다. 원본 그대로 보여 주는 길은 경로 규칙 `allow`뿐입니다.
 - 대화상자의 "에이전트가 밝힌 목적"은 에이전트가 쓴 글이라 "확인되지 않음"으로 표시합니다.
-- 승인 소켓(`approve.sock`)은 게이트 소켓과 따로 있어서, 샌드박스 안의 에이전트는 스스로 승인할 수 없습니다.
+- 승인 소켓(`approve.sock`)은 PLANT 소켓과 따로 있어서, 샌드박스 안의 에이전트는 스스로 승인할 수 없습니다.
 
 ## 감사 로그
 
-`gate serve --audit 파일` 또는 `GATE_AUDIT`를 주면 요청마다 JSONL 한 줄을 남깁니다.
+`plant serve --audit 파일` 또는 `GATE_AUDIT`를 주면 요청마다 JSONL 한 줄을 남깁니다.
 
 ```console
-$ gate audit                       # 최근 20건 (-n 0이면 전부)
-$ gate audit --blocked             # 막힌 요청만 (차단, 승인 필요, 원본 밖 경로 같은 EACCES)
-$ gate audit --decision mask       # 결정으로 거르기: allow mask deny ask_human ok error
-$ gate audit --path 상담 --since 1h  # 경로에 '상담'이 든 최근 1시간 기록 (30m, 2h, 1d, 2026-10-31T17:00)
-$ gate audit --file ~/문서/계약서.pdf  # 이 파일과 내용이 같은 파일을 읽은 기록
-$ gate audit --json                # 고른 기록을 JSONL 그대로 (스크립트용)
+$ plant audit                      # 최근 20건 (-n 0이면 전부)
+$ plant audit --blocked            # 막힌 요청만 (차단, 승인 필요, 원본 밖 경로 같은 EACCES)
+$ plant audit --decision mask      # 결정으로 거르기: allow mask deny ask_human ok error
+$ plant audit --path 상담 --since 1h  # 경로에 '상담'이 든 최근 1시간 기록 (30m, 2h, 1d, 2026-10-31T17:00)
+$ plant audit --file ~/문서/계약서.pdf  # 이 파일과 내용이 같은 파일을 읽은 기록
+$ plant audit --json               # 고른 기록을 JSONL 그대로 (스크립트용)
 ```
 
-- **남기는 것**: 시각, 요청자 PID·UID·프로그램, 연산, 게이트 안 경로, 오류, 결정과 이유, 결정 단계, 정책 버전, 파일 해시, 종류별 탐지 건수, 판단 모델 라벨·확신도·호출 수, 캐시 여부, 사람 승인 결과와 답한 곳, 걸린 시간. 키 목록과 규칙은 [`gate/audit.py`](gate/audit.py) 맨 위 설명에 있습니다.
+- **남기는 것**: 시각, 요청자 PID·UID·프로그램, 연산, PLANT 안 경로, 오류, 결정과 이유, 결정 단계, 정책 버전, 파일 해시, 종류별 탐지 건수, 판단 모델 라벨·확신도·호출 수, 캐시 여부, 사람 승인 결과와 답한 곳, 걸린 시간. 키 목록과 규칙은 [`gate/audit.py`](gate/audit.py) 맨 위 설명에 있습니다.
 - **남기지 않는 것**: 원문, 탐지한 값, 에이전트가 밝힌 목적.
-- **파일 해시**는 SHA-256이 아니라 `HMAC-SHA256(audit.key, SHA-256(내용))`입니다. "연락처 010-xxxx-xxxx"처럼 짧고 틀이 정해진 파일은 SHA-256만 보고 후보를 넣어 원문을 맞혀 볼 수 있기 때문입니다. 키는 설치마다 만드는 32바이트 난수입니다. `gate audit --file`은 이 키로 파일을 맞춰 봅니다.
-- 파일은 0600, 폴더는 0700이고 심볼릭 링크로 바꿔치기한 경로에는 쓰지 않습니다. 돌려 쓰기(rotation)는 없습니다. `gate audit`은 읽기만 하고, 깨진 줄은 건너뛰고 줄 번호를 알려 줍니다.
+- **파일 해시**는 SHA-256이 아니라 `HMAC-SHA256(audit.key, SHA-256(내용))`입니다. "연락처 010-xxxx-xxxx"처럼 짧고 틀이 정해진 파일은 SHA-256만 보고 후보를 넣어 원문을 맞혀 볼 수 있기 때문입니다. 키는 설치마다 만드는 32바이트 난수입니다. `plant audit --file`은 이 키로 파일을 맞춰 봅니다.
+- 파일은 0600, 폴더는 0700이고 심볼릭 링크로 바꿔치기한 경로에는 쓰지 않습니다. 돌려 쓰기(rotation)는 없습니다. `plant audit`은 읽기만 하고, 깨진 줄은 건너뛰고 줄 번호를 알려 줍니다.
 
 ## 우회 시험 하네스
 
-[`sandbox/bypass.py`](sandbox/bypass.py)는 에이전트가 원본을 게이트 없이 읽으려는 시도를 실제 `claude -p`(헤드리스, 모델 Haiku)로 하나씩 돌려 보고 판정합니다.
+[`sandbox/bypass.py`](sandbox/bypass.py)는 에이전트가 원본을 PLANT 없이 읽으려는 시도를 실제 `claude -p`(헤드리스, 모델 Haiku)로 하나씩 돌려 보고 판정합니다.
 
-- **시도**: 내장 `Read`·`LSP`, `cat`, `grep -r`, Python `open()`, 심볼릭 링크·하드링크·`../`·대소문자 바꾼 경로, `cp`·`tar`, Spotlight, 두 번째 데몬 띄우기, 정책 파일·정책 기록·감사 로그 쓰기, `gate audit`으로 감사 로그·키 열기, 승인 소켓 연결·`gate approve`·`osascript`로 스스로 승인하기, 설정 파일 수정, bypass 모드 등.
-- **판정**: 실행마다 원본 폴더에 무작위 표식 파일을 두고, 결과에 표식이 나오면 뚫린 것으로 봅니다. 모델이 명령을 거절하거나 다른 명령을 쓰면 "막힘"이 아니라 "판정 불가"로 셉니다. 게이트로는 읽힌다는 대조군 2개가 먼저 돕니다.
-- **결과(2026-10-31, Claude Code 2.1.316)**: 작업 폴더 설정 40가지, 전역 설정(`gate setup` 조각) 29가지 모두 **뚫린 것 0**. 나중에 더한 `gate audit` 시도 2가지(W14·W15)도 두 설정 모두 막혔습니다. 어떤 층이 막았는지는 계획 문서 5절 "6-3 결과"와 Phase 7 "보완"에 있습니다.
-- **설정 화면 시도(W16·W17, Phase 8)**: 하네스가 호스트에서 `gate ui`를 띄우고, 에이전트가 샌드박스 안에서 127.0.0.1로 그 포트에 닿아 토큰 없이 정책을 바꾸거나 감사 기록을 읽으려 합니다. 2026-11-01에 돌려 작업 폴더 설정·전역 설정 모두 **OS 샌드박스가 연결을 막았습니다**(화면 서버에 요청이 닿지 않음). worktree에서 돌릴 때는 `--data-root`를 꼭 줍니다(기본값이 저장소 위치 기준).
+- **시도**: 내장 `Read`·`LSP`, `cat`, `grep -r`, Python `open()`, 심볼릭 링크·하드링크·`../`·대소문자 바꾼 경로, `cp`·`tar`, Spotlight, 두 번째 데몬 띄우기, 정책 파일·정책 기록·감사 로그 쓰기, `plant audit`으로 감사 로그·키 열기, 승인 소켓 연결·`plant approve`·`osascript`로 스스로 승인하기, 설정 파일 수정, bypass 모드 등.
+- **판정**: 실행마다 원본 폴더에 무작위 표식 파일을 두고, 결과에 표식이 나오면 뚫린 것으로 봅니다. 모델이 명령을 거절하거나 다른 명령을 쓰면 "막힘"이 아니라 "판정 불가"로 셉니다. PLANT로는 읽힌다는 대조군 2개가 먼저 돕니다.
+- **결과(2026-10-31, Claude Code 2.1.316)**: 작업 폴더 설정 40가지, 전역 설정(`plant setup` 조각) 29가지 모두 **뚫린 것 0**. 나중에 더한 `plant audit` 시도 2가지(W14·W15)도 두 설정 모두 막혔습니다. 어떤 층이 막았는지는 계획 문서 5절 "6-3 결과"와 Phase 7 "보완"에 있습니다.
+- **설정 화면 시도(W16·W17, Phase 8)**: 하네스가 호스트에서 `plant ui`를 띄우고, 에이전트가 샌드박스 안에서 127.0.0.1로 그 포트에 닿아 토큰 없이 정책을 바꾸거나 감사 기록을 읽으려 합니다. 2026-11-01에 돌려 작업 폴더 설정·전역 설정 모두 **OS 샌드박스가 연결을 막았습니다**(화면 서버에 요청이 닿지 않음). worktree에서 돌릴 때는 `--data-root`를 꼭 줍니다(기본값이 저장소 위치 기준).
 
-실행하려면 데몬이 떠 있고 Claude Code에 로그인되어 있어야 합니다. **NER은 기본으로 켜져 있으므로 데몬보다 nerserve를 먼저 띄우거나, 하네스에서 쓰는 정책 파일에서 NER을 꺼 둡니다**(`gate policy set ner_backend none`). 그렇지 않으면 게이트로 읽는 대조군도 막혀 "대조군 실패"로 끝납니다. **API 비용이 듭니다**(Phase 6에서 7번 돌려 약 $0.57).
+실행하려면 데몬이 떠 있고 Claude Code에 로그인되어 있어야 합니다. **NER은 기본으로 켜져 있으므로 데몬보다 nerserve를 먼저 띄우거나, 하네스에서 쓰는 정책 파일에서 NER을 꺼 둡니다**(`plant policy set ner_backend none`). 그렇지 않으면 PLANT로 읽는 대조군도 막혀 "대조군 실패"로 끝납니다. **API 비용이 듭니다**(Phase 6에서 7번 돌려 약 $0.57).
 
 ```bash
 uv run python -m sandbox.bypass --out 보고서.md                                        # 작업 폴더 설정 (default 모드)
 uv run python -m sandbox.bypass --mode auto --only W2,W8,W9,W10,W11 --out 보고서.md     # 쓰기 도구 (auto 모드)
-gate setup --source $DATA/source --settings-file 시험.json --yes                       # 전역 설정 시험 파일
+plant setup --source $DATA/source --settings-file 시험.json --yes                      # 전역 설정 시험 파일
 uv run python -m sandbox.bypass --settings 시험.json --workspace $DATA/plain-project --only … --out 보고서.md
 ```
 
@@ -409,14 +409,14 @@ uv run python -m sandbox.bypass --settings 시험.json --workspace $DATA/plain-p
 ## 테스트
 
 ```bash
-uv run pytest                     # 맥: 1904 통과, 1 skip(FUSE), 약 40초 (사람 승인 시간 초과를 실제로 기다림)
+uv run pytest                     # 맥: 1896 통과, 1 skip(FUSE), 약 40초 (사람 승인 시간 초과를 실제로 기다림)
 
 docker build -f sandbox/gate.Dockerfile -t fuse-jev-gate .
 docker run --rm --device /dev/fuse --cap-add SYS_ADMIN fuse-jev-gate pytest -q    # Linux (FUSE 포함): 맥 통과 수 + FUSE 1개
 
 uv run python -m eval.run_eval --client mock [--policy 정책파일] [--details]        # 샘플 36개 평가
 uv run python -m eval.run_eval --client laya [--details]   # 실제 Laya (laya-serve와 JEV_* 환경변수 필요)
-uv run python -m eval.run_eval --client laya --ner server --details   # 게이트 흐름(NER 포함)과 누출 (nerserve 필요, NER_BASE_URL 기본 127.0.0.1:8001)
+uv run python -m eval.run_eval --client laya --ner server --details   # PLANT 흐름(NER 포함)과 누출 (nerserve 필요, NER_BASE_URL 기본 127.0.0.1:8001)
 uv run python -m eval.run_policy_text --interpreter mock [--details]   # 정책 문장 해석기 평가 (문장 120개)
 uv run python -m eval.run_e2e [--keep] [--only mask,approve]   # 실제 모델 e2e: 데몬·CLI·사람 승인·정책·감사 로그·설정 화면을 한 번에 (laya-serve·nerserve 둘 다 필요, JEV_*·NER_BASE_URL. 데이터는 /tmp 임시 폴더에 만들고 지움. API 비용 없음, 약 15초)
 ```
@@ -449,19 +449,19 @@ uv run python -m eval.run_e2e [--keep] [--only mask,approve]   # 실제 모델 e
 ```
 gate/
   daemon.py, client.py, protocol.py, peer.py   소켓 서버·클라이언트, 요청자 확인
-  store.py, paths.py                           원본 저장소, 게이트 안 경로 → 실제 경로(탈출 차단)
+  store.py, paths.py                           원본 저장소, PLANT 안 경로 → 실제 경로(탈출 차단)
   pipeline.py, cache.py                        판단 순서, search, 캐시
   detectors.py                                 정규식 탐지와 같은 길이 가림
   host_rules.py                                IP·내부 주소 규칙
   ner_client.py, ner_spans.py                  NER 클라이언트(라벨 나누기·정책 칸·가림 표시), 범위 다듬기
   jev_client.py                                판단 모델 인터페이스(답 + 확신도), Mock, Laya(laya-serve)
-  policy.py, policy_text.py, policy_cli.py     정책 기본값·파일, 문장 해석기, gate policy
+  policy.py, policy_text.py, policy_cli.py     정책 기본값·파일, 문장 해석기, plant policy
   approval.py                                  사람 승인(대화상자, 승인 소켓)
-  audit.py, audit_cli.py                       감사 로그, gate audit
-  policy_change.py                             정책 바꾸기 계산·기록·쓰기 (gate policy와 gate ui가 같이 씀)
-  ui.py, ui_api.py, ui_static/                 설정 화면 gate ui (서버, 자료·바꾸기, HTML·CSS·JS·글꼴·로고)
-  workspace.py, claude_setup.py                gate workspace init, gate setup
-  cli.py                                       gate 명령
+  audit.py, audit_cli.py                       감사 로그, plant audit
+  policy_change.py                             정책 바꾸기 계산·기록·쓰기 (plant policy와 plant ui가 같이 씀)
+  ui.py, ui_api.py, ui_static/                 설정 화면 plant ui (서버, 자료·바꾸기, HTML·CSS·JS·글꼴·로고)
+  workspace.py, claude_setup.py                plant workspace init, plant setup
+  cli.py                                       plant 명령
 nerserve/              로컬 NER 서버 (torch는 이 프로세스에서만)
 config/policy.yaml     기본 정책 설명
 samples/  eval/        합성 한국어 샘플 36개와 평가 스크립트

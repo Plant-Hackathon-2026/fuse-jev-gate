@@ -20,7 +20,7 @@ from collections.abc import Callable
 from typing import Protocol
 
 PICK_SECONDS = 120
-PROMPT = "게이트에 연결할 폴더를 골라 주세요"
+PROMPT = "PLANT에 연결할 폴더를 골라 주세요"
 CANCELLED_CODE = "-128"  # AppleScript "User canceled."
 
 # 인자: 1 안내 문구. 고른 폴더의 POSIX 경로(끝에 /)를 돌려준다.
@@ -32,7 +32,7 @@ _PICK_SCRIPT = (
 )
 
 BUSY_MESSAGE = "이미 폴더 선택 창이 떠 있어요. 그 창에서 고르거나 취소해 주세요."
-UNAVAILABLE_MESSAGE = "폴더 선택 창은 맥에서만 돼요. 터미널에서 `gate mount add <폴더>`를 쓰세요."
+UNAVAILABLE_MESSAGE = "폴더 선택 창은 맥에서만 돼요. 터미널에서 `plant mount add <폴더>`를 쓰세요."
 
 
 class PickerError(Exception):
@@ -108,7 +108,7 @@ class MacFolderPicker:
                 if proc.returncode < 0:  # cancel()로 닫았다(gate ui를 끔)
                     return None
                 raise PickerError(f"폴더 선택 창을 띄우지 못했어요(osascript 종료 코드 {proc.returncode}). "
-                                  "터미널에서 `gate mount add <폴더>`로도 연결할 수 있어요.")
+                                  "터미널에서 `plant mount add <폴더>`로도 연결할 수 있어요.")
             return _posix_path(out)
         finally:
             self._turn.release()

@@ -311,9 +311,9 @@ from gate import cli  # noqa: E402
 from gate.cli import mask_notice  # noqa: E402
 from gate.ner_client import Entity, NerResult  # noqa: E402
 
-STARS_ONLY = "gate: 개인정보 일부를 같은 길이의 *로 가렸습니다 (휴대폰 번호 1건)"
-LABELS_ONLY = "gate: 개인정보 일부를 [이름]처럼 종류 이름으로 가렸습니다 (이름 1건, IP·내부 주소 1건, 일반 전화번호 1건)"
-BOTH = "gate: 개인정보 일부를 같은 길이의 *로 (휴대폰 번호 1건), [이름]처럼 종류 이름으로 (이름 1건) 가렸습니다"
+STARS_ONLY = "plant: 개인정보 일부를 같은 길이의 *로 가렸습니다 (휴대폰 번호 1건)"
+LABELS_ONLY = "plant: 개인정보 일부를 [이름]처럼 종류 이름으로 가렸습니다 (이름 1건, IP·내부 주소 1건, 일반 전화번호 1건)"
+BOTH = "plant: 개인정보 일부를 같은 길이의 *로 (휴대폰 번호 1건), [이름]처럼 종류 이름으로 (이름 1건) 가렸습니다"
 
 
 class WordNer:
@@ -370,7 +370,7 @@ def test_mask_notice_by_kind():
     assert mask_notice({"mobile": 1, "name": 1}, {"name": 1}) == BOTH
     # 같은 칸을 정규식과 NER이 나눠 가린 경우(휴대폰 번호 2건 중 1건은 정규식이 놓쳐 NER이 찾았다)
     assert mask_notice({"mobile": 2}, {"mobile": 1}) == (
-        "gate: 개인정보 일부를 같은 길이의 *로 (휴대폰 번호 1건), [이름]처럼 종류 이름으로 (휴대폰 번호 1건) 가렸습니다")
+        "plant: 개인정보 일부를 같은 길이의 *로 (휴대폰 번호 1건), [이름]처럼 종류 이름으로 (휴대폰 번호 1건) 가렸습니다")
 
 
 def test_old_daemon_response_without_labeled_is_read_by_kind_names(monkeypatch):
@@ -382,7 +382,7 @@ def test_old_daemon_response_without_labeled_is_read_by_kind_names(monkeypatch):
     assert (result.masked, result.labeled) == ({"mobile": 1, "name": 1}, None)
     assert mask_notice(result.masked, result.labeled) == BOTH
     assert mask_notice({"mobile": 1}, None) == STARS_ONLY
-    assert mask_notice({"host": 1}, None) == "gate: 개인정보 일부를 [이름]처럼 종류 이름으로 가렸습니다 (IP·내부 주소 1건)"
+    assert mask_notice({"host": 1}, None) == "plant: 개인정보 일부를 [이름]처럼 종류 이름으로 가렸습니다 (IP·내부 주소 1건)"
 
 
 # --- Phase 5: 사람 승인 (게이트 소켓 + 승인 소켓) ---

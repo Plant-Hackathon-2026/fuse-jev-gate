@@ -79,7 +79,7 @@ def test_show_separates_user_values_from_defaults(policy_file):
     first = lines.index('  1. "주민번호는 생년월일까지만 보여줘"  (2026-10-31 14:00)')
     assert "덮어써서 지금은 적용되지 않음" in lines[first + 1]  # 1번은 5번이 덮어썼다
     assert sum("덮어써서" in line for line in lines) == 1
-    assert "2. (gate policy set으로 지정)" in out
+    assert "2. (plant policy set으로 지정)" in out
     assert "주민등록번호: 가려서 보여줌 [기본] · 가릴 때 성별 자리(앞 7자리)까지 공개 [지정]" in out
     assert "카드번호: 거부 [지정] · 가릴 때 전부 가림 [기본]" in out
     assert "이메일: 가려서 보여줌 [기본]" in out
@@ -187,7 +187,7 @@ def test_add_context_rule_warns_mock_jev(policy_file):
 
 @pytest.mark.parametrize("sentence, hint", [
     ("아무거나", "다시 말해 주세요"),
-    ("공개 폴더는 그냥 보여줘", "gate policy set path"),
+    ("공개 폴더는 그냥 보여줘", "plant policy set path"),
     ("병원 기록은 보여줘도 돼", "더 막는 쪽"),
 ])
 def test_add_not_understood_does_not_ask_or_save(policy_file, sentence, hint):
